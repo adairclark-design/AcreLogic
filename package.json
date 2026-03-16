@@ -10,7 +10,7 @@
     "build:web": "npx expo export --platform web",
     "build:pwa": "TMPDIR=/tmp/acrelogic-metro-cache EXPO_NO_CACHE=1 expo export -p web && node scripts/pwa-inject.js",
     "pwa:inject": "node scripts/pwa-inject.js",
-    "deploy": "npm run build:pwa && wrangler pages deploy dist --project-name acrelogic-preview --commit-dirty=true",
+    "deploy": "npm run build:pwa && wrangler pages deploy dist --project-name acrelogic --commit-dirty=true",
     "wrangler:login": "wrangler login"
   },
   "dependencies": {
