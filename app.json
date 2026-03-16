@@ -1,0 +1,44 @@
+{
+  "expo": {
+    "name": "AcreLogic",
+    "slug": "acrelogic",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "backgroundColor": "#2D4F1E"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.acrelogic.app"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#2D4F1E"
+      },
+      "package": "com.acrelogic.app"
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "viewport": {
+        "width": "device-width",
+        "initialScale": 1,
+        "shrinkToFit": "no",
+        "viewportFit": "cover"
+      }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "8d55461e-90e8-4bec-9558-2d822e20248b"
+      }
+    },
+    "owner": "builtbybot",
+    "runtimeVersion": {
+      "policy": "sdkVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/8d55461e-90e8-4bec-9558-2d822e20248b"
+    }
+  }
+}
