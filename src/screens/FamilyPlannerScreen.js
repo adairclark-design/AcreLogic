@@ -367,16 +367,32 @@ export default function FamilyPlannerScreen({ navigation }) {
         setActiveTierLocal(getActiveTier());
     }, []);
 
-    // ── CSS Grid — direct DOM style (RN Web strips gridTemplateColumns from inline styles) ──
+    // ── CSS Grid via injected <style> tag ─────────────────────────────────────
+    // RN Web's style pipeline (inline styles AND DOM ref) gets transformed by
+    // the Metro/Webpack build, stripping complex CSS grid values. Injecting a
+    // real <style> element into document.head is fully outside that pipeline.
     useEffect(() => {
         if (Platform.OS !== 'web') return;
-        const el = gridRef.current;
-        if (!el) return;
-        el.style.display = 'grid';
-        el.style.gridTemplateColumns = `repeat(${numColumns}, 1fr)`;
-        el.style.gap = '8px';
-    }); // no dep array — run after every render so it applies after mount/update
-
+        const STYLE_ID = 'acrelogic-crop-grid-style';
+        let el = document.getElementById(STYLE_ID);
+        if (!el) {
+            el = document.createElement('style');
+            el.id = STYLE_ID;
+            document.head.appendChild(el);
+        }
+        el.textContent = [
+            `.acrelogic-crop-grid {`,
+            `  display: grid !important;`,
+            `  grid-template-columns: repeat(${numColumns}, 1fr) !important;`,
+            `  gap: 8px !important;`,
+            `  width: 100% !important;`,
+            `}`,
+        ].join('\n');
+        return () => {
+            const existing = document.getElementById(STYLE_ID);
+            if (existing) existing.remove();
+        };
+    }, [numColumns]);
 
 
     const limits = LIMITS[activeTier] ?? LIMITS[TIER.FREE];
@@ -685,11 +701,8 @@ export default function FamilyPlannerScreen({ navigation }) {
                             >
                                 <View
                                     ref={gridRef}
-                                    style={{
-                                        display: 'grid',
-                                        gridTemplateColumns: `repeat(${numColumns}, 1fr)`,
-                                        gap: 8,
-                                    }}
+                                    className="acrelogic-crop-grid"
+                                    style={{ width: '100%' }}
                                 >
                                     {planResult.supported.map(item => (
                                         <ReportCard key={item.cropId} item={item} />
