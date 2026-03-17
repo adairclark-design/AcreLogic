@@ -184,12 +184,21 @@ function ReportCard({ item, cardWidth }) {
         ]}>
             {/* Header row */}
             <View style={styles.reportCardHeader}>
-                <Text style={styles.reportEmoji}>{item.emoji}</Text>
+                {CROP_IMAGES[item.cropId] ? (
+                    <Image
+                        source={CROP_IMAGES[item.cropId]}
+                        style={{ width: 48, height: 48, borderRadius: 8 }}
+                        resizeMode="cover"
+                    />
+                ) : (
+                    <Text style={styles.reportEmoji}>{item.emoji}</Text>
+                )}
                 <View style={{ flex: 1 }}>
                     <Text style={styles.reportCropName}>{item.cropName}</Text>
                     {item.variety ? <Text style={styles.reportVariety}>{item.variety}</Text> : null}
                 </View>
             </View>
+
 
             {/* Key metrics */}
             <View style={styles.reportMetrics}>
