@@ -166,10 +166,10 @@ function LocationBar({ gardenProfile, onProfileFetched }) {
 }
 
 // ─── Report Card (one per crop in Step 2) ────────────────────────────────────
-function ReportCard({ item }) {
+function ReportCard({ item, cardWidth }) {
     const isFlower = item.isFlower;
     return (
-        <View style={[styles.reportCard, Shadows.card]}>
+        <View style={[styles.reportCard, Shadows.card, cardWidth ? { width: cardWidth } : null]}>
             {/* Header row */}
             <View style={styles.reportCardHeader}>
                 <Text style={styles.reportEmoji}>{item.emoji}</Text>
@@ -281,6 +281,19 @@ function FactRow({ icon, label, value, highlight }) {
             <Text style={[styles.factValue, highlight && styles.factValueHighlight]}>{value}</Text>
         </View>
     );
+}
+
+// ─── Responsive column count ─────────────────────────────────────────────────
+// Targets: 1 col mobile, 2 col tablet, 3 col small desktop,
+//          4 col medium desktop, 6 col large, 8 col 27"+ monitor
+function getColumns(viewportWidth) {
+    if (viewportWidth >= 2200) return 8;
+    if (viewportWidth >= 1800) return 6;
+    if (viewportWidth >= 1400) return 5;
+    if (viewportWidth >= 1100) return 4;
+    if (viewportWidth >= 768)  return 3;
+    if (viewportWidth >= 540)  return 2;
+    return 1;
 }
 
 // ─── Main Screen ─────────────────────────────────────────────────────────────
@@ -635,22 +648,27 @@ export default function FamilyPlannerScreen({ navigation }) {
                             </View>
                         )}
 
-                        {/* Report cards */}
-                        <FlatList
-                            data={planResult.supported}
-                            keyExtractor={item => item.cropId}
-                            contentContainerStyle={styles.reportList}
-                            showsVerticalScrollIndicator={false}
+                        {/* Report cards — responsive multi-column grid */}
+                        <ScrollView
                             style={Platform.OS === 'web' ? { overflowY: 'scroll', flex: 1 } : { flex: 1 }}
-                            ListFooterComponent={() => (
-                                <View style={styles.goodLuck}>
-                                    <Text style={styles.goodLuckEmoji}>🥬</Text>
-                                    <Text style={styles.goodLuckTitle}>Good Luck Gardening!</Text>
-                                    <Text style={styles.goodLuckSub}>Happy planting this season.</Text>
-                                </View>
-                            )}
-                            renderItem={({ item }) => <ReportCard item={item} />}
-                        />
+                            showsVerticalScrollIndicator={false}
+                            contentContainerStyle={styles.reportGrid}
+                        >
+                            <View style={styles.reportGridRow}>
+                                {planResult.supported.map(item => (
+                                    <ReportCard
+                                        key={item.cropId}
+                                        item={item}
+                                        cardWidth={cardWidth}
+                                    />
+                                ))}
+                            </View>
+                            <View style={styles.goodLuck}>
+                                <Text style={styles.goodLuckEmoji}>🥬</Text>
+                                <Text style={styles.goodLuckTitle}>Good Luck Gardening!</Text>
+                                <Text style={styles.goodLuckSub}>Happy planting this season.</Text>
+                            </View>
+                        </ScrollView>
 
                         {/* Report footer — edit + dual export */}
                         <View style={styles.footer}>
@@ -989,6 +1007,15 @@ const styles = StyleSheet.create({
     warnText: { fontSize: Typography.xs, color: Colors.burntOrange },
 
     // ── Report cards ──────────────────────────────────────────────────────────
+    reportGrid: {
+        padding: Spacing.lg,
+        paddingBottom: 180,
+    },
+    reportGridRow: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: Spacing.sm,
+    },
     reportList: { padding: Spacing.lg, paddingBottom: 180, gap: Spacing.md },
 
     reportCard: {
