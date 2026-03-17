@@ -21,7 +21,7 @@
  *   • Report cards driven by calculateGardenPlan()
  *   • "Good Luck Gardening!" footer + Export stub
  */
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
     View, Text, StyleSheet, TouchableOpacity, ScrollView,
     FlatList, TextInput, Image, Switch, Animated,
@@ -40,6 +40,7 @@ import UpgradeModal from '../components/UpgradeModal';
 import CROP_IMAGES from '../data/cropImages';
 import CROPS_DATA from '../data/crops.json';
 import { exportGardenPlan } from '../services/planExporter';
+import { loadSavedPlan } from '../services/persistence';
 
 const ALL_CROPS = CROPS_DATA.crops ?? [];
 const PLANTABLE_CROPS = ALL_CROPS.filter(c => c.category !== 'Cover Crop');
@@ -126,7 +127,12 @@ function ReportCard({ item }) {
             <View style={styles.reportFacts}>
                 {item.dtm      && <FactRow icon="⏱" label="Days to maturity"  value={`${item.dtm} days`} />}
                 {item.seedType && <FactRow icon="🌱" label="Starting method"   value={item.seedType === 'DS' ? 'Direct Sow' : 'Transplant'} />}
-                {item.seedType === 'TP' && item.seedStartWeeks
+                {/* Calendar dates — only when farmProfile was loaded */}
+                {item.indoorSeedDate  && <FactRow icon="📅" label="Start seeds indoors" value={item.indoorSeedDate} />}
+                {item.directSowDate   && <FactRow icon="📅" label="Direct sow date"     value={item.directSowDate} />}
+                {item.transplantDate  && <FactRow icon="📅" label="Transplant date"     value={item.transplantDate} />}
+                {/* Fallback if no profile: show relative weeks */}
+                {!item.indoorSeedDate && item.seedType === 'TP' && item.seedStartWeeks
                                && <FactRow icon="📅" label="Start seeds"        value={`${item.seedStartWeeks} wks before last frost`} />}
                 {item.harvestMethod    && <FactRow icon="✂️" label="Harvest method"  value={item.harvestMethod} />}
                 {item.harvestFrequency && <FactRow icon="🔁" label="Frequency"       value={item.harvestFrequency} />}
@@ -291,6 +297,13 @@ export default function GardenSpacePlannerScreen({ navigation }) {
     const [upgradeVisible, setUpgradeVisible]   = useState(false);
     const [upgradeBlockedBy, setUpgradeBlockedBy] = useState(null);
 
+    // ── Farm profile (for calendar dates in crop plan) ────────────────────────
+    const [gardenFarmProfile, setGardenFarmProfile] = useState(null);
+    useEffect(() => {
+        const saved = loadSavedPlan();
+        if (saved?.farmProfile) setGardenFarmProfile(saved.farmProfile);
+    }, []);
+
     const slideAnim = useRef(new Animated.Value(0)).current;
     const limits = LIMITS[getActiveTier()] ?? LIMITS[TIER.FREE];
 
@@ -395,7 +408,7 @@ export default function GardenSpacePlannerScreen({ navigation }) {
 
     const generatePlan = () => {
         const crops = ALL_CROPS.filter(c => selectedIds.has(c.id));
-        const result = calculateGardenPlan(crops, familySize);
+        const result = calculateGardenPlan(crops, familySize, gardenFarmProfile);
         setPlanResult(result);
         setShowReport(true);
     };
