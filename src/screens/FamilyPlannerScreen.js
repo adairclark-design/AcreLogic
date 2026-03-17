@@ -329,6 +329,7 @@ export default function FamilyPlannerScreen({ navigation }) {
     const [postPaymentReady, setPostPaymentReady] = useState(false); // true when returning from Stripe
 
     const listRef  = useRef(null);
+    const gridRef  = useRef(null);  // grid container for web DOM ref
     const slideAnim = useRef(new Animated.Value(0)).current;
 
     // ── Detect return from Stripe (?paid=1) ───────────────────────────────────
@@ -365,6 +366,18 @@ export default function FamilyPlannerScreen({ navigation }) {
     useEffect(() => {
         setActiveTierLocal(getActiveTier());
     }, []);
+
+    // ── CSS Grid — direct DOM style (RN Web strips gridTemplateColumns from inline styles) ──
+    useEffect(() => {
+        if (Platform.OS !== 'web') return;
+        const el = gridRef.current;
+        if (!el) return;
+        el.style.display = 'grid';
+        el.style.gridTemplateColumns = `repeat(${numColumns}, 1fr)`;
+        el.style.gap = '8px';
+    }); // no dep array — run after every render so it applies after mount/update
+
+
 
     const limits = LIMITS[activeTier] ?? LIMITS[TIER.FREE];
 
@@ -670,15 +683,19 @@ export default function FamilyPlannerScreen({ navigation }) {
                                 showsVerticalScrollIndicator={false}
                                 contentContainerStyle={{ padding: Spacing.lg, paddingBottom: 180 }}
                             >
-                                <View style={{
-                                    display: 'grid',
-                                    gridTemplateColumns: `repeat(${numColumns}, 1fr)`,
-                                    gap: 8,
-                                }}>
+                                <View
+                                    ref={gridRef}
+                                    style={{
+                                        display: 'grid',
+                                        gridTemplateColumns: `repeat(${numColumns}, 1fr)`,
+                                        gap: 8,
+                                    }}
+                                >
                                     {planResult.supported.map(item => (
                                         <ReportCard key={item.cropId} item={item} />
                                     ))}
                                 </View>
+
                                 <View style={styles.goodLuck}>
                                     <Text style={styles.goodLuckEmoji}>🥬</Text>
                                     <Text style={styles.goodLuckTitle}>Good Luck Gardening!</Text>
