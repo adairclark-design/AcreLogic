@@ -360,51 +360,81 @@ export function calculateTotalSoilVolume(bedCount, lengthFt, widthFt, heightIn) 
 /**
  * calculateBedsInSpace
  * ─────────────────────
- * Given a total garden area, calculates:
- *   - How many raised beds fit
- *   - Area used vs. available
- *   - Pathway layout
+ * Given a total garden area, calculates how many raised beds fit,
+ * area efficiency, and multi-pathway groupings for the visual.
  *
- * Layout logic: beds run parallel along the length of the space.
- * Each bed row = bedWidth + pathwayWidth. One main wheelbarrow path
- * divides the space lengthwise through the middle.
+ * Pathway model:
+ *   nsPathwayCount — vertical strips running N→S (consume width)
+ *   ewPathwayCount — horizontal strips running E→W (consume length)
+ *   mainPathWidthFt — shared width for all access paths (default 4ft)
+ *   equidistant — true: paths divide space equally; false: paths at edges
+ *
+ * Legacy: passing wheelbarrowPathFt is treated as 1 N/S path at that width.
  *
  * @param {object} params
- * @param {number} params.spaceLengthFt        — total space length
- * @param {number} params.spaceWidthFt         — total space width
- * @param {number} params.bedLengthFt          — individual bed length (default 8)
- * @param {number} params.bedWidthFt           — individual bed width (default 4)
- * @param {number} params.pathwayWidthFt       — path between beds (default 2)
- * @param {number} params.wheelbarrowPathFt    — main access path (default 4)
- * @param {boolean} params.isRaisedBed         — affects soil volume output only
- * @param {number} params.bedHeightIn          — raised bed height in inches (default 12)
+ * @param {number} params.spaceLengthFt
+ * @param {number} params.spaceWidthFt
+ * @param {number} params.bedLengthFt          (default 8)
+ * @param {number} params.bedWidthFt           (default 4)
+ * @param {number} params.pathwayWidthFt       between beds (default 2)
+ * @param {number} params.nsPathwayCount       N/S access paths (default 0)
+ * @param {number} params.ewPathwayCount       E/W access paths (default 0)
+ * @param {number} params.mainPathWidthFt      wheelbarrow-path width (default 4)
+ * @param {boolean} params.equidistant         true = divide evenly; false = edge
+ * @param {number|null} params.wheelbarrowPathFt  legacy single-path compat
+ * @param {boolean} params.isRaisedBed
+ * @param {number} params.bedHeightIn
  * @returns {object}
  */
 export function calculateBedsInSpace({
     spaceLengthFt,
     spaceWidthFt,
-    bedLengthFt = DEFAULTS.BED_LENGTH_FT,
-    bedWidthFt = DEFAULTS.BED_WIDTH_FT,
-    pathwayWidthFt = DEFAULTS.PATHWAY_WIDTH_FT,
-    wheelbarrowPathFt = DEFAULTS.WHEELBARROW_PATH_FT,
-    isRaisedBed = false,
-    bedHeightIn = 12,
+    bedLengthFt       = DEFAULTS.BED_LENGTH_FT,
+    bedWidthFt        = DEFAULTS.BED_WIDTH_FT,
+    pathwayWidthFt    = DEFAULTS.PATHWAY_WIDTH_FT,
+    nsPathwayCount    = 0,
+    ewPathwayCount    = 0,
+    mainPathWidthFt   = DEFAULTS.WHEELBARROW_PATH_FT,
+    equidistant       = false,
+    // Legacy compat — if caller passes wheelbarrowPathFt, treat as 1 N/S path
+    wheelbarrowPathFt = null,
+    isRaisedBed       = false,
+    bedHeightIn       = 12,
 } = {}) {
-    // How many beds fit across the width (each bed + its own pathway)?
-    const bedsAcrossWidth = Math.floor(
-        (spaceWidthFt - wheelbarrowPathFt) / (bedWidthFt + pathwayWidthFt)
-    );
+    // Resolve legacy param
+    const _nsCount     = wheelbarrowPathFt != null && wheelbarrowPathFt > 0
+        ? 1 : Math.max(0, nsPathwayCount);
+    const _ewCount     = Math.max(0, ewPathwayCount);
+    const _mainWidth   = wheelbarrowPathFt != null ? wheelbarrowPathFt : Math.max(0, mainPathWidthFt);
 
-    // How many beds fit along the length?
-    const bedsAlongLength = Math.floor(spaceLengthFt / (bedLengthFt + pathwayWidthFt));
+    // How many beds fit after reserving space for access paths?
+    const effectiveWidth  = spaceWidthFt  - _nsCount * _mainWidth;
+    const effectiveLength = spaceLengthFt - _ewCount * _mainWidth;
 
-    const totalBeds = Math.max(0, bedsAcrossWidth * bedsAlongLength);
+    const bedsAcrossWidth  = Math.max(0, Math.floor(effectiveWidth  / (bedWidthFt  + pathwayWidthFt)));
+    const bedsAlongLength  = Math.max(0, Math.floor(effectiveLength / (bedLengthFt + pathwayWidthFt)));
+
+    const totalBeds = bedsAcrossWidth * bedsAlongLength;
+
+    // ── Compute bed-group arrays for the visual ───────────────────────────────
+    // colGroups: how many beds in each column-block (separated by N/S paths)
+    // rowGroups: how many beds in each row-block (separated by E/W paths)
+    function makeGroups(total, pathCount, evenSplit) {
+        if (pathCount === 0 || total === 0) return [total];
+        if (!evenSplit) return [total]; // edge mode: one group, path at border
+        const n = pathCount + 1;
+        const base = Math.floor(total / n);
+        const extra = total % n;
+        return Array.from({ length: n }, (_, i) => base + (i < extra ? 1 : 0));
+    }
+    const colGroups = makeGroups(bedsAcrossWidth, _nsCount, equidistant);
+    const rowGroups = makeGroups(bedsAlongLength, _ewCount, equidistant);
 
     // Areas
-    const totalSpaceSqFt = spaceLengthFt * spaceWidthFt;
-    const bedAreaSqFt = totalBeds * bedLengthFt * bedWidthFt;
-    const pathwayAreaSqFt = totalSpaceSqFt - bedAreaSqFt;
-    const efficiency = totalSpaceSqFt > 0 ? +(bedAreaSqFt / totalSpaceSqFt * 100).toFixed(1) : 0;
+    const totalSpaceSqFt  = spaceLengthFt * spaceWidthFt;
+    const bedAreaSqFt     = totalBeds * bedLengthFt * bedWidthFt;
+    const efficiency      = totalSpaceSqFt > 0
+        ? +(bedAreaSqFt / totalSpaceSqFt * 100).toFixed(1) : 0;
 
     // Soil volume if raised beds
     const soilInfo = isRaisedBed && totalBeds > 0

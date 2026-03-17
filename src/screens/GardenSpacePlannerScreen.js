@@ -171,46 +171,114 @@ function FactRow({ icon, label, value }) {
 function BedLayoutVisual({ spaceResult, containerWidth }) {
     if (!spaceResult || spaceResult.totalBeds === 0) return null;
 
-    const { bedsAcrossWidth, bedsAlongLength, bedWidthFt, bedLengthFt,
-            pathwayWidthFt, spaceLengthFt, spaceWidthFt } = spaceResult;
+    const {
+        bedsAcrossWidth, bedsAlongLength,
+        bedWidthFt, bedLengthFt, pathwayWidthFt,
+        spaceLengthFt, spaceWidthFt,
+        nsPathwayCount = 0, ewPathwayCount = 0,
+        mainPathWidthFt = 0, equidistant = false,
+        colGroups, rowGroups,
+    } = spaceResult;
 
-    // Scale width to container, maintain aspect ratio for height.
-    // Compute height from actual row content so no beds are ever clipped.
-    const ratio = containerWidth / (spaceWidthFt || 1);
-    const scaledBedH   = bedLengthFt    * ratio;     // height of one bed cell
-    const scaledPathH  = pathwayWidthFt * ratio;     // gap between rows
-    const padding      = scaledPathH / 2;            // top + bottom margin
-    const drawHeight   = padding * 2 + bedsAlongLength * scaledBedH + (bedsAlongLength - 1) * scaledPathH;
+    const ratio       = containerWidth / (spaceWidthFt || 1);
+    const scaledBedW  = bedWidthFt    * ratio;
+    const scaledBedH  = bedLengthFt   * ratio;
+    const scaledPathW = pathwayWidthFt * ratio;   // small bed-to-bed path
+    const scaledMainW = mainPathWidthFt * ratio;  // wide wheelbarrow path
+    const padding     = Math.max(scaledPathW / 2, 4);
 
-    const scaledBedW  = bedWidthFt   * ratio;
-    const scaledBedL  = bedLengthFt  * ratio;
-    const scaledPath  = pathwayWidthFt * ratio;
+    // Resolve groups (fallback if calculator hasn't populated them yet)
+    const cGroups = (colGroups && colGroups.length) ? colGroups : [bedsAcrossWidth];
+    const rGroups = (rowGroups && rowGroups.length) ? rowGroups : [bedsAlongLength];
+
+    // In edge mode, paths live OUTSIDE the bed groups (east / south border)
+    const showEastPath  = !equidistant && nsPathwayCount > 0 && scaledMainW > 0;
+    const showSouthPath = !equidistant && ewPathwayCount > 0 && scaledMainW > 0;
+
+    // Total height: sum of all row-group heights + E/W path gaps between groups
+    // (in equidistant mode, ewPathwayCount gaps between rGroups.length groups)
+    const totalBedRowH = bedsAlongLength * (scaledBedH + scaledPathW) - scaledPathW;
+    const ewGapCount   = equidistant ? Math.max(0, rGroups.length - 1) : 0;
+    const drawHeight   = padding * 2 + totalBedRowH + ewGapCount * scaledMainW
+                         + (showSouthPath ? scaledMainW : 0);
+
+    // Build all row-group and column-group positions
+    const rowEls = [];
+    let curRowIdx = 0;
+
+    for (let rg = 0; rg < rGroups.length; rg++) {
+        const rgSize = rGroups[rg];
+        for (let r = 0; r < rgSize; r++) {
+            const rowTop = padding
+                + curRowIdx * (scaledBedH + scaledPathW)
+                + (equidistant ? rg * scaledMainW : 0);
+
+            // Build columns for this row
+            const colEls = [];
+            let curColIdx = 0;
+
+            for (let cg = 0; cg < cGroups.length; cg++) {
+                const cgSize = cGroups[cg];
+                for (let c = 0; c < cgSize; c++) {
+                    const isFirst = curColIdx === 0;
+                    const isFirstInGroup = c === 0 && cg > 0;
+                    const marginLeft = isFirst
+                        ? padding
+                        : isFirstInGroup && equidistant
+                            ? scaledMainW    // wide path between equidistant groups
+                            : scaledPathW;   // normal bed-to-bed path
+
+                    colEls.push(
+                        <View
+                            key={curColIdx}
+                            style={[styles.visualBed, {
+                                width: scaledBedW,
+                                height: scaledBedH,
+                                marginLeft,
+                            }]}
+                        >
+                            {scaledBedH > 20 && [0.25, 0.5, 0.75].map((frac, li) => (
+                                <View key={li} style={[styles.visualBedRow, { top: `${frac * 100}%` }]} />
+                            ))}
+                        </View>
+                    );
+                    curColIdx++;
+                }
+            }
+
+            // East-edge N/S path strip (edge mode only)
+            if (showEastPath) {
+                colEls.push(
+                    <View key="east-path" style={{
+                        width: scaledMainW, height: scaledBedH,
+                        backgroundColor: '#B8A888', marginLeft: scaledPathW,
+                    }} />
+                );
+            }
+
+            rowEls.push(
+                <View key={`rg${rg}_r${r}`} style={[styles.visualRow, { top: rowTop }]}>
+                    {colEls}
+                </View>
+            );
+            curRowIdx++;
+        }
+    }
 
     return (
         <View style={[styles.visual, { height: drawHeight, width: containerWidth }]}>
             {/* Background = pathway / ground */}
             <View style={[StyleSheet.absoluteFill, { backgroundColor: '#D4C5A9' }]} />
 
-            {/* Bed grid */}
-            {Array.from({ length: bedsAlongLength }).map((_, row) => (
-                <View key={row} style={[styles.visualRow, { top: padding + row * (scaledBedH + scaledPathH) }]}>
-                    {Array.from({ length: bedsAcrossWidth }).map((_, col) => (
-                        <View
-                            key={col}
-                            style={[styles.visualBed, {
-                                width: scaledBedW,
-                                height: scaledBedH,
-                                marginLeft: col === 0 ? scaledPathH / 2 : scaledPathH,
-                            }]}
-                        >
-                            {/* Planting row lines */}
-                            {scaledBedH > 20 && [0.25, 0.5, 0.75].map((frac, li) => (
-                                <View key={li} style={[styles.visualBedRow, { top: `${frac * 100}%` }]} />
-                            ))}
-                        </View>
-                    ))}
-                </View>
-            ))}
+            {rowEls}
+
+            {/* South E/W path strip (edge mode only) */}
+            {showSouthPath && (
+                <View style={{
+                    position: 'absolute', bottom: 0, left: 0, right: 0,
+                    height: scaledMainW, backgroundColor: '#B8A888',
+                }} />
+            )}
 
             {/* Dimension labels */}
             <View style={styles.visualLabel}>
@@ -219,7 +287,7 @@ function BedLayoutVisual({ spaceResult, containerWidth }) {
                 </Text>
             </View>
 
-            {/* N/S Compass — top-right corner */}
+            {/* N/S Compass */}
             <View style={{
                 position: 'absolute', top: 8, right: 8,
                 alignItems: 'center',
@@ -228,29 +296,14 @@ function BedLayoutVisual({ spaceResult, containerWidth }) {
                 justifyContent: 'center',
                 borderWidth: 1, borderColor: 'rgba(45,79,30,0.25)',
             }}>
-                {/* N label */}
                 <Text style={{ fontSize: 7, fontWeight: '800', color: '#2D4F1E', letterSpacing: 0.5, marginBottom: 1 }}>N</Text>
-                {/* North arrow up (solid green) */}
-                <View style={{
-                    width: 0, height: 0,
-                    borderLeftWidth: 4, borderLeftColor: 'transparent',
-                    borderRightWidth: 4, borderRightColor: 'transparent',
-                    borderBottomWidth: 7, borderBottomColor: '#2D4F1E',
-                }} />
-                {/* South arrow down (faded) */}
-                <View style={{
-                    width: 0, height: 0,
-                    borderLeftWidth: 4, borderLeftColor: 'transparent',
-                    borderRightWidth: 4, borderRightColor: 'transparent',
-                    borderTopWidth: 7, borderTopColor: 'rgba(45,79,30,0.3)',
-                }} />
-                {/* S label */}
+                <View style={{ width: 0, height: 0, borderLeftWidth: 4, borderLeftColor: 'transparent', borderRightWidth: 4, borderRightColor: 'transparent', borderBottomWidth: 7, borderBottomColor: '#2D4F1E' }} />
+                <View style={{ width: 0, height: 0, borderLeftWidth: 4, borderLeftColor: 'transparent', borderRightWidth: 4, borderRightColor: 'transparent', borderTopWidth: 7, borderTopColor: 'rgba(45,79,30,0.3)' }} />
                 <Text style={{ fontSize: 7, fontWeight: '800', color: 'rgba(45,79,30,0.5)', letterSpacing: 0.5, marginTop: 1 }}>S</Text>
             </View>
         </View>
     );
 }
-
 
 // ─── Labelled number input ────────────────────────────────────────────────────
 function DimInput({ label, hint, value, onChangeText, suffix = 'ft', keyboardType = 'decimal-pad' }) {
@@ -307,9 +360,11 @@ export default function GardenSpacePlannerScreen({ navigation }) {
     const [pathwayFt, setPathwayFt]     = useState('2');
     // Orientation: NS = beds run north–south (default), EW = east–west
     const [orientation, setOrientation] = useState('NS');
-    // Wheelbarrow path: optional main access aisle
-    const [includeWheelbarrow, setIncludeWheelbarrow] = useState(true);
-    const [wheelbarrowFt, setWheelbarrowFt]           = useState('4');
+    // Multi-pathway access aisles
+    const [nsPathCount, setNsPathCount]       = useState(1);   // N/S vertical strips
+    const [ewPathCount, setEwPathCount]       = useState(0);   // E/W horizontal strips
+    const [mainPathWidthFt, setMainPathWidthFt] = useState('4'); // shared width
+    const [equidistant, setEquidistant]       = useState(false); // false = edge, true = divided
 
     // ── Step 2: Calculated results ────────────────────────────────────────────
     const [spaceResult, setSpaceResult] = useState(null);
@@ -382,12 +437,15 @@ export default function GardenSpacePlannerScreen({ navigation }) {
         const result = calculateBedsInSpace({
             spaceLengthFt,
             spaceWidthFt,
-            bedLengthFt:        parseFloat(bedLengthFt) || 8,
-            bedWidthFt:         parseFloat(bedWidthFt)  || 4,
-            pathwayWidthFt:     parseFloat(pathwayFt)   || 2,
-            wheelbarrowPathFt:  includeWheelbarrow ? (parseFloat(wheelbarrowFt) || 4) : 0,
+            bedLengthFt:      parseFloat(bedLengthFt) || 8,
+            bedWidthFt:       parseFloat(bedWidthFt)  || 4,
+            pathwayWidthFt:   parseFloat(pathwayFt)   || 2,
+            nsPathwayCount:   nsPathCount,
+            ewPathwayCount:   ewPathCount,
+            mainPathWidthFt:  parseFloat(mainPathWidthFt) || 4,
+            equidistant,
             isRaisedBed,
-            bedHeightIn:        parseFloat(bedHeightIn) || 12,
+            bedHeightIn:      parseFloat(bedHeightIn) || 12,
         });
         // Attach raw input for the visual
         result.spaceLengthFt = spaceLengthFt;
@@ -588,35 +646,87 @@ export default function GardenSpacePlannerScreen({ navigation }) {
                             onChangeText={setPathwayFt}
                         />
 
-                        {/* Wheelbarrow path toggle */}
-                        <View style={styles.toggleRow}>
-                            <View style={styles.dimLabel}>
-                                <Text style={styles.dimLabelText}>Main Access Path</Text>
-                                <Text style={styles.dimHint}>Wider aisle for wheelbarrow / tools</Text>
-                            </View>
-                            <Switch
-                                value={includeWheelbarrow}
-                                onValueChange={setIncludeWheelbarrow}
-                                trackColor={{ true: Colors.primaryGreen, false: '#ccc' }}
-                                thumbColor={includeWheelbarrow ? Colors.warmTan : '#f4f3f4'}
-                            />
+                        {/* ── Multi-pathway access aisles ─────────────────── */}
+                        <View style={styles.sectionSubheader}>
+                            <Text style={styles.dimLabelText}>Access Pathways (Wheelbarrow / UTV)</Text>
+                            <Text style={styles.dimHint}>Wider aisles for equipment · 4ft fits a wheelbarrow · 6ft fits a UTV</Text>
                         </View>
 
-                        {includeWheelbarrow && (
-                            <DimInput
-                                label="Access Path Width"
-                                hint="4ft fits a wheelbarrow; 6ft fits a UTV"
-                                value={wheelbarrowFt}
-                                onChangeText={setWheelbarrowFt}
-                            />
-                        )}
-
-                        {!includeWheelbarrow && (
-                            <View style={styles.explainer}>
-                                <Text style={styles.explainerText}>
-                                    💡 No main access path. All available space used for beds and regular pathways.
-                                </Text>
+                        {/* N/S path stepper */}
+                        <View style={styles.stepperRow}>
+                            <View style={styles.dimLabel}>
+                                <Text style={styles.dimLabelText}>↕ N/S Paths</Text>
+                                <Text style={styles.dimHint}>Vertical strips running north to south</Text>
                             </View>
+                            <View style={styles.stepper}>
+                                <TouchableOpacity
+                                    style={styles.stepperBtn}
+                                    onPress={() => setNsPathCount(c => Math.max(0, c - 1))}
+                                >
+                                    <Text style={styles.stepperBtnText}>−</Text>
+                                </TouchableOpacity>
+                                <Text style={styles.stepperVal}>{nsPathCount}</Text>
+                                <TouchableOpacity
+                                    style={styles.stepperBtn}
+                                    onPress={() => setNsPathCount(c => Math.min(6, c + 1))}
+                                >
+                                    <Text style={styles.stepperBtnText}>+</Text>
+                                </TouchableOpacity>
+                            </View>
+                        </View>
+
+                        {/* E/W path stepper */}
+                        <View style={styles.stepperRow}>
+                            <View style={styles.dimLabel}>
+                                <Text style={styles.dimLabelText}>↔ E/W Paths</Text>
+                                <Text style={styles.dimHint}>Horizontal strips running east to west</Text>
+                            </View>
+                            <View style={styles.stepper}>
+                                <TouchableOpacity
+                                    style={styles.stepperBtn}
+                                    onPress={() => setEwPathCount(c => Math.max(0, c - 1))}
+                                >
+                                    <Text style={styles.stepperBtnText}>−</Text>
+                                </TouchableOpacity>
+                                <Text style={styles.stepperVal}>{ewPathCount}</Text>
+                                <TouchableOpacity
+                                    style={styles.stepperBtn}
+                                    onPress={() => setEwPathCount(c => Math.min(6, c + 1))}
+                                >
+                                    <Text style={styles.stepperBtnText}>+</Text>
+                                </TouchableOpacity>
+                            </View>
+                        </View>
+
+                        {/* Width + placement (only shown if any paths) */}
+                        {(nsPathCount > 0 || ewPathCount > 0) && (
+                            <>
+                                <DimInput
+                                    label="Path Width"
+                                    hint="Shared width for all access paths"
+                                    value={mainPathWidthFt}
+                                    onChangeText={setMainPathWidthFt}
+                                />
+                                <View style={styles.dimRow}>
+                                    <View style={styles.dimLabel}>
+                                        <Text style={styles.dimLabelText}>Placement</Text>
+                                        <Text style={styles.dimHint}>Edge = path at border · Even = paths divide space equally</Text>
+                                    </View>
+                                    <View style={styles.segRow}>
+                                        {[false, true].map(opt => (
+                                            <TouchableOpacity
+                                                key={String(opt)}
+                                                style={[styles.segBtn, equidistant === opt && styles.segBtnActive]}
+                                                onPress={() => setEquidistant(opt)}
+                                            >
+                                                <Text style={[styles.segBtnText, equidistant === opt && styles.segBtnTextActive]}>
+                                                    {opt ? 'Even' : 'Edge'}
+                                                </Text>
+                                            </TouchableOpacity>
+                                        ))}
+                                    </View>
+                                </View>
+                            </>
                         )}
 
                         {/* Free-tier note */}
@@ -704,15 +814,27 @@ export default function GardenSpacePlannerScreen({ navigation }) {
                                 <Text style={styles.infoLabel}>Path between beds</Text>
                                 <Text style={styles.infoValue}>{spaceResult.pathwayWidthFt}′</Text>
                             </View>
-                            {spaceResult.wheelbarrowPathFt > 0 && (
+                            {spaceResult.nsPathwayCount > 0 && (
                                 <View style={styles.infoRow}>
-                                    <Text style={styles.infoLabel}>Main access path</Text>
-                                    <Text style={styles.infoValue}>{spaceResult.wheelbarrowPathFt}′ (wheelbarrow)</Text>
+                                    <Text style={styles.infoLabel}>↕ N/S access paths</Text>
+                                    <Text style={styles.infoValue}>
+                                        {spaceResult.nsPathwayCount} × {spaceResult.mainPathWidthFt}′
+                                        {spaceResult.equidistant ? ' (equidistant)' : ' (edge)'}
+                                    </Text>
                                 </View>
                             )}
-                            {spaceResult.wheelbarrowPathFt === 0 && (
+                            {spaceResult.ewPathwayCount > 0 && (
                                 <View style={styles.infoRow}>
-                                    <Text style={styles.infoLabel}>Main access path</Text>
+                                    <Text style={styles.infoLabel}>↔ E/W access paths</Text>
+                                    <Text style={styles.infoValue}>
+                                        {spaceResult.ewPathwayCount} × {spaceResult.mainPathWidthFt}′
+                                        {spaceResult.equidistant ? ' (equidistant)' : ' (edge)'}
+                                    </Text>
+                                </View>
+                            )}
+                            {spaceResult.nsPathwayCount === 0 && spaceResult.ewPathwayCount === 0 && (
+                                <View style={styles.infoRow}>
+                                    <Text style={styles.infoLabel}>Access paths</Text>
                                     <Text style={[styles.infoValue, { color: Colors.mutedText }]}>None</Text>
                                 </View>
                             )}
@@ -1028,6 +1150,36 @@ const styles = StyleSheet.create({
         borderWidth: 1, borderColor: 'rgba(45,79,30,0.12)',
         gap: Spacing.sm,
     },
+
+    // Section sub-header (label + hint, no border)
+    sectionSubheader: {
+        paddingVertical: Spacing.xs,
+    },
+
+    // Stepper row (label + –/value/+ control)
+    stepperRow: {
+        flexDirection: 'row', alignItems: 'center',
+        backgroundColor: Colors.white, borderRadius: Radius.md,
+        paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm,
+        borderWidth: 1, borderColor: 'rgba(45,79,30,0.12)',
+        gap: Spacing.sm,
+    },
+    stepper: {
+        flexDirection: 'row', alignItems: 'center',
+        borderWidth: 1, borderColor: 'rgba(45,79,30,0.2)',
+        borderRadius: Radius.full, overflow: 'hidden',
+    },
+    stepperBtn: {
+        paddingHorizontal: 14, paddingVertical: 6,
+        backgroundColor: Colors.white,
+    },
+    stepperBtnText: { fontSize: 18, color: Colors.primaryGreen, fontWeight: '600' },
+    stepperVal: {
+        minWidth: 32, textAlign: 'center',
+        fontSize: Typography.md, fontWeight: Typography.bold,
+        color: Colors.primaryGreen,
+    },
+
 
     // Orientation segment
     segRow: { flexDirection: 'row', gap: 6 },
