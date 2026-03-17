@@ -168,8 +168,20 @@ function LocationBar({ gardenProfile, onProfileFetched }) {
 // ─── Report Card (one per crop in Step 2) ────────────────────────────────────
 function ReportCard({ item, cardWidth }) {
     const isFlower = item.isFlower;
+    const GAP = 8; // matches Spacing.sm
     return (
-        <View style={[styles.reportCard, Shadows.card, cardWidth ? { width: cardWidth } : null]}>
+        <View style={[
+            styles.reportCard,
+            Shadows.card,
+            cardWidth ? {
+                width: cardWidth,
+                maxWidth: cardWidth,
+                flexShrink: 0,
+                flexGrow: 0,
+                marginRight: GAP,
+                marginBottom: GAP,
+            } : null,
+        ]}>
             {/* Header row */}
             <View style={styles.reportCardHeader}>
                 <Text style={styles.reportEmoji}>{item.emoji}</Text>
@@ -298,9 +310,11 @@ function getColumns(viewportWidth) {
 
 // ─── Main Screen ─────────────────────────────────────────────────────────────
 export default function FamilyPlannerScreen({ navigation }) {
+    const GAP = 8; // Spacing.sm
     const { width } = useWindowDimensions();
     const numColumns = getColumns(width);
-    const cardWidth = (width - Spacing.lg * 2 - Spacing.sm * (numColumns - 1)) / numColumns;
+    // Account for outer padding (2 × Spacing.lg = 48) and inter-card gaps
+    const cardWidth = Math.floor((width - 48 - GAP * (numColumns - 1)) / numColumns);
 
     // ── State ──────────────────────────────────────────────────────────────
     const [step, setStep]                   = useState(1);
@@ -1014,7 +1028,8 @@ const styles = StyleSheet.create({
     reportGridRow: {
         flexDirection: 'row',
         flexWrap: 'wrap',
-        gap: Spacing.sm,
+        alignItems: 'flex-start',
+        // Note: gap is not used here — cards manage their own marginRight/marginBottom
     },
     reportList: { padding: Spacing.lg, paddingBottom: 180, gap: Spacing.md },
 
