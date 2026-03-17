@@ -883,9 +883,8 @@ export default function GardenSpacePlannerScreen({ navigation }) {
                             <TouchableOpacity
                                 style={[styles.primaryBtn, Shadows.button, { flex: 1, backgroundColor: '#2D4F1E' }]}
                                 onPress={() => navigation.navigate('VisualBedLayout', {
-                                    initialBedCount: spaceResult.totalBeds,
-                                    wFt: spaceResult.bedWidthFt,
-                                    hFt: spaceResult.bedLengthFt,
+                                    spaceJson: JSON.stringify(spaceResult),
+                                    orientation,
                                 })}
                             >
                                 <Text style={styles.primaryBtnText}>🖊 Design Layout</Text>

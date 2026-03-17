@@ -48,11 +48,24 @@ const BED_DEFAULT_H_FT = 8;
 
 const GROUND_COLOR   = '#E8E0D0';
 const GRID_COLOR     = 'rgba(45,79,30,0.12)';
-const PATH_COLOR     = '#CFC5AE';
+const PATH_COLOR     = '#C9B99A';   // access-path strip colour
+const BOUNDARY_COLOR = '#2D4F1E';   // space boundary outline
 const BED_FILL       = '#D4E9C8';
 const BED_STROKE     = '#2D4F1E';
 const SELECT_STROKE  = '#F97316';
 const TEXT_COLOR     = '#2D4F1E';
+
+// Per-row crop strip colours (up to 8 rows; repeats)
+const ROW_COLORS = [
+    '#A8D08D', // light green
+    '#F4C97D', // golden
+    '#F08080', // coral
+    '#85C1E9', // sky blue
+    '#C39BD3', // lavender
+    '#82E0AA', // mint
+    '#F0B27A', // peach
+    '#AED6F1', // pale blue
+];
 
 function snap(val) {
     return Math.round(val / SNAP_PX) * SNAP_PX;
@@ -150,6 +163,109 @@ function CropPickerModal({ visible, onSelect, onClose, currentCropId, conflictCr
     );
 }
 
+// ─── Row Assignment Sheet ─────────────────────────────────────────────────────
+// Shows all rows within a selected bed; lets user assign a different crop to each.
+function BedRowSheet({ visible, bed, onAssignRow, onClose, allCropIds }) {
+    const [pickingRow, setPickingRow] = useState(null); // index of row being assigned
+    const [search, setSearch] = useState('');
+    const rows = bed?.rows ?? [];
+    const filtered = useMemo(() => {
+        const q = search.toLowerCase().trim();
+        return q ? ALL_CROPS.filter(c => c.name.toLowerCase().includes(q)) : ALL_CROPS;
+    }, [search]);
+
+    if (!bed) return null;
+
+    return (
+        <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+            <View style={rowSheet.overlay}>
+                <TouchableOpacity style={StyleSheet.absoluteFill} onPress={onClose} activeOpacity={1} />
+                <View style={rowSheet.sheet}>
+                    <View style={rowSheet.handle} />
+                    {pickingRow === null ? (
+                        // ── Row list view ─────────────────────────────────────
+                        <>
+                            <Text style={rowSheet.title}>🛏 Bed {bed.label} — {bed.wFt ?? 4}×{bed.hFt ?? 8} ft</Text>
+                            <Text style={rowSheet.sub}>Assign a crop to each planting row</Text>
+                            <ScrollView style={{ maxHeight: 320 }} showsVerticalScrollIndicator={false}>
+                                {rows.map((cropId, idx) => {
+                                    const crop = ALL_CROPS.find(c => c.id === cropId);
+                                    const img  = crop ? CROP_IMAGES[crop.id] : null;
+                                    return (
+                                        <TouchableOpacity
+                                            key={idx}
+                                            style={rowSheet.rowItem}
+                                            onPress={() => { setSearch(''); setPickingRow(idx); }}
+                                        >
+                                            <View style={[rowSheet.rowSwatch, { backgroundColor: ROW_COLORS[idx % ROW_COLORS.length] }]} />
+                                            <Text style={rowSheet.rowLabel}>Row {idx + 1}</Text>
+                                            {crop ? (
+                                                <>
+                                                    {img
+                                                        ? <Image source={img} style={rowSheet.rowImg} />
+                                                        : <Text style={{ fontSize: 18 }}>{crop.emoji ?? '🌱'}</Text>
+                                                    }
+                                                    <Text style={rowSheet.rowCrop} numberOfLines={1}>{crop.name}</Text>
+                                                </>
+                                            ) : (
+                                                <Text style={[rowSheet.rowCrop, { color: Colors.mutedText }]}>— empty —</Text>
+                                            )}
+                                            <Text style={rowSheet.rowEdit}>›</Text>
+                                        </TouchableOpacity>
+                                    );
+                                })}
+                            </ScrollView>
+                            <TouchableOpacity style={rowSheet.doneBtn} onPress={onClose}>
+                                <Text style={rowSheet.doneBtnText}>Done</Text>
+                            </TouchableOpacity>
+                        </>
+                    ) : (
+                        // ── Crop picker for a specific row ────────────────────
+                        <>
+                            <TouchableOpacity onPress={() => setPickingRow(null)} style={{ marginBottom: 8 }}>
+                                <Text style={{ color: Colors.primaryGreen, fontWeight: '700', fontSize: 14 }}>‹ Back to rows</Text>
+                            </TouchableOpacity>
+                            <Text style={rowSheet.title}>Row {pickingRow + 1} — choose a crop</Text>
+                            <TextInput
+                                style={rowSheet.search}
+                                value={search}
+                                onChangeText={setSearch}
+                                placeholder="Search crops…"
+                                placeholderTextColor={Colors.mutedText}
+                                clearButtonMode="while-editing"
+                            />
+                            <ScrollView style={rowSheet.scroll} contentContainerStyle={rowSheet.grid} showsVerticalScrollIndicator={false}>
+                                <TouchableOpacity style={rowSheet.cropCard} onPress={() => { onAssignRow(pickingRow, null); setPickingRow(null); }}>
+                                    <View style={rowSheet.clearIcon}><Text style={{ fontSize: 28 }}>🚫</Text></View>
+                                    <Text style={rowSheet.cropName}>None</Text>
+                                </TouchableOpacity>
+                                {filtered.map(crop => {
+                                    const img = CROP_IMAGES[crop.id];
+                                    const isSel = crop.id === rows[pickingRow];
+                                    return (
+                                        <TouchableOpacity
+                                            key={crop.id}
+                                            style={[rowSheet.cropCard, isSel && rowSheet.cropCardSelected]}
+                                            onPress={() => { onAssignRow(pickingRow, crop.id); setPickingRow(null); }}
+                                        >
+                                            {img
+                                                ? <Image source={img} style={rowSheet.cropImg} resizeMode="cover" />
+                                                : <Text style={{ fontSize: 28 }}>{crop.emoji ?? '🌱'}</Text>
+                                            }
+                                            <Text style={rowSheet.cropName} numberOfLines={1}>{crop.name}</Text>
+                                            {isSel && <View style={rowSheet.checkBadge}><Text style={rowSheet.checkText}>✓</Text></View>}
+                                        </TouchableOpacity>
+                                    );
+                                })}
+                            </ScrollView>
+                        </>
+                    )}
+                </View>
+            </View>
+        </Modal>
+    );
+}
+
 // ─── Add-bed panel ────────────────────────────────────────────────────────────
 function AddBedSheet({ visible, onAdd, onClose }) {
     const [wFt, setWFt] = useState('4');
@@ -201,32 +317,34 @@ function AddBedSheet({ visible, onAdd, onClose }) {
 }
 
 // ─── Main Canvas Component ────────────────────────────────────────────────────
-function BedLayoutCanvas({ beds, selectedId, onBedDrop, onBedClick, width, height }) {
+function BedLayoutCanvas({ beds, selectedId, onBedDrop, onBedClick, width, height, spaceInfo }) {
     const canvasRef = useRef(null);
     const stateRef  = useRef({
         beds,
         selectedId,
         zoom: 1,
         pan: { x: 40, y: 40 },
-        drag: null,         // { bedId, startX, startY, origX, origY }
+        drag: null,
         panning: false,
         panStart: null,
-        cropImages: {},     // cropId → HTMLImageElement (cached)
+        cropImages: {},
+        spaceInfo: spaceInfo ?? null,
     });
 
     // ── Sync props into stateRef ───────────────────────────────────────────────
     useEffect(() => {
         stateRef.current.beds = beds;
         stateRef.current.selectedId = selectedId;
+        stateRef.current.spaceInfo = spaceInfo ?? null;
         redraw();
-    }, [beds, selectedId]);
+    }, [beds, selectedId, spaceInfo]);
 
     // ── Draw ──────────────────────────────────────────────────────────────────
     const redraw = useCallback(() => {
         const canvas = canvasRef.current;
         if (!canvas) return;
         const ctx = canvas.getContext('2d');
-        const { zoom, pan, beds: bs, selectedId: sel } = stateRef.current;
+        const { zoom, pan, beds: bs, selectedId: sel, spaceInfo: si } = stateRef.current;
 
         ctx.clearRect(0, 0, width, height);
 
@@ -238,10 +356,39 @@ function BedLayoutCanvas({ beds, selectedId, onBedDrop, onBedClick, width, heigh
         ctx.translate(pan.x, pan.y);
         ctx.scale(zoom, zoom);
 
+        // ── Space boundary + access path strips ───────────────────────────────
+        if (si) {
+            const { wPx, hPx, pathStrips } = si;
+
+            // Outer space (slightly lighter ground)
+            ctx.fillStyle = '#EDE4D0';
+            ctx.fillRect(0, 0, wPx, hPx);
+
+            // Access path strips (rendered as darker soil)
+            ctx.fillStyle = PATH_COLOR;
+            for (const s of (pathStrips ?? [])) {
+                ctx.fillRect(s.x, s.y, s.w, s.h);
+            }
+
+            // Dashed boundary outline
+            ctx.strokeStyle = BOUNDARY_COLOR;
+            ctx.lineWidth = 2 / zoom;
+            ctx.setLineDash([8 / zoom, 4 / zoom]);
+            ctx.strokeRect(0, 0, wPx, hPx);
+            ctx.setLineDash([]);
+
+            // Boundary label
+            ctx.fillStyle = 'rgba(45,79,30,0.5)';
+            ctx.font = `bold ${Math.max(8, 11 / zoom)}px sans-serif`;
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'bottom';
+            ctx.fillText(si.label ?? '', 4 / zoom, hPx - 4 / zoom);
+        }
+
         // Grid dots
         ctx.fillStyle = GRID_COLOR;
-        const gs = SNAP_PX; // 1 ft in px
-        const gStep = Math.max(gs, gs * Math.round(12 / zoom));  // adaptive density
+        const gs = SNAP_PX;
+        const gStep = Math.max(gs, gs * Math.round(12 / zoom));
         const sx = Math.floor(-pan.x / zoom / gStep) * gStep - gStep;
         const sy = Math.floor(-pan.y / zoom / gStep) * gStep - gStep;
         const ex = sx + width / zoom + gStep * 2;
@@ -275,15 +422,49 @@ function BedLayoutCanvas({ beds, selectedId, onBedDrop, onBedClick, width, heigh
             ctx.fillStyle = BED_FILL;
             roundRect(ctx, 0, 0, w, h, 8);
             ctx.fill();
-
             ctx.shadowColor = 'transparent';
             ctx.shadowBlur = 0;
 
-            // Planting row lines
-            ctx.strokeStyle = 'rgba(45,79,30,0.15)';
+            // ── Per-row crop strips (Phase 2) ─────────────────────────────────
+            const rows = bed.rows ?? [];
+            const numRows = rows.length;
+            if (numRows > 0) {
+                const rowH = h / numRows;
+                for (let ri = 0; ri < numRows; ri++) {
+                    const cropId = rows[ri];
+                    if (!cropId) continue;
+                    // Color band
+                    ctx.fillStyle = ROW_COLORS[ri % ROW_COLORS.length] + 'CC'; // 80% alpha
+                    ctx.fillRect(2, ri * rowH + 2, w - 4, rowH - 2);
+                    // Tiny emoji / name
+                    const crop = ALL_CROPS.find(c => c.id === cropId);
+                    if (crop) {
+                        ctx.fillStyle = TEXT_COLOR;
+                        ctx.font = `bold ${Math.max(7, Math.min(10, h / numRows / 2))}px sans-serif`;
+                        ctx.textAlign = 'center';
+                        ctx.textBaseline = 'middle';
+                        ctx.fillText(
+                            `${crop.emoji ?? '🌱'} ${crop.name}`,
+                            w / 2,
+                            ri * rowH + rowH / 2,
+                            w - 8
+                        );
+                    }
+                }
+            } else {
+                // Empty bed label (no rows assigned yet)
+                ctx.fillStyle = 'rgba(45,79,30,0.4)';
+                ctx.font = `${Math.max(9, Math.min(12, w / 5))}px sans-serif`;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(`${bed.wFt ?? 4}×${bed.hFt ?? 8}ft`, w / 2, h / 2);
+            }
+
+            // Planting row divider lines
+            ctx.strokeStyle = 'rgba(45,79,30,0.18)';
             ctx.lineWidth = 1;
-            const rows = Math.floor(h / SNAP_PX);
-            for (let r = 1; r < rows; r++) {
+            const lineRows = Math.floor(h / SNAP_PX);
+            for (let r = 1; r < lineRows; r++) {
                 const ry = r * SNAP_PX;
                 ctx.beginPath();
                 ctx.moveTo(4, ry);
@@ -296,48 +477,6 @@ function BedLayoutCanvas({ beds, selectedId, onBedDrop, onBedClick, width, heigh
             ctx.lineWidth = isSelected ? 3 : 2;
             roundRect(ctx, 0, 0, w, h, 8);
             ctx.stroke();
-
-            // Crop image (if assigned)
-            const crop = ALL_CROPS.find(c => c.id === bed.cropId);
-            const imgEl = bed.cropId ? stateRef.current.cropImages[bed.cropId] : null;
-
-            if (imgEl) {
-                const imgSize = Math.min(w, h) * 0.45;
-                const ix = (w - imgSize) / 2;
-                const iy = 6;
-                ctx.save();
-                ctx.beginPath();
-                ctx.arc(ix + imgSize / 2, iy + imgSize / 2, imgSize / 2, 0, Math.PI * 2);
-                ctx.clip();
-                ctx.drawImage(imgEl, ix, iy, imgSize, imgSize);
-                ctx.restore();
-
-                if (crop?.name) {
-                    ctx.fillStyle = TEXT_COLOR;
-                    ctx.font = `bold ${Math.max(10, Math.min(14, w / 5))}px sans-serif`;
-                    ctx.textAlign = 'center';
-                    ctx.textBaseline = 'top';
-                    ctx.fillText(crop.name, w / 2, 8 + imgSize, w - 8);
-                }
-            } else if (crop) {
-                // Emoji fallback
-                const emoji = crop.emoji ?? '🌱';
-                const fontSize = Math.max(18, Math.min(32, w / 3));
-                ctx.font = `${fontSize}px sans-serif`;
-                ctx.textAlign = 'center';
-                ctx.textBaseline = 'middle';
-                ctx.fillText(emoji, w / 2, h / 2 - 8);
-                ctx.fillStyle = TEXT_COLOR;
-                ctx.font = `bold ${Math.max(9, Math.min(13, w / 5))}px sans-serif`;
-                ctx.fillText(crop.name, w / 2, h / 2 + fontSize / 2 + 2, w - 8);
-            } else {
-                // Empty bed label
-                ctx.fillStyle = 'rgba(45,79,30,0.4)';
-                ctx.font = `${Math.max(9, Math.min(12, w / 5))}px sans-serif`;
-                ctx.textAlign = 'center';
-                ctx.textBaseline = 'middle';
-                ctx.fillText(`${bed.wFt ?? 4}×${bed.hFt ?? 8}ft`, w / 2, h / 2);
-            }
 
             // Bed number badge
             ctx.fillStyle = isSelected ? SELECT_STROKE : BED_STROKE;
@@ -353,7 +492,7 @@ function BedLayoutCanvas({ beds, selectedId, onBedDrop, onBedClick, width, heigh
             ctx.restore();
         }
 
-        // North compass rose (top-right)
+        // North compass rose (top-right, screen-space)
         drawCompass(ctx, width - 50, 50, zoom);
 
         ctx.restore();
@@ -501,20 +640,25 @@ function BedLayoutCanvas({ beds, selectedId, onBedDrop, onBedClick, width, heigh
                 const dy = pos.y - st.drag.startY;
                 const moved = Math.sqrt(dx * dx + dy * dy) > 4;
                 if (moved) {
-                    const rawX = st.drag.origX + dx / st.zoom;
-                    const rawY = st.drag.origY + dy / st.zoom;
-                    const snappedX = snap(rawX);
-                    const snappedY = snap(rawY);
-                    onBedDrop(st.drag.bedId, snappedX, snappedY);
+                    let rawX = st.drag.origX + dx / st.zoom;
+                    let rawY = st.drag.origY + dy / st.zoom;
+                    // ── Clamp to space boundary ───────────────────────────────
+                    if (st.spaceInfo) {
+                        const bed = st.beds.find(b => b.id === st.drag.bedId);
+                        if (bed) {
+                            const { w, h } = bedPx(bed);
+                            rawX = Math.max(0, Math.min(rawX, st.spaceInfo.wPx - w));
+                            rawY = Math.max(0, Math.min(rawY, st.spaceInfo.hPx - h));
+                        }
+                    }
+                    onBedDrop(st.drag.bedId, snap(rawX), snap(rawY));
                 } else {
-                    // Click = select
                     onBedClick(st.drag.bedId);
                 }
                 st.drag = null;
             } else if (st.panning) {
                 st.panning = false;
                 st.panStart = null;
-                // Click on empty canvas = deselect
                 const dt = Date.now() - clickStart.t;
                 const ddx = pos.x - clickStart.x;
                 const ddy = pos.y - clickStart.y;
@@ -596,7 +740,9 @@ export default function VisualBedLayoutScreen({ navigation, route }) {
     const [undoStack, setUndoStack] = useState([]);
     const [showCropPicker, setShowCropPicker] = useState(false);
     const [showAddBed, setShowAddBed] = useState(false);
-    const [companionAlert, setCompanionAlert] = useState(null); // { warnings: string[] }
+    const [showRowSheet, setShowRowSheet] = useState(false);
+    const [companionAlert, setCompanionAlert] = useState(null);
+    const [spaceInfo, setSpaceInfo] = useState(null);  // canvas boundary + path strips
     const bedCounter = useRef(1);
 
     const selectedBed = beds.find(b => b.id === selectedId);
@@ -604,15 +750,130 @@ export default function VisualBedLayoutScreen({ navigation, route }) {
     // ── Load from persistence ────────────────────────────────────────────────
     useFocusEffect(useCallback(() => {
         const saved = loadBedLayout();
+
+        // ── Parse space context from route (new format) ────────────────────
+        let sp = null;
+        try {
+            sp = route?.params?.spaceJson ? JSON.parse(route.params.spaceJson) : null;
+        } catch {}
+
+        const orientation = route?.params?.orientation ?? 'NS';
+        const isEW = orientation === 'EW';
+
+        if (sp) {
+            // Build spaceInfo for the canvas boundary + path strips
+            const {
+                spaceLengthFt, spaceWidthFt,
+                bedLengthFt, bedWidthFt, pathwayWidthFt,
+                nsPathwayCount = 0, ewPathwayCount = 0,
+                mainPathWidthFt = 0, equidistant = false,
+                colGroups, rowGroups,
+            } = sp;
+
+            // In EW orientation the length/width axes are swapped for the canvas
+            const canvasW = spaceWidthFt  * PX_PER_FT;
+            const canvasH = spaceLengthFt * PX_PER_FT;
+
+            // Build access-path strip rects in canvas space
+            const pathStrips = [];
+            const pathPx = mainPathWidthFt * PX_PER_FT;
+            const bedWPx  = bedWidthFt  * PX_PER_FT;
+            const bedHPx  = bedLengthFt * PX_PER_FT;
+            const pathWPx = pathwayWidthFt * PX_PER_FT;
+            const cGroups = colGroups?.length ? colGroups : [sp.bedsAcrossWidth];
+            const rGroups = rowGroups?.length ? rowGroups : [sp.bedsAlongLength];
+
+            if (nsPathwayCount > 0 && pathPx > 0) {
+                if (!equidistant) {
+                    // Edge: path on east border
+                    pathStrips.push({ x: canvasW - pathPx, y: 0, w: pathPx, h: canvasH });
+                } else {
+                    // Evenly distributed: path between column groups
+                    let curX = 0;
+                    for (let cg = 0; cg < cGroups.length; cg++) {
+                        curX += cGroups[cg] * (bedWPx + pathWPx);
+                        if (cg < cGroups.length - 1) {
+                            pathStrips.push({ x: curX, y: 0, w: pathPx, h: canvasH });
+                            curX += pathPx;
+                        }
+                    }
+                }
+            }
+            if (ewPathwayCount > 0 && pathPx > 0) {
+                if (!equidistant) {
+                    // Edge: path on south border
+                    pathStrips.push({ x: 0, y: canvasH - pathPx, w: canvasW, h: pathPx });
+                } else {
+                    let curY = 0;
+                    for (let rg = 0; rg < rGroups.length; rg++) {
+                        curY += rGroups[rg] * (bedHPx + pathWPx);
+                        if (rg < rGroups.length - 1) {
+                            pathStrips.push({ x: 0, y: curY, w: canvasW, h: pathPx });
+                            curY += pathPx;
+                        }
+                    }
+                }
+            }
+
+            setSpaceInfo({
+                wPx: canvasW, hPx: canvasH,
+                pathStrips,
+                label: `${spaceWidthFt}′ × ${spaceLengthFt}′`,
+            });
+
+            // Pre-populate beds only if no saved layout
+            if (!saved?.beds?.length) {
+                const numRows = sp.bedsAlongLength;
+                const numCols = sp.bedsAcrossWidth;
+                const rotation = isEW ? 90 : 0;
+                const rowCount = Math.max(1, Math.floor(bedWPx / SNAP_PX)); // crop rows per bed
+
+                const initBeds = [];
+                let label = 1;
+                let curY = pathWPx / 2;
+
+                for (let rg = 0; rg < rGroups.length; rg++) {
+                    if (rg > 0) curY += equidistant ? pathPx : 0;
+                    for (let r = 0; r < rGroups[rg]; r++) {
+                        let curX = pathWPx / 2;
+                        for (let cg = 0; cg < cGroups.length; cg++) {
+                            if (cg > 0) curX += equidistant ? pathPx : 0;
+                            for (let c = 0; c < cGroups[cg]; c++) {
+                                initBeds.push({
+                                    id: makeId(),
+                                    label: label++,
+                                    x: snap(curX),
+                                    y: snap(curY),
+                                    rotation,
+                                    wFt: bedWidthFt,
+                                    hFt: bedLengthFt,
+                                    rows: Array(rowCount).fill(null),
+                                });
+                                curX += bedWPx + pathWPx;
+                            }
+                        }
+                        curY += bedHPx + pathWPx;
+                    }
+                }
+                bedCounter.current = label;
+                setBeds(initBeds);
+            } else {
+                setBeds(saved.beds);
+                const maxLabel = saved.beds.reduce((m, b) => Math.max(m, b.label ?? 0), 0);
+                bedCounter.current = maxLabel + 1;
+            }
+            return;
+        }
+
+        // ── Legacy: old route format (initialBedCount) ─────────────────────
         if (saved?.beds?.length) {
             setBeds(saved.beds);
-            // Set counter above highest existing label
             const maxLabel = saved.beds.reduce((m, b) => Math.max(m, b.label ?? 0), 0);
             bedCounter.current = maxLabel + 1;
         } else if (route?.params?.initialBedCount) {
-            // Pre-populated from GardenSpacePlanner
             const { initialBedCount, wFt = 4, hFt = 8 } = route.params;
             const cols = Math.min(4, initialBedCount);
+            const rowCount = Math.max(1, Math.floor((wFt * PX_PER_FT) / SNAP_PX));
             const initBeds = Array.from({ length: initialBedCount }, (_, i) => ({
                 id: makeId(),
                 label: i + 1,
@@ -621,12 +882,12 @@ export default function VisualBedLayoutScreen({ navigation, route }) {
                 rotation: 0,
                 wFt,
                 hFt,
-                cropId: null,
+                rows: Array(rowCount).fill(null),
             }));
             bedCounter.current = initialBedCount + 1;
             setBeds(initBeds);
         }
-    }, [route?.params?.initialBedCount]));
+    }, [route?.params?.spaceJson, route?.params?.initialBedCount]));
 
     // ── Persist on every change ───────────────────────────────────────────────
     useEffect(() => {
@@ -671,6 +932,7 @@ export default function VisualBedLayoutScreen({ navigation, route }) {
 
     function addBed({ wFt, hFt }) {
         const label = bedCounter.current++;
+        const rowCount = Math.max(1, Math.floor((wFt * PX_PER_FT) / SNAP_PX));
         const newBed = {
             id: makeId(),
             label,
@@ -679,7 +941,7 @@ export default function VisualBedLayoutScreen({ navigation, route }) {
             rotation: 0,
             wFt,
             hFt,
-            cropId: null,
+            rows: Array(rowCount).fill(null),
         };
         setBeds(prev => { pushUndo(prev); return [...prev, newBed]; });
         setSelectedId(newBed.id);
@@ -711,21 +973,41 @@ export default function VisualBedLayoutScreen({ navigation, route }) {
         });
         setShowCropPicker(false);
 
-        // ── Companion planting flash alert ─────────────────────────────────
+        // companion check vs all other beds (first non-null row)
         if (cropId) {
             const otherCropIds = beds
-                .filter(b => b.id !== selectedId && b.cropId)
-                .map(b => b.cropId);
-            const warnings = otherCropIds
+                .filter(b => b.id !== selectedId)
+                .flatMap(b => (b.rows ?? []).filter(Boolean));
+            const warnings = [...new Set(otherCropIds)]
                 .map(otherId => getBadCompanionWarning(cropId, otherId))
                 .filter(Boolean)
-                // deduplicate
                 .filter((w, i, arr) => arr.indexOf(w) === i);
-            if (warnings.length > 0) {
-                setCompanionAlert({ warnings });
-            }
+            if (warnings.length > 0) setCompanionAlert({ warnings });
         }
-        // ──────────────────────────────────────────────────────────────────
+    }
+
+    function assignRowCrop(rowIdx, cropId) {
+        if (!selectedId) return;
+        setBeds(prev => {
+            pushUndo(prev);
+            return prev.map(b => {
+                if (b.id !== selectedId) return b;
+                const newRows = [...(b.rows ?? [])];
+                newRows[rowIdx] = cropId;
+                return { ...b, rows: newRows };
+            });
+        });
+        // companion check: new crop vs all crops in other beds
+        if (cropId) {
+            const otherCropIds = beds
+                .filter(b => b.id !== selectedId)
+                .flatMap(b => (b.rows ?? []).filter(Boolean));
+            const warnings = [...new Set(otherCropIds)]
+                .map(otherId => getBadCompanionWarning(cropId, otherId))
+                .filter(Boolean)
+                .filter((w, i, arr) => arr.indexOf(w) === i);
+            if (warnings.length > 0) setCompanionAlert({ warnings });
+        }
     }
 
     function clearAll() {
@@ -775,6 +1057,7 @@ export default function VisualBedLayoutScreen({ navigation, route }) {
                     onBedClick={handleBedClick}
                     width={width}
                     height={canvasH}
+                    spaceInfo={spaceInfo}
                 />
             </View>
 
@@ -786,6 +1069,16 @@ export default function VisualBedLayoutScreen({ navigation, route }) {
                     <Text style={styles.toolBtnLabel}>Add Bed</Text>
                 </TouchableOpacity>
 
+                {/* Assign rows (multi-crop) */}
+                <TouchableOpacity
+                    style={[styles.toolBtn, !selectedId && styles.toolBtnDisabled]}
+                    onPress={() => setShowRowSheet(true)}
+                    disabled={!selectedId}
+                >
+                    <Text style={styles.toolBtnIcon}>🌿</Text>
+                    <Text style={styles.toolBtnLabel}>Rows</Text>
+                </TouchableOpacity>
+
                 {/* Rotate (only when selected) */}
                 <TouchableOpacity
                     style={[styles.toolBtn, !selectedId && styles.toolBtnDisabled]}
@@ -794,20 +1087,6 @@ export default function VisualBedLayoutScreen({ navigation, route }) {
                 >
                     <Text style={styles.toolBtnIcon}>↻</Text>
                     <Text style={styles.toolBtnLabel}>Rotate</Text>
-                </TouchableOpacity>
-
-                {/* Assign crop */}
-                <TouchableOpacity
-                    style={[styles.toolBtn, !selectedId && styles.toolBtnDisabled]}
-                    onPress={() => setShowCropPicker(true)}
-                    disabled={!selectedId}
-                >
-                    <Text style={styles.toolBtnIcon}>🌱</Text>
-                    <Text style={styles.toolBtnLabel}>
-                        {selectedBed?.cropId
-                            ? ALL_CROPS.find(c => c.id === selectedBed.cropId)?.name ?? 'Crop'
-                            : 'Assign Crop'}
-                    </Text>
                 </TouchableOpacity>
 
                 {/* Delete */}
@@ -846,10 +1125,16 @@ export default function VisualBedLayoutScreen({ navigation, route }) {
             {/* Modals */}
             <CropPickerModal
                 visible={showCropPicker}
-                currentCropId={selectedBed?.cropId}
+                currentCropId={selectedBed?.rows?.[0]}
                 conflictCropIds={conflictCropIds}
                 onSelect={assignCrop}
                 onClose={() => setShowCropPicker(false)}
+            />
+            <BedRowSheet
+                visible={showRowSheet}
+                bed={selectedBed}
+                onAssignRow={assignRowCrop}
+                onClose={() => setShowRowSheet(false)}
             />
             <AddBedSheet
                 visible={showAddBed}
@@ -960,4 +1245,47 @@ const addSheet = StyleSheet.create({
     dimX: { fontSize: 22, color: Colors.mutedText, fontWeight: '300', marginTop: 18 },
     addBtn: { backgroundColor: Colors.primaryGreen, borderRadius: Radius.md, paddingVertical: 15, alignItems: 'center' },
     addBtnText: { color: '#FFF8F0', fontWeight: '800', fontSize: 16, letterSpacing: 0.5 },
+});
+
+// ─── BedRowSheet Styles ────────────────────────────────────────────────────────
+const rowSheet = StyleSheet.create({
+    overlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.45)' },
+    sheet: {
+        backgroundColor: '#FAFAF7', borderTopLeftRadius: 24, borderTopRightRadius: 24,
+        paddingHorizontal: Spacing.lg, paddingBottom: 36, maxHeight: '80%',
+    },
+    handle: { width: 36, height: 4, backgroundColor: 'rgba(45,79,30,0.2)', borderRadius: 2, alignSelf: 'center', marginTop: 10, marginBottom: 10 },
+    title: { fontSize: 18, fontWeight: '800', color: Colors.primaryGreen, marginBottom: 4 },
+    sub: { fontSize: 12, color: Colors.mutedText, marginBottom: Spacing.md },
+    // Row list item
+    rowItem: {
+        flexDirection: 'row', alignItems: 'center', gap: 10,
+        paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: 'rgba(45,79,30,0.08)',
+    },
+    rowSwatch: { width: 12, height: 36, borderRadius: 4 },
+    rowLabel: { width: 48, fontSize: 12, fontWeight: '700', color: Colors.mutedText },
+    rowImg: { width: 32, height: 32, borderRadius: 6 },
+    rowCrop: { flex: 1, fontSize: 13, fontWeight: '600', color: Colors.primaryGreen },
+    rowEdit: { fontSize: 20, color: Colors.mutedText },
+    // Done button
+    doneBtn: { backgroundColor: Colors.primaryGreen, borderRadius: Radius.md, paddingVertical: 14, alignItems: 'center', marginTop: Spacing.md },
+    doneBtnText: { color: '#FFF8F0', fontWeight: '800', fontSize: 16 },
+    // Crop picker (inline in row picker sub-view)
+    search: {
+        borderWidth: 1.5, borderColor: 'rgba(45,79,30,0.2)', borderRadius: Radius.sm,
+        padding: 10, fontSize: 14, color: Colors.darkText, marginBottom: Spacing.sm,
+        backgroundColor: '#FFF',
+    },
+    scroll: { flex: 1 },
+    grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, paddingBottom: 24 },
+    cropCard: {
+        width: 80, alignItems: 'center', padding: 8, borderRadius: Radius.sm,
+        backgroundColor: 'rgba(45,79,30,0.05)', borderWidth: 1.5, borderColor: 'transparent',
+    },
+    cropCardSelected: { borderColor: Colors.primaryGreen, backgroundColor: 'rgba(45,79,30,0.08)' },
+    cropImg: { width: 56, height: 56, borderRadius: 8, marginBottom: 4 },
+    clearIcon: { width: 56, height: 56, alignItems: 'center', justifyContent: 'center', marginBottom: 4 },
+    cropName: { fontSize: 10, fontWeight: '700', color: Colors.primaryGreen, textAlign: 'center' },
+    checkBadge: { position: 'absolute', top: 4, right: 4, width: 18, height: 18, borderRadius: 9, backgroundColor: Colors.primaryGreen, alignItems: 'center', justifyContent: 'center' },
+    checkText: { color: '#FFF', fontSize: 10, fontWeight: '800' },
 });
