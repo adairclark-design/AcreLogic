@@ -295,10 +295,8 @@ function FactRow({ icon, label, value, highlight }) {
     );
 }
 
-// ─── Responsive column count ─────────────────────────────────────────────────
-// Targets: 1 col mobile, 2 col tablet, 3 col small desktop,
-//          4 col medium desktop, 6 col large, 8 col 27"+ monitor
-function getColumns(viewportWidth) {
+// ─── Plan results column count (Step 2 — fewer, richer cards) ────────────────
+function getPlanColumns(viewportWidth) {
     if (viewportWidth >= 2200) return 8;
     if (viewportWidth >= 1800) return 6;
     if (viewportWidth >= 1400) return 5;
@@ -312,7 +310,7 @@ function getColumns(viewportWidth) {
 export default function FamilyPlannerScreen({ navigation }) {
     const GAP = 8; // Spacing.sm
     const { width } = useWindowDimensions();
-    const numColumns = getColumns(width);
+    const numColumns = getPlanColumns(width);
     // Account for outer padding (2 × Spacing.lg = 48) and inter-card gaps
     const cardWidth = Math.floor((width - 48 - GAP * (numColumns - 1)) / numColumns);
 

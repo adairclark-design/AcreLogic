@@ -20,6 +20,7 @@
       "package": "com.acrelogic.app"
     },
     "web": {
+      "bundler": "metro",
       "favicon": "./assets/favicon.png",
       "viewport": {
         "width": "device-width",
@@ -28,6 +29,7 @@
         "viewportFit": "cover"
       }
     },
+
     "extra": {
       "eas": {
         "projectId": "8d55461e-90e8-4bec-9558-2d822e20248b"
