@@ -1013,9 +1013,6 @@ export default function BedWorkspaceScreen({ navigation, route }) {
                             <TouchableOpacity style={[styles.autoFillBtn, Shadows.card]} onPress={() => navigation.navigate('SeedOrder', { farmProfile })}>
                                 <Text style={styles.autoFillBtnText}>🌱 Seed Order List</Text>
                             </TouchableOpacity>
-                            <TouchableOpacity style={[styles.autoFillBtn, Shadows.card]} onPress={() => navigation.navigate('SeasonPass', { farmProfile })}>
-                                <Text style={styles.autoFillBtnText}>🎟 Season Pass</Text>
-                            </TouchableOpacity>
                         </>
                     )}
                 </View>
