@@ -222,33 +222,22 @@ function cropCardHTML(item, imgSrc) {
 
 // ─── 1. Family Plan HTML ──────────────────────────────────────────────────────
 async function buildFamilyPlanHTML(planResult, familySize) {
-    // Prefetch all crop images in parallel → inline base64 data URLs
+    // Prefetch all crop images in parallel → inline base64 data URLs.
+    // Images are served from /crops/<cropId>.png via the public/ folder,
+    // bypassing the Webpack bundler entirely for deterministic URLs.
     var imgMap = {};
     if (Platform.OS === 'web') {
+        var baseUrl = window.location.origin;
         await Promise.all(
             planResult.supported.map(async function(item) {
-                var raw = CROP_IMAGES[item.cropId] ?? CROP_IMAGES[item.id];
-                // Expo web resolves require() to:
-                //   - a string URI            (Webpack static asset URL)
-                //   - an object { uri: '...' } (Image source object)
-                //   - a number                (native module ID — not useful on web)
-                var src = null;
-                if (typeof raw === 'string' && raw.length > 0) {
-                    src = raw;
-                } else if (raw && typeof raw === 'object' && typeof raw.uri === 'string') {
-                    src = raw.uri;
-                } else if (raw != null) {
-                    // Last resort: resolve via the asset registry (Expo web exposes Asset)
-                    try {
-                        var resolved = require('expo-asset').Asset.fromModule(raw);
-                        await resolved.downloadAsync();
-                        src = resolved.localUri ?? resolved.uri ?? null;
-                    } catch (_) {}
+                var cropId = item.cropId ?? item.id;
+                if (!cropId) return;
+                // Try .png first, then .jpg
+                var dataUrl = await imageToDataURL(baseUrl + '/crops/' + cropId + '.png');
+                if (!dataUrl) {
+                    dataUrl = await imageToDataURL(baseUrl + '/crops/' + cropId + '.jpg');
                 }
-                if (src) {
-                    var dataUrl = await imageToDataURL(src);
-                    if (dataUrl) { imgMap[item.cropId ?? item.id] = dataUrl; }
-                }
+                if (dataUrl) { imgMap[cropId] = dataUrl; }
             })
         );
     }
