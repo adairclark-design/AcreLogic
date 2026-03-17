@@ -269,6 +269,11 @@ export default function GardenSpacePlannerScreen({ navigation }) {
     const [bedLengthFt, setBedLengthFt] = useState('8');
     const [bedWidthFt, setBedWidthFt]   = useState('4');
     const [pathwayFt, setPathwayFt]     = useState('2');
+    // Orientation: NS = beds run north–south (default), EW = east–west
+    const [orientation, setOrientation] = useState('NS');
+    // Wheelbarrow path: optional main access aisle
+    const [includeWheelbarrow, setIncludeWheelbarrow] = useState(true);
+    const [wheelbarrowFt, setWheelbarrowFt]           = useState('4');
 
     // ── Step 2: Calculated results ────────────────────────────────────────────
     const [spaceResult, setSpaceResult] = useState(null);
@@ -327,18 +332,24 @@ export default function GardenSpacePlannerScreen({ navigation }) {
             return;
         }
 
+        // Apply orientation: EW swaps length ↔ width so beds run across the east–west axis
+        const spaceLengthFt = orientation === 'EW' ? w : l;
+        const spaceWidthFt  = orientation === 'EW' ? l : w;
+
         const result = calculateBedsInSpace({
-            spaceLengthFt: l,
-            spaceWidthFt:  w,
-            bedLengthFt:   parseFloat(bedLengthFt) || 8,
-            bedWidthFt:    parseFloat(bedWidthFt)  || 4,
-            pathwayWidthFt: parseFloat(pathwayFt)  || 2,
+            spaceLengthFt,
+            spaceWidthFt,
+            bedLengthFt:        parseFloat(bedLengthFt) || 8,
+            bedWidthFt:         parseFloat(bedWidthFt)  || 4,
+            pathwayWidthFt:     parseFloat(pathwayFt)   || 2,
+            wheelbarrowPathFt:  includeWheelbarrow ? (parseFloat(wheelbarrowFt) || 4) : 0,
             isRaisedBed,
-            bedHeightIn:   parseFloat(bedHeightIn) || 12,
+            bedHeightIn:        parseFloat(bedHeightIn) || 12,
         });
         // Attach raw input for the visual
-        result.spaceLengthFt = l;
-        result.spaceWidthFt  = w;
+        result.spaceLengthFt = spaceLengthFt;
+        result.spaceWidthFt  = spaceWidthFt;
+        result.orientation   = orientation;
 
         setSpaceResult(result);
 
@@ -501,6 +512,30 @@ export default function GardenSpacePlannerScreen({ navigation }) {
                         />
 
                         <View style={styles.divider} />
+                        <Text style={styles.sectionTitle}>Orientation</Text>
+
+                        {/* N/S vs E/W toggle */}
+                        <View style={styles.dimRow}>
+                            <View style={styles.dimLabel}>
+                                <Text style={styles.dimLabelText}>Bed Orientation</Text>
+                                <Text style={styles.dimHint}>N/S maximises sun; E/W suits slope drainage</Text>
+                            </View>
+                            <View style={styles.segRow}>
+                                {['NS', 'EW'].map(opt => (
+                                    <TouchableOpacity
+                                        key={opt}
+                                        style={[styles.segBtn, orientation === opt && styles.segBtnActive]}
+                                        onPress={() => setOrientation(opt)}
+                                    >
+                                        <Text style={[styles.segBtnText, orientation === opt && styles.segBtnTextActive]}>
+                                            {opt === 'NS' ? '↕ N/S' : '↔ E/W'}
+                                        </Text>
+                                    </TouchableOpacity>
+                                ))}
+                            </View>
+                        </View>
+
+                        <View style={styles.divider} />
                         <Text style={styles.sectionTitle}>Pathways</Text>
 
                         <DimInput
@@ -510,11 +545,36 @@ export default function GardenSpacePlannerScreen({ navigation }) {
                             onChangeText={setPathwayFt}
                         />
 
-                        <View style={styles.explainer}>
-                            <Text style={styles.explainerText}>
-                                💡 One wider wheelbarrow path (4ft) is automatically included along the main access aisle.
-                            </Text>
+                        {/* Wheelbarrow path toggle */}
+                        <View style={styles.toggleRow}>
+                            <View style={styles.dimLabel}>
+                                <Text style={styles.dimLabelText}>Main Access Path</Text>
+                                <Text style={styles.dimHint}>Wider aisle for wheelbarrow / tools</Text>
+                            </View>
+                            <Switch
+                                value={includeWheelbarrow}
+                                onValueChange={setIncludeWheelbarrow}
+                                trackColor={{ true: Colors.primaryGreen, false: '#ccc' }}
+                                thumbColor={includeWheelbarrow ? Colors.warmTan : '#f4f3f4'}
+                            />
                         </View>
+
+                        {includeWheelbarrow && (
+                            <DimInput
+                                label="Access Path Width"
+                                hint="4ft fits a wheelbarrow; 6ft fits a UTV"
+                                value={wheelbarrowFt}
+                                onChangeText={setWheelbarrowFt}
+                            />
+                        )}
+
+                        {!includeWheelbarrow && (
+                            <View style={styles.explainer}>
+                                <Text style={styles.explainerText}>
+                                    💡 No main access path. All available space used for beds and regular pathways.
+                                </Text>
+                            </View>
+                        )}
 
                         {/* Free-tier note */}
                         {getActiveTier() === TIER.FREE && (
@@ -592,13 +652,27 @@ export default function GardenSpacePlannerScreen({ navigation }) {
                                 </Text>
                             </View>
                             <View style={styles.infoRow}>
+                                <Text style={styles.infoLabel}>Orientation</Text>
+                                <Text style={styles.infoValue}>
+                                    {spaceResult.orientation === 'EW' ? '↔ East–West' : '↕ North–South'}
+                                </Text>
+                            </View>
+                            <View style={styles.infoRow}>
                                 <Text style={styles.infoLabel}>Path between beds</Text>
                                 <Text style={styles.infoValue}>{spaceResult.pathwayWidthFt}′</Text>
                             </View>
-                            <View style={styles.infoRow}>
-                                <Text style={styles.infoLabel}>Main access path</Text>
-                                <Text style={styles.infoValue}>{spaceResult.wheelbarrowPathFt}′ (wheelbarrow)</Text>
-                            </View>
+                            {spaceResult.wheelbarrowPathFt > 0 && (
+                                <View style={styles.infoRow}>
+                                    <Text style={styles.infoLabel}>Main access path</Text>
+                                    <Text style={styles.infoValue}>{spaceResult.wheelbarrowPathFt}′ (wheelbarrow)</Text>
+                                </View>
+                            )}
+                            {spaceResult.wheelbarrowPathFt === 0 && (
+                                <View style={styles.infoRow}>
+                                    <Text style={styles.infoLabel}>Main access path</Text>
+                                    <Text style={[styles.infoValue, { color: Colors.mutedText }]}>None</Text>
+                                </View>
+                            )}
                         </View>
 
                         {/* Soil volume card (raised beds only) */}
@@ -911,6 +985,16 @@ const styles = StyleSheet.create({
         borderWidth: 1, borderColor: 'rgba(45,79,30,0.12)',
         gap: Spacing.sm,
     },
+
+    // Orientation segment
+    segRow: { flexDirection: 'row', gap: 6 },
+    segBtn: {
+        paddingVertical: 8, paddingHorizontal: 14, borderRadius: Radius.full,
+        borderWidth: 1.5, borderColor: 'rgba(45,79,30,0.2)', backgroundColor: Colors.white,
+    },
+    segBtnActive: { backgroundColor: Colors.primaryGreen, borderColor: Colors.primaryGreen },
+    segBtnText: { fontSize: Typography.xs, fontWeight: Typography.bold, color: Colors.primaryGreen },
+    segBtnTextActive: { color: Colors.cream },
 
     areaPreview: {
         backgroundColor: 'rgba(45,79,30,0.07)',
