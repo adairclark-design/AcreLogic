@@ -24,6 +24,7 @@ import PricingScreen from '../screens/PricingScreen';
 import SuccessScreen from '../screens/SuccessScreen';
 import SeedOrderScreen from '../screens/SeedOrderScreen';
 import VisualBedLayoutScreen from '../screens/VisualBedLayoutScreen';
+import BedDesignerSetupScreen from '../screens/BedDesignerSetupScreen';
 import DashboardScreen from '../screens/DashboardScreen';
 
 const Stack = createStackNavigator();
@@ -91,6 +92,7 @@ export default function AppNavigator() {
                 <Stack.Screen name="BlockDetail" component={BlockDetailScreen} />
                 <Stack.Screen name="SeedOrder" component={SeedOrderScreen} />
                 <Stack.Screen name="VisualBedLayout" component={VisualBedLayoutScreen} />
+                <Stack.Screen name="BedDesignerSetup" component={BedDesignerSetupScreen} />
                 <Stack.Screen name="Dashboard" component={DashboardScreen} />
             </Stack.Navigator>
         </NavigationContainer>

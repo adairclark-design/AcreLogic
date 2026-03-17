@@ -95,6 +95,264 @@ function roundRect(ctx, x, y, w, h, r = 6) {
 function makeId() {
     return `bed_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 }
+// Cell colour palette (shared by canvas draw + CellGridOverlay)
+const CELL_COLORS = [
+    '#A8D08D','#F4C97D','#F08080','#85C1E9',
+    '#C39BD3','#82E0AA','#F0B27A','#AED6F1',
+    '#FFD54F','#CE93D8','#80DEEA','#FFAB91',
+];
+// Deterministic colour per cropId — same crop always gets same colour
+function cropColor(cropId) {
+    if (!cropId) return null;
+    let h = 0;
+    for (let i = 0; i < cropId.length; i++) h = (h * 31 + cropId.charCodeAt(i)) >>> 0;
+    return CELL_COLORS[h % CELL_COLORS.length];
+}
+
+// ─── Cell-Grid Crop Overlay ───────────────────────────────────────────────────
+// Modal that shows a 1ft×1ft grid over the selected bed for crop-cell painting.
+function CellGridOverlay({ visible, bed, onAssignCell, onClose }) {
+    const [pickingCell, setPickingCell] = useState(null);
+    const [search, setSearch] = useState('');
+    const filtered = useMemo(() => {
+        const q = search.toLowerCase().trim();
+        return q ? ALL_CROPS.filter(c => c.name.toLowerCase().includes(q)) : ALL_CROPS;
+    }, [search]);
+
+    if (!bed) return null;
+    const cols  = Math.max(1, Math.round(bed.wFt ?? BED_DEFAULT_W_FT));
+    const rows  = Math.max(1, Math.round(bed.hFt ?? BED_DEFAULT_H_FT));
+    const cells = bed.cells ?? {};
+    const CELL_PX = Math.min(58, Math.floor(280 / Math.max(cols, rows)));
+
+    return (
+        <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+            <View style={cgo.backdrop}>
+                <TouchableOpacity style={StyleSheet.absoluteFill} onPress={onClose} activeOpacity={1} />
+                <View style={cgo.panel}>
+                    <View style={cgo.panelHeader}>
+                        <Text style={cgo.panelTitle}>🛏 Bed {bed.label} — {bed.wFt ?? 4}×{bed.hFt ?? 8} ft</Text>
+                        <TouchableOpacity onPress={onClose}><Text style={cgo.closeBtn}>×</Text></TouchableOpacity>
+                    </View>
+                    {pickingCell === null ? (
+                        <>
+                            <Text style={cgo.hint}>Tap any 1ft×1ft cell to assign a crop · N is top</Text>
+                            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                                <ScrollView showsVerticalScrollIndicator={false}>
+                                    <View>
+                                        <View style={{ flexDirection: 'row', marginLeft: 24, marginBottom: 2 }}>
+                                            {Array.from({ length: cols }, (_, c) => (
+                                                <Text key={c} style={[cgo.axisLabel, { width: CELL_PX }]}>{c + 1}′</Text>
+                                            ))}
+                                        </View>
+                                        {Array.from({ length: rows }, (_, r) => (
+                                            <View key={r} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 2 }}>
+                                                <Text style={cgo.axisLabel}>{r + 1}′</Text>
+                                                {Array.from({ length: cols }, (_, c) => {
+                                                    const key   = `${c}_${r}`;
+                                                    const cropId = cells[key];
+                                                    const crop  = ALL_CROPS.find(x => x.id === cropId);
+                                                    const img   = crop ? CROP_IMAGES[crop.id] : null;
+                                                    const bg    = cropColor(cropId) ?? '#EEE8DC';
+                                                    return (
+                                                        <TouchableOpacity
+                                                            key={c}
+                                                            style={[cgo.cell, { width: CELL_PX, height: CELL_PX, backgroundColor: bg }]}
+                                                            onPress={() => { setSearch(''); setPickingCell({ col: c, row: r }); }}
+                                                        >
+                                                            {img
+                                                                ? <Image source={img} style={{ width: CELL_PX - 10, height: CELL_PX - 10, borderRadius: 4 }} resizeMode="cover" />
+                                                                : crop ? <Text style={{ fontSize: Math.max(12, CELL_PX / 4) }}>{crop.emoji ?? '🌱'}</Text>
+                                                                : null
+                                                            }
+                                                        </TouchableOpacity>
+                                                    );
+                                                })}
+                                            </View>
+                                        ))}
+                                    </View>
+                                </ScrollView>
+                            </ScrollView>
+                            {Object.keys(cells).length > 0 && (
+                                <View style={cgo.legend}>
+                                    {[...new Set(Object.values(cells).filter(Boolean))].map(cId => {
+                                        const crop = ALL_CROPS.find(x => x.id === cId);
+                                        if (!crop) return null;
+                                        return (
+                                            <View key={cId} style={cgo.legendItem}>
+                                                <View style={[cgo.legendSwatch, { backgroundColor: cropColor(cId) }]} />
+                                                <Text style={cgo.legendLabel}>{crop.emoji ?? '🌱'} {crop.name}</Text>
+                                            </View>
+                                        );
+                                    })}
+                                </View>
+                            )}
+                            <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
+                                <TouchableOpacity style={cgo.clearBtn} onPress={() => onAssignCell('__clear__', null)}>
+                                    <Text style={cgo.clearBtnText}>Clear all</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity style={cgo.doneBtn} onPress={onClose}>
+                                    <Text style={cgo.doneBtnText}>Done</Text>
+                                </TouchableOpacity>
+                            </View>
+                        </>
+                    ) : (
+                        <>
+                            <TouchableOpacity onPress={() => setPickingCell(null)} style={{ marginBottom: 8 }}>
+                                <Text style={{ color: Colors.primaryGreen, fontWeight: '700', fontSize: 14 }}>‹ Back to grid</Text>
+                            </TouchableOpacity>
+                            <Text style={cgo.panelTitle}>
+                                Cell ({pickingCell.col + 1}ft, {pickingCell.row + 1}ft) — pick a crop
+                            </Text>
+                            <TextInput
+                                style={cgo.search} value={search} onChangeText={setSearch}
+                                placeholder="Search crops…" placeholderTextColor={Colors.mutedText}
+                                clearButtonMode="while-editing"
+                            />
+                            <ScrollView style={{ flex: 1 }} contentContainerStyle={cgo.cropGrid}>
+                                <TouchableOpacity style={cgo.cropCard} onPress={() => { onAssignCell(`${pickingCell.col}_${pickingCell.row}`, null); setPickingCell(null); }}>
+                                    <View style={cgo.clearIcon}><Text style={{ fontSize: 26 }}>🚫</Text></View>
+                                    <Text style={cgo.cropName}>Clear</Text>
+                                </TouchableOpacity>
+                                {filtered.map(crop => {
+                                    const img    = CROP_IMAGES[crop.id];
+                                    const curKey = `${pickingCell.col}_${pickingCell.row}`;
+                                    const isSel  = cells[curKey] === crop.id;
+                                    return (
+                                        <TouchableOpacity
+                                            key={crop.id}
+                                            style={[cgo.cropCard, isSel && cgo.cropCardSel]}
+                                            onPress={() => { onAssignCell(`${pickingCell.col}_${pickingCell.row}`, crop.id); setPickingCell(null); }}
+                                        >
+                                            {img ? <Image source={img} style={cgo.cropImg} resizeMode="cover" /> : <Text style={{ fontSize: 26 }}>{crop.emoji ?? '🌱'}</Text>}
+                                            <Text style={cgo.cropName} numberOfLines={1}>{crop.name}</Text>
+                                            {isSel && <View style={cgo.check}><Text style={{ color: '#FFF', fontSize: 9, fontWeight: '800' }}>✓</Text></View>}
+                                        </TouchableOpacity>
+                                    );
+                                })}
+                            </ScrollView>
+                        </>
+                    )}
+                </View>
+            </View>
+        </Modal>
+    );
+}
+
+const cgo = StyleSheet.create({
+    backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center', padding: 12 },
+    panel: { backgroundColor: '#FAFAF7', borderRadius: 20, padding: 18, width: '100%', maxWidth: 500, maxHeight: '92%' },
+    panelHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
+    panelTitle: { fontSize: 15, fontWeight: '800', color: Colors.primaryGreen, flex: 1, marginRight: 8 },
+    closeBtn: { fontSize: 26, color: Colors.mutedText, lineHeight: 28 },
+    hint: { fontSize: 11, color: Colors.mutedText, marginBottom: 10, fontStyle: 'italic' },
+    axisLabel: { width: 24, fontSize: 8, color: Colors.mutedText, textAlign: 'center' },
+    cell: { borderWidth: 1, borderColor: 'rgba(45,79,30,0.18)', borderRadius: 4, margin: 1, alignItems: 'center', justifyContent: 'center' },
+    legend: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 },
+    legendItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+    legendSwatch: { width: 10, height: 10, borderRadius: 3 },
+    legendLabel: { fontSize: 11, color: Colors.primaryGreen, fontWeight: '600' },
+    clearBtn: { flex: 1, padding: 10, borderRadius: 8, borderWidth: 1.5, borderColor: '#C62828', alignItems: 'center' },
+    clearBtnText: { fontSize: 13, fontWeight: '700', color: '#C62828' },
+    doneBtn: { flex: 2, padding: 10, borderRadius: 8, backgroundColor: Colors.primaryGreen, alignItems: 'center' },
+    doneBtnText: { fontSize: 13, fontWeight: '800', color: '#FFF8F0' },
+    search: { borderWidth: 1.5, borderColor: 'rgba(45,79,30,0.2)', borderRadius: 8, padding: 10, fontSize: 14, color: Colors.darkText, marginBottom: 10, backgroundColor: '#FFF' },
+    cropGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingBottom: 20 },
+    cropCard: { width: 74, alignItems: 'center', padding: 6, borderRadius: 8, backgroundColor: 'rgba(45,79,30,0.05)', borderWidth: 1.5, borderColor: 'transparent' },
+    cropCardSel: { borderColor: Colors.primaryGreen, backgroundColor: 'rgba(45,79,30,0.1)' },
+    cropImg: { width: 50, height: 50, borderRadius: 6, marginBottom: 4 },
+    clearIcon: { width: 50, height: 50, alignItems: 'center', justifyContent: 'center', marginBottom: 4 },
+    cropName: { fontSize: 9, fontWeight: '700', color: Colors.primaryGreen, textAlign: 'center' },
+    check: { position: 'absolute', top: 4, right: 4, width: 16, height: 16, borderRadius: 8, backgroundColor: Colors.primaryGreen, alignItems: 'center', justifyContent: 'center' },
+});
+
+// ─── Add-Bed Sidebar ──────────────────────────────────────────────────────────
+// Fixed left panel on web/tablet with Create Bed form + selected bed actions.
+function AddBedSidebar({ onAdd, selectedBed, onRotate, onDelete, onAssignCrops, undoStack, onUndo }) {
+    const [wFt, setWFt] = useState('4');
+    const [hFt, setHFt] = useState('8');
+    const [bedOri, setBedOri] = useState('NS');
+    const [open, setOpen] = useState(true);
+
+    function handleCreate() {
+        const w = parseFloat(wFt) || 4;
+        const h = parseFloat(hFt) || 8;
+        onAdd({ wFt: Math.max(1, w), hFt: Math.max(1, h) });
+    }
+
+    return (
+        <View style={sb.sidebar}>
+            <TouchableOpacity style={sb.sectionHeader} onPress={() => setOpen(o => !o)}>
+                <Text style={sb.sectionTitle}>＋ Add Bed</Text>
+                <Text style={sb.chevron}>{open ? '▲' : '▼'}</Text>
+            </TouchableOpacity>
+            {open && (
+                <View style={sb.form}>
+                    <Text style={sb.fieldLabel}>Length (ft)</Text>
+                    <TextInput style={sb.input} value={hFt} onChangeText={setHFt} keyboardType="decimal-pad" selectTextOnFocus />
+                    <Text style={sb.fieldLabel}>Width (ft)</Text>
+                    <TextInput style={sb.input} value={wFt} onChangeText={setWFt} keyboardType="decimal-pad" selectTextOnFocus />
+                    <Text style={sb.fieldLabel}>Orientation</Text>
+                    <View style={sb.segRow}>
+                        {['NS', 'EW'].map(opt => (
+                            <TouchableOpacity
+                                key={opt} style={[sb.segBtn, bedOri === opt && sb.segBtnActive]}
+                                onPress={() => setBedOri(opt)}
+                            >
+                                <Text style={[sb.segBtnTxt, bedOri === opt && sb.segBtnTxtActive]}>
+                                    {opt === 'NS' ? '↕ N/S' : '↔ E/W'}
+                                </Text>
+                            </TouchableOpacity>
+                        ))}
+                    </View>
+                    <TouchableOpacity style={sb.createBtn} onPress={handleCreate}>
+                        <Text style={sb.createBtnTxt}>Create</Text>
+                    </TouchableOpacity>
+                </View>
+            )}
+            <View style={sb.divider} />
+            <Text style={sb.actionsLabel}>
+                {selectedBed ? `Bed ${selectedBed.label} — ${selectedBed.wFt ?? 4}×${selectedBed.hFt ?? 8}ft` : 'Select a bed'}
+            </Text>
+            <TouchableOpacity style={[sb.actionBtn, !selectedBed && sb.dim]} onPress={onAssignCrops} disabled={!selectedBed}>
+                <Text style={sb.actionTxt}>🌱 Assign Crops</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[sb.actionBtn, !selectedBed && sb.dim]} onPress={onRotate} disabled={!selectedBed}>
+                <Text style={sb.actionTxt}>↻ Rotate</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[sb.actionBtn, sb.delBtn, !selectedBed && sb.dim]} onPress={onDelete} disabled={!selectedBed}>
+                <Text style={[sb.actionTxt, { color: '#C62828' }]}>🗑 Delete</Text>
+            </TouchableOpacity>
+            <View style={sb.divider} />
+            <TouchableOpacity style={[sb.actionBtn, !undoStack.length && sb.dim]} onPress={onUndo} disabled={!undoStack.length}>
+                <Text style={sb.actionTxt}>↩ Undo</Text>
+            </TouchableOpacity>
+        </View>
+    );
+}
+
+const sb = StyleSheet.create({
+    sidebar: { width: 176, backgroundColor: '#FAFAF7', borderRightWidth: 1, borderRightColor: 'rgba(45,79,30,0.12)', paddingVertical: 12, paddingHorizontal: 10, gap: 6 },
+    sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 },
+    sectionTitle: { fontSize: 13, fontWeight: '800', color: Colors.primaryGreen },
+    chevron: { fontSize: 10, color: Colors.mutedText },
+    form: { gap: 6 },
+    fieldLabel: { fontSize: 9, fontWeight: '700', color: Colors.mutedText, textTransform: 'uppercase', letterSpacing: 0.5 },
+    input: { borderWidth: 1.5, borderColor: 'rgba(45,79,30,0.2)', borderRadius: 6, padding: 8, fontSize: 16, fontWeight: '700', color: Colors.primaryGreen, textAlign: 'center', backgroundColor: '#FFF' },
+    segRow: { flexDirection: 'row', gap: 4 },
+    segBtn: { flex: 1, paddingVertical: 7, borderRadius: 6, borderWidth: 1.5, borderColor: 'rgba(45,79,30,0.2)', alignItems: 'center' },
+    segBtnActive: { backgroundColor: Colors.primaryGreen, borderColor: Colors.primaryGreen },
+    segBtnTxt: { fontSize: 10, fontWeight: '700', color: Colors.primaryGreen },
+    segBtnTxtActive: { color: '#FFF8F0' },
+    createBtn: { backgroundColor: Colors.primaryGreen, borderRadius: 8, paddingVertical: 10, alignItems: 'center', marginTop: 2 },
+    createBtnTxt: { color: '#FFF8F0', fontWeight: '800', fontSize: 13 },
+    divider: { height: 1, backgroundColor: 'rgba(45,79,30,0.1)', marginVertical: 4 },
+    actionsLabel: { fontSize: 10, fontWeight: '700', color: Colors.mutedText, lineHeight: 14 },
+    actionBtn: { paddingVertical: 9, paddingHorizontal: 8, borderRadius: 8, backgroundColor: 'rgba(45,79,30,0.06)', alignItems: 'center' },
+    delBtn: { backgroundColor: 'rgba(183,28,28,0.06)' },
+    actionTxt: { fontSize: 12, fontWeight: '700', color: Colors.primaryGreen },
+    dim: { opacity: 0.3 },
+});
 
 // ─── Crop picker ──────────────────────────────────────────────────────────────
 // conflictCropIds: set of cropIds already planted in OTHER beds (for badge display)
@@ -425,34 +683,34 @@ function BedLayoutCanvas({ beds, selectedId, onBedDrop, onBedClick, width, heigh
             ctx.shadowColor = 'transparent';
             ctx.shadowBlur = 0;
 
-            // ── Per-row crop strips (Phase 2) ─────────────────────────────────
-            const rows = bed.rows ?? [];
-            const numRows = rows.length;
-            if (numRows > 0) {
-                const rowH = h / numRows;
-                for (let ri = 0; ri < numRows; ri++) {
-                    const cropId = rows[ri];
-                    if (!cropId) continue;
-                    // Color band
-                    ctx.fillStyle = ROW_COLORS[ri % ROW_COLORS.length] + 'CC'; // 80% alpha
-                    ctx.fillRect(2, ri * rowH + 2, w - 4, rowH - 2);
-                    // Tiny emoji / name
-                    const crop = ALL_CROPS.find(c => c.id === cropId);
+            // ── Cell-grid crop draw (bed.cells{} model) ───────────────────────
+            const cells  = bed.cells ?? {};
+            const cellKeys = Object.keys(cells).filter(k => cells[k]);
+            const cols   = Math.max(1, Math.round(bed.wFt ?? BED_DEFAULT_W_FT));
+            const rowsFt = Math.max(1, Math.round(bed.hFt ?? BED_DEFAULT_H_FT));
+            const cellW  = w / cols;
+            const cellH  = h / rowsFt;
+
+            if (cellKeys.length > 0) {
+                // Draw every painted cell
+                for (const key of cellKeys) {
+                    const [c, r] = key.split('_').map(Number);
+                    const cropId = cells[key];
+                    const color  = cropColor(cropId);
+                    if (!color) continue;
+                    ctx.fillStyle = color + 'CC';
+                    ctx.fillRect(c * cellW + 1, r * cellH + 1, cellW - 2, cellH - 2);
+                    const crop = ALL_CROPS.find(x => x.id === cropId);
                     if (crop) {
                         ctx.fillStyle = TEXT_COLOR;
-                        ctx.font = `bold ${Math.max(7, Math.min(10, h / numRows / 2))}px sans-serif`;
+                        ctx.font = `${Math.max(6, Math.min(9, cellH / 2.5))}px sans-serif`;
                         ctx.textAlign = 'center';
                         ctx.textBaseline = 'middle';
-                        ctx.fillText(
-                            `${crop.emoji ?? '🌱'} ${crop.name}`,
-                            w / 2,
-                            ri * rowH + rowH / 2,
-                            w - 8
-                        );
+                        ctx.fillText(`${crop.emoji ?? '🌱'}`, c * cellW + cellW / 2, r * cellH + cellH / 2);
                     }
                 }
             } else {
-                // Empty bed label (no rows assigned yet)
+                // Fallback: show dimension label for empty beds
                 ctx.fillStyle = 'rgba(45,79,30,0.4)';
                 ctx.font = `${Math.max(9, Math.min(12, w / 5))}px sans-serif`;
                 ctx.textAlign = 'center';
@@ -740,7 +998,7 @@ export default function VisualBedLayoutScreen({ navigation, route }) {
     const [undoStack, setUndoStack] = useState([]);
     const [showCropPicker, setShowCropPicker] = useState(false);
     const [showAddBed, setShowAddBed] = useState(false);
-    const [showRowSheet, setShowRowSheet] = useState(false);
+    const [showCellGrid, setShowCellGrid] = useState(false);
     const [companionAlert, setCompanionAlert] = useState(null);
     const [spaceInfo, setSpaceInfo] = useState(null);  // canvas boundary + path strips
     const bedCounter = useRef(1);
@@ -997,11 +1255,37 @@ export default function VisualBedLayoutScreen({ navigation, route }) {
                 return { ...b, rows: newRows };
             });
         });
-        // companion check: new crop vs all crops in other beds
         if (cropId) {
             const otherCropIds = beds
                 .filter(b => b.id !== selectedId)
                 .flatMap(b => (b.rows ?? []).filter(Boolean));
+            const warnings = [...new Set(otherCropIds)]
+                .map(otherId => getBadCompanionWarning(cropId, otherId))
+                .filter(Boolean)
+                .filter((w, i, arr) => arr.indexOf(w) === i);
+            if (warnings.length > 0) setCompanionAlert({ warnings });
+        }
+    }
+
+    // Assign a crop to a specific 1ft cell in the selected bed.
+    // key = "col_row" string, or '__clear__' to wipe all cells.
+    function assignCell(key, cropId) {
+        if (!selectedId) return;
+        setBeds(prev => {
+            pushUndo(prev);
+            return prev.map(b => {
+                if (b.id !== selectedId) return b;
+                if (key === '__clear__') return { ...b, cells: {} };
+                const newCells = { ...(b.cells ?? {}) };
+                if (cropId) newCells[key] = cropId;
+                else delete newCells[key];
+                return { ...b, cells: newCells };
+            });
+        });
+        if (cropId && cropId !== '__clear__') {
+            const otherCropIds = beds
+                .filter(b => b.id !== selectedId)
+                .flatMap(b => Object.values(b.cells ?? {}).filter(Boolean));
             const warnings = [...new Set(otherCropIds)]
                 .map(otherId => getBadCompanionWarning(cropId, otherId))
                 .filter(Boolean)
@@ -1048,67 +1332,70 @@ export default function VisualBedLayoutScreen({ navigation, route }) {
                 <Text style={styles.bedCount}>{beds.length} bed{beds.length !== 1 ? 's' : ''}</Text>
             </View>
 
-            {/* Canvas */}
-            <View style={{ width, height: canvasH }}>
-                <BedLayoutCanvas
-                    beds={beds}
-                    selectedId={selectedId}
-                    onBedDrop={handleBedDrop}
-                    onBedClick={handleBedClick}
-                    width={width}
-                    height={canvasH}
-                    spaceInfo={spaceInfo}
-                />
+            {/* Canvas row: sidebar (web) + canvas */}
+            <View style={{ flex: 1, flexDirection: 'row' }}>
+                {/* Left sidebar — web/tablet only */}
+                {Platform.OS === 'web' && (
+                    <AddBedSidebar
+                        onAdd={addBed}
+                        selectedBed={selectedBed}
+                        onRotate={rotateBed}
+                        onDelete={deleteBed}
+                        onAssignCrops={() => setShowCellGrid(true)}
+                        undoStack={undoStack}
+                        onUndo={undo}
+                    />
+                )}
+                <View style={{ flex: 1, height: canvasH }}>
+                    <BedLayoutCanvas
+                        beds={beds}
+                        selectedId={selectedId}
+                        onBedDrop={handleBedDrop}
+                        onBedClick={handleBedClick}
+                        width={Platform.OS === 'web' ? width - 176 : width}
+                        height={canvasH}
+                        spaceInfo={spaceInfo}
+                    />
+                </View>
             </View>
 
-            {/* Toolbar */}
-            <View style={styles.toolbar}>
-                {/* Add bed */}
-                <TouchableOpacity style={styles.toolBtn} onPress={() => setShowAddBed(true)}>
-                    <Text style={styles.toolBtnIcon}>＋</Text>
-                    <Text style={styles.toolBtnLabel}>Add Bed</Text>
-                </TouchableOpacity>
-
-                {/* Assign rows (multi-crop) */}
-                <TouchableOpacity
-                    style={[styles.toolBtn, !selectedId && styles.toolBtnDisabled]}
-                    onPress={() => setShowRowSheet(true)}
-                    disabled={!selectedId}
-                >
-                    <Text style={styles.toolBtnIcon}>🌿</Text>
-                    <Text style={styles.toolBtnLabel}>Rows</Text>
-                </TouchableOpacity>
-
-                {/* Rotate (only when selected) */}
-                <TouchableOpacity
-                    style={[styles.toolBtn, !selectedId && styles.toolBtnDisabled]}
-                    onPress={rotateBed}
-                    disabled={!selectedId}
-                >
-                    <Text style={styles.toolBtnIcon}>↻</Text>
-                    <Text style={styles.toolBtnLabel}>Rotate</Text>
-                </TouchableOpacity>
-
-                {/* Delete */}
-                <TouchableOpacity
-                    style={[styles.toolBtn, !selectedId && styles.toolBtnDisabled]}
-                    onPress={deleteBed}
-                    disabled={!selectedId}
-                >
-                    <Text style={[styles.toolBtnIcon, { color: '#C62828' }]}>🗑</Text>
-                    <Text style={styles.toolBtnLabel}>Delete</Text>
-                </TouchableOpacity>
-
-                {/* Undo */}
-                <TouchableOpacity
-                    style={[styles.toolBtn, !undoStack.length && styles.toolBtnDisabled]}
-                    onPress={undo}
-                    disabled={!undoStack.length}
-                >
-                    <Text style={styles.toolBtnIcon}>↩</Text>
-                    <Text style={styles.toolBtnLabel}>Undo</Text>
-                </TouchableOpacity>
-            </View>
+            {/* Toolbar — mobile only (sidebar handles web) */}
+            {Platform.OS !== 'web' && (
+                <View style={styles.toolbar}>
+                    <TouchableOpacity style={styles.toolBtn} onPress={() => setShowAddBed(true)}>
+                        <Text style={styles.toolBtnIcon}>＋</Text>
+                        <Text style={styles.toolBtnLabel}>Add Bed</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                        style={[styles.toolBtn, !selectedId && styles.toolBtnDisabled]}
+                        onPress={() => setShowCellGrid(true)} disabled={!selectedId}
+                    >
+                        <Text style={styles.toolBtnIcon}>🌱</Text>
+                        <Text style={styles.toolBtnLabel}>Crops</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                        style={[styles.toolBtn, !selectedId && styles.toolBtnDisabled]}
+                        onPress={rotateBed} disabled={!selectedId}
+                    >
+                        <Text style={styles.toolBtnIcon}>↻</Text>
+                        <Text style={styles.toolBtnLabel}>Rotate</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                        style={[styles.toolBtn, !selectedId && styles.toolBtnDisabled]}
+                        onPress={deleteBed} disabled={!selectedId}
+                    >
+                        <Text style={[styles.toolBtnIcon, { color: '#C62828' }]}>🗑</Text>
+                        <Text style={styles.toolBtnLabel}>Delete</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                        style={[styles.toolBtn, !undoStack.length && styles.toolBtnDisabled]}
+                        onPress={undo} disabled={!undoStack.length}
+                    >
+                        <Text style={styles.toolBtnIcon}>↩</Text>
+                        <Text style={styles.toolBtnLabel}>Undo</Text>
+                    </TouchableOpacity>
+                </View>
+            )}
 
             {/* Tip when canvas is empty */}
             {beds.length === 0 && (
@@ -1116,25 +1403,19 @@ export default function VisualBedLayoutScreen({ navigation, route }) {
                     <Text style={styles.emptyIcon}>🗺️</Text>
                     <Text style={styles.emptyTitle}>Start Designing</Text>
                     <Text style={styles.emptyBody}>
-                        Tap "+ Add Bed" to place your first garden bed on the canvas.
-                        Drag beds to position them, rotate to orient, then assign crops.
+                        {Platform.OS === 'web'
+                            ? 'Use the sidebar to add your first bed, then drag it into position.'
+                            : 'Tap "+ Add Bed" to place your first garden bed.'}
                     </Text>
                 </View>
             )}
 
             {/* Modals */}
-            <CropPickerModal
-                visible={showCropPicker}
-                currentCropId={selectedBed?.rows?.[0]}
-                conflictCropIds={conflictCropIds}
-                onSelect={assignCrop}
-                onClose={() => setShowCropPicker(false)}
-            />
-            <BedRowSheet
-                visible={showRowSheet}
+            <CellGridOverlay
+                visible={showCellGrid}
                 bed={selectedBed}
-                onAssignRow={assignRowCrop}
-                onClose={() => setShowRowSheet(false)}
+                onAssignCell={assignCell}
+                onClose={() => setShowCellGrid(false)}
             />
             <AddBedSheet
                 visible={showAddBed}

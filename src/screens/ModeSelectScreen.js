@@ -37,6 +37,16 @@ const MODES = [
         enabled: true,
     },
     {
+        key: 'design',
+        icon: '🗺️',
+        title: 'Design My Garden',
+        subtitle: 'Drag-and-drop bed designer: set your space, drop beds, paint each cell with crops.',
+        badge: 'FREE',
+        badgeColor: '#4CAF50',
+        route: 'BedDesignerSetup',
+        enabled: true,
+    },
+    {
         key: 'farm',
         icon: '🚜',
         title: 'Market Farm',
