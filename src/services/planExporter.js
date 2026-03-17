@@ -106,10 +106,11 @@ const BASE_CSS = `
         color: #2D4F1E; margin: 18px 0 10px;
         border-bottom: 2px solid rgba(45,79,30,0.15); padding-bottom: 5px;
     }
-    .crop-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .crop-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
     .crop-row {
         background: #fff; border: 1px solid rgba(45,79,30,0.12);
         border-radius: 7px; overflow: hidden; display: flex; flex-direction: column;
+        break-inside: avoid; page-break-inside: avoid;
     }
     .crop-row-head {
         background: #2D4F1E; color: #F5F5DC;
