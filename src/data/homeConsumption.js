@@ -28,40 +28,32 @@ const HOME_CONSUMPTION = {
         notes: 'Pull-and-replant — the whole root is harvested at once (not cut-and-come-again). Ready in 30 days; plan 2–3 successive sowings 3 weeks apart. 3 lbs/person is 2–3 rounds for a family of 4.',
     },
     spinach_space: {
-        lbs_per_person_season: 5,
+        lbs_per_person_season: 2,
         unit_label: 'lbs',
-        notes: 'You are harvesting outer leaves weekly — the same plant keeps going. But spinach bolts (goes to seed) after ~20 warm days, so plan 2–3 succession sowings spaced 2–3 weeks apart. 5 lbs/person = ~10–12 ft of row per sowing for a family of 4.',
+        notes: 'You are harvesting outer leaves weekly — the same plant keeps going. But spinach bolts (goes to seed) after ~20 warm days, so plan 2–3 succession sowings spaced 2–3 weeks apart. 2 lbs/person = ~4–5 ft of row per sowing for a family of 4 — a realistic fresh-salad target for a short bolt-prone season.',
     },
     lettuce_mix: {
-        lbs_per_person_season: 8,
+        lbs_per_person_season: 5,
         unit_label: 'lbs',
-        notes: 'You are harvesting outer leaves weekly from the same plant (cut-and-come-again). Each planting lasts ~3 weeks before bolting in heat. Succession plant every 3 weeks for a continuous salad supply. 8 lbs/person ≈ 1–2 salads/week through the season for a family of 4.',
+        notes: 'You are harvesting outer leaves weekly from the same plant (cut-and-come-again). Each planting lasts ~3 weeks before bolting in heat. Succession plant every 3 weeks for a continuous salad supply. 5 lbs/person for a family of 4 — roughly 1 salad bowl per week per person across the season.',
     },
     arugula_standard: {
-        lbs_per_person_season: 4,
+        lbs_per_person_season: 2,
         unit_label: 'lbs',
         notes: 'Harvest outer leaves weekly (same plant, keeps growing). Bolt-prone in heat — succession plant every 2–3 weeks. Used as a peppery accent, not primary salad base, so quantities stay low.',
     },
     chard_rainbow: {
-        lbs_per_person_season: 8,
+        lbs_per_person_season: 3,
         unit_label: 'lbs',
-        notes: 'Harvest outer stalks weekly — the same plant keeps producing all season (does not bolt in heat like spinach). One planting lasts the whole season. 8 lbs/person covers regular side-dish use for a family of 4.',
+        notes: 'Harvest outer stalks weekly — the same plant keeps producing all season (does not bolt in heat like spinach). One planting lasts the whole season. 3 lbs/person ≈ side dish every 2 weeks for a family of 4.',
     },
     mizuna_standard: {
-        lbs_per_person_season: 4,
+        lbs_per_person_season: 2,
         unit_label: 'lbs',
         notes: 'Harvest outer leaves weekly (cut-and-come-again). Mild bolt resistance — one planting lasts longer than spinach. Used as a salad accent alongside primary greens.',
     },
-    tatsoi_standard: {
-        lbs_per_person_season: 4,
-        unit_label: 'lbs',
-        notes: 'Similar to mizuna; used in stir-fries and salads',
-    },
-    mustard_red_giant: {
-        lbs_per_person_season: 4,
-        unit_label: 'lbs',
-        notes: 'Usually grown as a flavour accent; strong taste limits volume',
-    },
+    tatsoi_standard:  { lbs_per_person_season: 2,   unit_label: 'lbs', notes: 'Similar to mizuna; used in stir-fries and salads' },
+    mustard_red_giant: { lbs_per_person_season: 1.5, unit_label: 'lbs', notes: 'Strong flavour limits volume — used as accent only' },
     mache_vit: {
         lbs_per_person_season: 3,
         unit_label: 'lbs',
@@ -100,19 +92,19 @@ const HOME_CONSUMPTION = {
 
     // ─── Brassica ────────────────────────────────────────────────────────────
     kale_red_russian: {
-        lbs_per_person_season: 10,
+        lbs_per_person_season: 4,
         unit_label: 'lbs',
-        notes: 'Harvest outer leaves weekly all season — kale is cold-hardy, does not bolt, and one planting lasts from spring through winter frost. 10 lbs/person covers regular fresh, frozen, and juiced use for a family of 4.',
+        notes: 'Harvest outer leaves weekly all season — kale is cold-hardy, does not bolt, and one planting lasts from spring through winter frost. 4 lbs/person = roughly 1 large bunch per month, which is realistic for most families without becoming a kale farm.',
     },
     broccoli_belstar: {
-        lbs_per_person_season: 12,
+        lbs_per_person_season: 5,
         unit_label: 'lbs',
-        notes: 'USDA avg: ~12 lbs/yr. Side shoots add to initial harvest',
+        notes: 'Each plant gives one main head (~1 lb) then side shoots for several weeks. 5 lbs/person = 4–6 plants per person — a realistic target for a dedicated bed.',
     },
     cabbage_storage: {
-        lbs_per_person_season: 10,
+        lbs_per_person_season: 4,
         unit_label: 'lbs',
-        notes: 'Includes sauerkraut/fermentation target for preservation-minded households',
+        notes: 'Each plant produces one head (2–3 lbs). 4 lbs/person = 1–2 heads per person for fresh use. Double if making sauerkraut.',
     },
     pac_choi_joi: {
         lbs_per_person_season: 6,
@@ -125,14 +117,14 @@ const HOME_CONSUMPTION = {
         notes: 'Specialty veg; novelty and snacking',
     },
     cauliflower_snowball: {
-        lbs_per_person_season: 8,
+        lbs_per_person_season: 4,
         unit_label: 'lbs',
-        notes: 'Popular as rice substitute; higher demand in low-carb households',
+        notes: 'One plant = one head (~1.5–2 lbs). 4 lbs/person = 2–3 heads per person — modest and realistic.',
     },
     brussels_sprouts: {
-        lbs_per_person_season: 5,
+        lbs_per_person_season: 3,
         unit_label: 'lbs',
-        notes: 'Seasonal fall crop; moderate household consumption',
+        notes: 'Long-season crop; each plant produces 1–2 lbs of sprouts over fall. 3 lbs/person is generous for most families.',
     },
     collards_champion: {
         lbs_per_person_season: 6,
@@ -152,14 +144,14 @@ const HOME_CONSUMPTION = {
 
     // ─── Root ─────────────────────────────────────────────────────────────────
     carrot_nantes: {
-        lbs_per_person_season: 15,
-        unit_label: 'lbs',
-        notes: 'USDA avg: ~15 lbs/yr fresh + cooked. High demand across all age groups',
-    },
-    beet_chioggia: {
         lbs_per_person_season: 8,
         unit_label: 'lbs',
-        notes: 'Fresh, roasted, and pickled use. Greens also edible',
+        notes: 'One of the most-eaten backyard vegetables. 8 lbs/person = ~2 lbs/month through the season, covering raw snacking, cooked dishes, and some storage.',
+    },
+    beet_chioggia: {
+        lbs_per_person_season: 4,
+        unit_label: 'lbs',
+        notes: 'Fresh, roasted, and pickled. 4 lbs/person covers regular use; greens are also edible and add to yield.',
     },
     turnip_hakurei: {
         lbs_per_person_season: 6,
@@ -187,14 +179,14 @@ const HOME_CONSUMPTION = {
         notes: 'Storage root; moderate consumption',
     },
     potato_red_norland: {
-        lbs_per_person_season: 50,
+        lbs_per_person_season: 15,
         unit_label: 'lbs',
-        notes: 'USDA avg: ~50 lbs/yr. One of the highest-volume crops to size correctly',
+        notes: 'USDA annual avg is 50 lbs but that includes all commercial sources. Backyard growers realistically harvest 10–20 lbs per person from a 4×8 bed. 15 lbs/person is a solid target without sizing a field.',
     },
     sweet_potato_beauregard: {
-        lbs_per_person_season: 8,
+        lbs_per_person_season: 5,
         unit_label: 'lbs',
-        notes: 'Growing in popularity; assumes some storage/baking use',
+        notes: '3–5 slips per person yields ~5 lbs; more if you have the space. Good for baking and storage.',
     },
     sunchoke_stampede: {
         lbs_per_person_season: 4,
@@ -214,9 +206,9 @@ const HOME_CONSUMPTION = {
 
     // ─── Allium ──────────────────────────────────────────────────────────────
     scallions_evergreen: {
-        lbs_per_person_season: 4,
+        lbs_per_person_season: 2,
         unit_label: 'lbs',
-        notes: 'Cut the tops weekly (leave ~1" above soil — they regrow). Succession sow every 3–4 weeks for a continuous garnish supply. 4 lbs/person covers constant cooking use for a family of 4.',
+        notes: 'Cut the tops weekly (leave ~1" above soil — they regrow). Succession sow every 3–4 weeks for a continuous garnish supply. 2 lbs/person covers constant cooking use for a family of 4.',
     },
     leek_giant_musselburgh: {
         lbs_per_person_season: 8,
@@ -224,9 +216,9 @@ const HOME_CONSUMPTION = {
         notes: 'Soups, quiches; moderate volume',
     },
     onion_candy: {
-        lbs_per_person_season: 20,
+        lbs_per_person_season: 8,
         unit_label: 'lbs',
-        notes: 'USDA avg: ~20 lbs/yr. Used in almost every savoury dish',
+        notes: 'USDA annual avg is ~20 lbs but most comes from grocery stores. 8 lbs/person from the garden = 1–2 onions per week through the harvest window — enough to cover fresh cooking without a full-scale operation.',
     },
     cipollini_onion: {
         lbs_per_person_season: 5,
@@ -256,14 +248,14 @@ const HOME_CONSUMPTION = {
 
     // ─── Legume ──────────────────────────────────────────────────────────────
     peas_sugar_snap: {
-        lbs_per_person_season: 8,
+        lbs_per_person_season: 4,
         unit_label: 'lbs',
-        notes: 'High fresh-eat volume; short season means targeted planting',
+        notes: 'Short spring season — peas are done in 6–8 weeks. 4 lbs/person is a generous fresh-eating target; mostly eaten straight off the vine.',
     },
     beans_green_bush: {
-        lbs_per_person_season: 15,
+        lbs_per_person_season: 8,
         unit_label: 'lbs',
-        notes: 'Core summer vegetable; 15 lbs/person covers fresh eating + a round or two of canning for most households. USDA avg is 20 lbs but backyard gardens skew toward fresh use.',
+        notes: 'Fresh eating through summer. 8 lbs/person for a family of 4 = 32 lbs total — enough for regular side dishes and a small batch of canning without needing a massive planting.',
     },
     edamame_besweet: {
         lbs_per_person_season: 6,
@@ -280,16 +272,8 @@ const HOME_CONSUMPTION = {
         unit_label: 'lbs',
         notes: 'Southern peas; can also be used as a cover crop',
     },
-    runner_beans: {
-        lbs_per_person_season: 10,
-        unit_label: 'lbs',
-        notes: 'Prolific producer; British gardening staple',
-    },
-    snap_peas_cascadia: {
-        lbs_per_person_season: 8,
-        unit_label: 'lbs',
-        notes: 'Similar to sugar snap; fresh eating',
-    },
+    runner_beans: { lbs_per_person_season: 6,  unit_label: 'lbs', notes: 'Prolific climbing producer. 6 lbs/person is realistic for regular fresh eating.' },
+    snap_peas_cascadia: { lbs_per_person_season: 4,  unit_label: 'lbs', notes: 'Similar to sugar snap; short spring season, fresh eating.' },
     soybeans_midori: {
         lbs_per_person_season: 5,
         unit_label: 'lbs',
@@ -377,19 +361,19 @@ const HOME_CONSUMPTION = {
 
     // ─── Nightshade ──────────────────────────────────────────────────────────
     tomato_heirloom_beefsteak: {
-        lbs_per_person_season: 30,
-        unit_label: 'lbs',
-        notes: 'USDA avg ~25–30 lbs fresh/yr. Significant if canning sauce (double for canners)',
-    },
-    cherry_tomato_sungold: {
         lbs_per_person_season: 15,
         unit_label: 'lbs',
-        notes: 'Snacking tomato; kids eat a lot. Lower than slicers because used as accent',
+        notes: 'Fresh slicing all summer. 15 lbs/person = 2–3 plants per person — enough for daily fresh eating without becoming a sauce factory. Double if you plan to can.',
+    },
+    cherry_tomato_sungold: {
+        lbs_per_person_season: 6,
+        unit_label: 'lbs',
+        notes: 'Snacking tomato — 1 plant per person is usually plenty. 6 lbs/person accounts for the kid factor and grazing straight off the vine.',
     },
     pepper_sweet: {
-        lbs_per_person_season: 10,
+        lbs_per_person_season: 6,
         unit_label: 'lbs',
-        notes: 'Fresh eating, stuffed peppers, roasting',
+        notes: 'Fresh eating, stuffed peppers, roasting. 6 lbs/person = 2–3 plants per person.',
     },
     pepper_jalapeño: {
         lbs_per_person_season: 3,
@@ -419,49 +403,49 @@ const HOME_CONSUMPTION = {
 
     // ─── Cucurbit ────────────────────────────────────────────────────────────
     cucumber_marketmore: {
-        lbs_per_person_season: 12,
+        lbs_per_person_season: 6,
         unit_label: 'lbs',
-        notes: 'Fresh slicing + pickling; core summer vegetable',
+        notes: 'Fresh slicing + pickling. 6 lbs/person = 1–2 plants per person; cucumbers are prolific so resist over-planting.',
     },
     zucchini_black_beauty: {
-        lbs_per_person_season: 20,
+        lbs_per_person_season: 6,
         unit_label: 'lbs',
-        notes: 'Prolific producer — WARNING: one plant is often enough for 2 people',
+        notes: 'The most prolific plant in the garden — 1 plant easily feeds 2 people all season. 6 lbs/person is the realistic consumption target before zucchini fatigue sets in.',
     },
     summer_squash_pattypan: {
-        lbs_per_person_season: 12,
+        lbs_per_person_season: 4,
         unit_label: 'lbs',
-        notes: 'Similar to zucchini; variety eating',
+        notes: 'Similar in output to zucchini. If growing both, halve quantities of each.',
     },
     butternut_squash: {
-        lbs_per_person_season: 15,
-        unit_label: 'lbs',
-        notes: 'Storage crop; canned soup and roasting through winter',
-    },
-    kabocha_squash: {
-        lbs_per_person_season: 10,
-        unit_label: 'lbs',
-        notes: 'Asian cuisine staple; sweet and dense',
-    },
-    delicata_squash: {
         lbs_per_person_season: 8,
         unit_label: 'lbs',
-        notes: 'No-peel thin skin; popular roasting variety',
+        notes: 'Storage crop; roasting and soup through winter. 8 lbs/person = 2–3 large squash per person.',
+    },
+    kabocha_squash: {
+        lbs_per_person_season: 5,
+        unit_label: 'lbs',
+        notes: 'Dense sweet flesh. 5 lbs/person = 1–2 fruits per person for seasonal use.',
+    },
+    delicata_squash: {
+        lbs_per_person_season: 4,
+        unit_label: 'lbs',
+        notes: 'No-peel thin skin; popular quick-roasting variety. 4 lbs/person = 2–3 fruit per person.',
     },
     pumpkin_jack: {
-        lbs_per_person_season: 10,
+        lbs_per_person_season: 5,
         unit_label: 'lbs',
-        notes: 'Cooking pumpkin + decorative; autumn family tradition',
+        notes: 'Cooking pumpkin + decorative. 5 lbs/person = 1–2 fruits per person for autumn use.',
     },
     cantaloupe_ambrosia: {
-        lbs_per_person_season: 15,
+        lbs_per_person_season: 8,
         unit_label: 'lbs',
-        notes: 'USDA avg: ~15 lbs/yr; summer fruit staple',
+        notes: 'Summer fruit. 8 lbs/person = 2–4 melons per person across the season.',
     },
     watermelon_sugar_baby: {
-        lbs_per_person_season: 20,
+        lbs_per_person_season: 5,
         unit_label: 'lbs',
-        notes: 'USDA avg: ~20 lbs/yr; space-heavy but high-reward',
+        notes: 'Space-hungry vine. Each fruit is 6–10 lbs — 1–2 per person for the season is realistic. 5 lbs/person keeps the planting to a manageable 1–2 plants per family of 4.',
     },
     bitter_melon: {
         lbs_per_person_season: 4,
@@ -548,9 +532,9 @@ const HOME_CONSUMPTION = {
         notes: 'Grain substitute; 5 lbs ≈ 3–4 months of weekly use',
     },
     corn_sweet_peaches: {
-        lbs_per_person_season: 15,
+        lbs_per_person_season: 8,
         unit_label: 'lbs',
-        notes: '≈ 25–30 ears per person per season; space-hungry but loved',
+        notes: '~12–16 ears per person per season (each ear ~0.5 lb of kernels). Space-hungry but worth it for the fresh-off-the-stalk experience.',
     },
     asparagus_millennium: {
         lbs_per_person_season: 5,
@@ -563,14 +547,14 @@ const HOME_CONSUMPTION = {
         notes: '≈ 10–12 heads per person; perennial in mild climates',
     },
     celery_utah: {
-        lbs_per_person_season: 8,
+        lbs_per_person_season: 4,
         unit_label: 'lbs',
-        notes: 'Diced for cooking, raw snacking; high water content means moderate weight',
+        notes: 'Mostly used diced in cooking rather than as a snack vegetable. 4 lbs/person covers regular use without a celery-intensive household.',
     },
     okra_clemson: {
-        lbs_per_person_season: 8,
+        lbs_per_person_season: 4,
         unit_label: 'lbs',
-        notes: 'Southern dishes, pickling, freezing; prolific in heat',
+        notes: 'Prolific in heat; 1–2 plants per person can easily yield 4 lbs. Freezes well for Southern dishes.',
     },
     rhubarb_victoria: {
         lbs_per_person_season: 4,
