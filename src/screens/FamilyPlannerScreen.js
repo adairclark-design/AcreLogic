@@ -689,51 +689,50 @@ export default function FamilyPlannerScreen({ navigation }) {
                             </View>
                         )}
 
-                        {/* Report cards — responsive multi-column grid */}
-                        {Platform.OS === 'web' ? (
-                            // Web: CSS Grid bypasses RN Web flex — cards fill grid cells automatically
-                            <ScrollView
-                                style={{ flex: 1, overflowY: 'scroll' }}
-                                showsVerticalScrollIndicator={false}
-                                contentContainerStyle={{ padding: Spacing.lg, paddingBottom: 180 }}
-                            >
-                                <View
-                                    ref={gridRef}
-                                    className="acrelogic-crop-grid"
-                                    style={{ width: '100%' }}
+                        {/* Report cards — responsive multi-column grid
+                            Strategy: manual row chunking (pure RN flex).
+                            Chunk cards into rows of numColumns, render each
+                            row as flexDirection:'row'. Each cell is flex:1
+                            so columns split width evenly — works everywhere. */}
+                        {(() => {
+                            const cards = planResult.supported;
+                            const rows = [];
+                            for (let i = 0; i < cards.length; i += numColumns) {
+                                rows.push(cards.slice(i, i + numColumns));
+                            }
+                            return (
+                                <ScrollView
+                                    showsVerticalScrollIndicator={false}
+                                    contentContainerStyle={{ padding: Spacing.lg, paddingBottom: 180 }}
+                                    style={{ flex: 1 }}
                                 >
-                                    {planResult.supported.map(item => (
-                                        <ReportCard key={item.cropId} item={item} />
+                                    {rows.map((rowItems, rowIdx) => (
+                                        <View
+                                            key={rowIdx}
+                                            style={{ flexDirection: 'row', marginBottom: 8 }}
+                                        >
+                                            {rowItems.map((item, colIdx) => (
+                                                <View
+                                                    key={item.cropId}
+                                                    style={{
+                                                        flex: 1,
+                                                        marginRight: colIdx < rowItems.length - 1 ? 8 : 0,
+                                                    }}
+                                                >
+                                                    <ReportCard item={item} />
+                                                </View>
+                                            ))}
+                                        </View>
                                     ))}
-                                </View>
-
-                                <View style={styles.goodLuck}>
-                                    <Text style={styles.goodLuckEmoji}>🥬</Text>
-                                    <Text style={styles.goodLuckTitle}>Good Luck Gardening!</Text>
-                                    <Text style={styles.goodLuckSub}>Happy planting this season.</Text>
-                                </View>
-                            </ScrollView>
-                        ) : (
-                            // Native: FlatList with numColumns
-                            <FlatList
-                                data={planResult.supported}
-                                keyExtractor={item => item.cropId}
-                                numColumns={numColumns}
-                                key={numColumns}
-                                contentContainerStyle={{ padding: Spacing.lg, paddingBottom: 180 }}
-                                columnWrapperStyle={numColumns > 1 ? { gap: 8, marginBottom: 8 } : null}
-                                showsVerticalScrollIndicator={false}
-                                style={{ flex: 1 }}
-                                ListFooterComponent={() => (
                                     <View style={styles.goodLuck}>
                                         <Text style={styles.goodLuckEmoji}>🥬</Text>
                                         <Text style={styles.goodLuckTitle}>Good Luck Gardening!</Text>
                                         <Text style={styles.goodLuckSub}>Happy planting this season.</Text>
                                     </View>
-                                )}
-                                renderItem={({ item }) => <ReportCard item={item} cardWidth={cardWidth} />}
-                            />
-                        )}
+                                </ScrollView>
+                            );
+                        })()}
+
 
                         {/* Report footer — edit + dual export */}
                         <View style={styles.footer}>
