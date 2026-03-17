@@ -168,9 +168,13 @@ function BedLayoutVisual({ spaceResult, containerWidth }) {
     const { bedsAcrossWidth, bedsAlongLength, bedWidthFt, bedLengthFt,
             pathwayWidthFt, spaceLengthFt, spaceWidthFt } = spaceResult;
 
-    // Scale the drawing to containerWidth, maintaining aspect ratio
+    // Scale width to container, maintain aspect ratio for height.
+    // Compute height from actual row content so no beds are ever clipped.
     const ratio = containerWidth / (spaceWidthFt || 1);
-    const drawHeight = Math.min(300, (spaceLengthFt * ratio));
+    const scaledBedH   = bedLengthFt    * ratio;     // height of one bed cell
+    const scaledPathH  = pathwayWidthFt * ratio;     // gap between rows
+    const padding      = scaledPathH / 2;            // top + bottom margin
+    const drawHeight   = padding * 2 + bedsAlongLength * scaledBedH + (bedsAlongLength - 1) * scaledPathH;
 
     const scaledBedW  = bedWidthFt   * ratio;
     const scaledBedL  = bedLengthFt  * ratio;
@@ -183,18 +187,18 @@ function BedLayoutVisual({ spaceResult, containerWidth }) {
 
             {/* Bed grid */}
             {Array.from({ length: bedsAlongLength }).map((_, row) => (
-                <View key={row} style={[styles.visualRow, { top: row * (scaledBedL + scaledPath) }]}>
+                <View key={row} style={[styles.visualRow, { top: padding + row * (scaledBedH + scaledPathH) }]}>
                     {Array.from({ length: bedsAcrossWidth }).map((_, col) => (
                         <View
                             key={col}
                             style={[styles.visualBed, {
                                 width: scaledBedW,
-                                height: scaledBedL,
-                                marginLeft: col === 0 ? scaledPath / 2 : scaledPath,
+                                height: scaledBedH,
+                                marginLeft: col === 0 ? scaledPathH / 2 : scaledPathH,
                             }]}
                         >
                             {/* Planting row lines */}
-                            {scaledBedL > 20 && [0.25, 0.5, 0.75].map((frac, li) => (
+                            {scaledBedH > 20 && [0.25, 0.5, 0.75].map((frac, li) => (
                                 <View key={li} style={[styles.visualBedRow, { top: `${frac * 100}%` }]} />
                             ))}
                         </View>
