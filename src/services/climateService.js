@@ -5,6 +5,52 @@
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+// ─── USDA Zone → Average Frost Dates ──────────────────────────────────────────
+// Average last/first frost dates for each USDA hardiness zone (continental US).
+// Dates use the current calendar year so math stays consistent.
+const Y = new Date().getFullYear();
+
+const USDA_ZONE_FROST_MAP = {
+    '3a': { last_frost: `${Y}-05-28`, first_frost: `${Y}-09-15`, frost_free: 109 },
+    '3b': { last_frost: `${Y}-05-15`, first_frost: `${Y}-09-25`, frost_free: 132 },
+    '4a': { last_frost: `${Y}-05-05`, first_frost: `${Y}-10-05`, frost_free: 152 },
+    '4b': { last_frost: `${Y}-04-25`, first_frost: `${Y}-10-12`, frost_free: 169 },
+    '5a': { last_frost: `${Y}-04-15`, first_frost: `${Y}-10-15`, frost_free: 182 },
+    '5b': { last_frost: `${Y}-04-05`, first_frost: `${Y}-10-25`, frost_free: 202 },
+    '6a': { last_frost: `${Y}-03-25`, first_frost: `${Y}-11-01`, frost_free: 220 },
+    '6b': { last_frost: `${Y}-03-15`, first_frost: `${Y}-11-10`, frost_free: 239 },
+    '7a': { last_frost: `${Y}-03-05`, first_frost: `${Y}-11-20`, frost_free: 259 },
+    '7b': { last_frost: `${Y}-02-22`, first_frost: `${Y}-11-30`, frost_free: 280 },
+    '8a': { last_frost: `${Y}-02-10`, first_frost: `${Y}-12-05`, frost_free: 297 },
+    '8b': { last_frost: `${Y}-02-01`, first_frost: `${Y}-12-15`, frost_free: 317 },
+    '9a': { last_frost: `${Y}-01-20`, first_frost: `${Y}-12-20`, frost_free: 333 },
+    '9b': { last_frost: `${Y}-01-10`, first_frost: `${Y}-12-28`, frost_free: 351 },
+    '10a': { last_frost: null,        first_frost: null,          frost_free: 365 },
+    '10b': { last_frost: null,        first_frost: null,          frost_free: 365 },
+    '11a': { last_frost: null,        first_frost: null,          frost_free: 365 },
+    '11b': { last_frost: null,        first_frost: null,          frost_free: 365 },
+};
+
+/** Ordered list of all USDA zones for the picker UI. */
+export const USDA_ZONES = Object.keys(USDA_ZONE_FROST_MAP);
+
+/**
+ * Build a minimal farmProfile object from a USDA zone string.
+ * Returns null if zone is unknown.
+ */
+export function getProfileFromZone(zone) {
+    const entry = USDA_ZONE_FROST_MAP[zone?.toLowerCase()];
+    if (!entry) return null;
+    return {
+        usda_zone: zone,
+        last_frost_date:  entry.last_frost,
+        first_frost_date: entry.first_frost,
+        frost_free_days:  entry.frost_free,
+        // No lat/lon/soil — zone-only profile
+        _source: 'zone_picker',
+    };
+}
+
 // ── Replace with your deployed Worker URL after `wrangler deploy` ────────────
 const WORKER_BASE_URL = 'https://acrelogic-climate-worker.adair-clark.workers.dev';
 

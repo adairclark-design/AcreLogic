@@ -25,7 +25,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import {
     View, Text, StyleSheet, TouchableOpacity, ScrollView,
     FlatList, TextInput, Image, Switch, Animated,
-    Platform, useWindowDimensions, Alert,
+    Platform, useWindowDimensions, Alert, ActivityIndicator,
 } from 'react-native';
 import { Colors, Typography, Spacing, Radius, Shadows } from '../theme';
 import {
@@ -41,6 +41,12 @@ import CROP_IMAGES from '../data/cropImages';
 import CROPS_DATA from '../data/crops.json';
 import { exportGardenPlan } from '../services/planExporter';
 import { loadSavedPlan } from '../services/persistence';
+import {
+    fetchFarmProfile,
+    USDA_ZONES,
+    getProfileFromZone,
+    formatDateDisplay,
+} from '../services/climateService';
 
 const ALL_CROPS = CROPS_DATA.crops ?? [];
 const PLANTABLE_CROPS = ALL_CROPS.filter(c => c.category !== 'Cover Crop');
@@ -58,18 +64,41 @@ function getColumns(width) {
     return 2;
 }
 
-const CROP_CATEGORIES = ['All', 'Vegetables', 'Herbs', 'Flowers', 'Specialty'];
-const VEG_CATS = new Set(['Greens', 'Brassica', 'Root', 'Allium', 'Legume', 'Nightshade', 'Cucurbit']);
+const CROP_CATEGORIES = [
+    'All', 'Vegetables', 'Tomatoes', 'Peppers', 'Greens',
+    'Brassica', 'Root & Tuber', 'Beans & Peas', 'Herbs',
+    'Squash', 'Cucumbers', 'Melons', 'Flowers', 'Grains',
+    'Fruits & Berries', 'Cover Crops', 'Specialty',
+];
+const VEG_CATS = new Set(['Greens', 'Brassica', 'Root', 'Tuber', 'Allium', 'Legume', 'Nightshade', 'Cucurbit']);
 
 function filterCrops(cat, query) {
     let list = PLANTABLE_CROPS;
-    if (cat === 'Vegetables') list = list.filter(c => VEG_CATS.has(c.category));
-    else if (cat === 'Herbs')     list = list.filter(c => c.category === 'Herb');
-    else if (cat === 'Flowers')   list = list.filter(c => c.category === 'Flower');
-    else if (cat === 'Specialty') list = list.filter(c => c.category === 'Specialty');
-    if (query.trim()) list = list.filter(c => c.name.toLowerCase().includes(query.toLowerCase()));
+    const idHas = (patterns) => list.filter(c => patterns.some(p => c.id.includes(p)));
+    switch (cat) {
+        case 'Vegetables':      list = list.filter(c => VEG_CATS.has(c.category)); break;
+        case 'Tomatoes':        list = idHas(['tomato', 'tomatillo', 'ground_cherry']); break;
+        case 'Peppers':         list = idHas(['pepper']); break;
+        case 'Greens':          list = list.filter(c => c.category === 'Greens'); break;
+        case 'Brassica':        list = list.filter(c => c.category === 'Brassica'); break;
+        case 'Root & Tuber':    list = list.filter(c => c.category === 'Root' || c.category === 'Tuber'); break;
+        case 'Beans & Peas':    list = list.filter(c => c.category === 'Legume'); break;
+        case 'Herbs':           list = list.filter(c => c.category === 'Herb'); break;
+        case 'Squash':          list = idHas(['squash', 'pumpkin', 'zucchini']); break;
+        case 'Cucumbers':       list = idHas(['cucumber']); break;
+        case 'Melons':          list = idHas(['melon', 'watermelon', 'cantaloupe']); break;
+        case 'Flowers':         list = list.filter(c => c.category === 'Flower'); break;
+        case 'Grains':          list = list.filter(c => c.category === 'Grain'); break;
+        case 'Fruits & Berries':list = list.filter(c => c.category === 'Fruit'); break;
+        case 'Cover Crops':     list = list.filter(c => c.category === 'Cover Crop'); break;
+        case 'Specialty':       list = list.filter(c => c.category === 'Specialty'); break;
+        default: break;
+    }
+    const q = query.trim().toLowerCase();
+    if (q) list = list.filter(c => c.name.toLowerCase().includes(q) || (c.variety ?? '').toLowerCase().includes(q));
     return list;
 }
+
 
 // ─── Compact CropCard (duplicated from FamilyPlannerScreen pattern) ────────
 function CropCard({ crop, selected, onPress }) {
@@ -382,12 +411,69 @@ export default function GardenSpacePlannerScreen({ navigation }) {
     const [upgradeVisible, setUpgradeVisible]   = useState(false);
     const [upgradeBlockedBy, setUpgradeBlockedBy] = useState(null);
 
-    // ── Farm profile (for calendar dates in crop plan) ────────────────────────
+    // ── Growing zone / location ────────────────────────────────────────────────
+    const [locationQuery, setLocationQuery]     = useState('');
+    const [locationLoading, setLocationLoading] = useState(false);
+    const [locationError, setLocationError]     = useState(null);
+    const [selectedZone, setSelectedZone]       = useState(null);   // manual picker
+    const [resolvedProfile, setResolvedProfile] = useState(null);   // from address lookup
+
+    // Farm profile (for calendar dates in crop plan) ──────────────────────────
+    // Priority: address lookup > manual zone > saved main-flow plan
     const [gardenFarmProfile, setGardenFarmProfile] = useState(null);
+
     useEffect(() => {
+        // Seed from main farm plan if user has already set up a location there
         const saved = loadSavedPlan();
         if (saved?.farmProfile) setGardenFarmProfile(saved.farmProfile);
     }, []);
+
+    // Whenever the user resolves a zone/location, update the active profile
+    useEffect(() => {
+        if (resolvedProfile) {
+            setGardenFarmProfile(resolvedProfile);
+        } else if (selectedZone) {
+            setGardenFarmProfile(getProfileFromZone(selectedZone));
+        }
+        // If neither is set, keep whatever was loaded from the saved plan
+    }, [resolvedProfile, selectedZone]);
+
+    // ── Location lookup handler ───────────────────────────────────────────────
+    const handleLocationLookup = async () => {
+        const q = locationQuery.trim();
+        if (!q) return;
+        setLocationLoading(true);
+        setLocationError(null);
+        setResolvedProfile(null);
+        try {
+            const raw = await fetchFarmProfile(q);
+            setResolvedProfile(raw);
+            if (raw.usda_zone) setSelectedZone(raw.usda_zone.toLowerCase());
+        } catch (err) {
+            setLocationError('Could not fetch climate data. Try a zip code.');
+        } finally {
+            setLocationLoading(false);
+        }
+    };
+
+    const handleZonePick = (zone) => {
+        setSelectedZone(zone);
+        setResolvedProfile(null);   // clear address result; manual pick takes over
+        setLocationQuery('');
+        setLocationError(null);
+    };
+
+    // Derive a friendly "Zone X · last frost Date" label for badges
+    const activeZoneLabel = (() => {
+        const profile = gardenFarmProfile;
+        if (!profile) return null;
+        const zone = profile.usda_zone ?? selectedZone;
+        if (!zone) return null;
+        if (!profile.last_frost_date) return `Zone ${zone.toUpperCase()} · Frost-free`;
+        return `Zone ${zone.toUpperCase()} · Last frost ${formatDateDisplay(profile.last_frost_date)}`;
+    })();
+
+
 
     const slideAnim = useRef(new Animated.Value(0)).current;
     const limits = LIMITS[getActiveTier()] ?? LIMITS[TIER.FREE];
@@ -739,12 +825,77 @@ export default function GardenSpacePlannerScreen({ navigation }) {
                             </View>
                         )}
 
+                        {/* ── Growing Zone section ─────────────────────────────── */}
+                        <View style={styles.divider} />
+                        <Text style={styles.sectionTitle}>🌡 Growing Zone <Text style={styles.optionalTag}>(optional)</Text></Text>
+                        <Text style={styles.sectionHint}>
+                            Add your location so planting dates (transplant &amp; seed-start) appear on your crop plan.
+                        </Text>
+
+                        {/* Address / zip lookup row */}
+                        <View style={styles.locationRow}>
+                            <View style={[styles.locationInput, locationError && { borderColor: Colors.burntOrange }]}>
+                                <Text style={{ fontSize: 15 }}>📍</Text>
+                                <TextInput
+                                    style={styles.locationTextInput}
+                                    value={locationQuery}
+                                    onChangeText={setLocationQuery}
+                                    placeholder="Zip code or city, state"
+                                    placeholderTextColor={Colors.mutedText}
+                                    onSubmitEditing={handleLocationLookup}
+                                    returnKeyType="search"
+                                    autoCapitalize="words"
+                                    selectTextOnFocus
+                                />
+                                {locationLoading
+                                    ? <ActivityIndicator size="small" color={Colors.primaryGreen} />
+                                    : (
+                                        <TouchableOpacity onPress={handleLocationLookup} style={styles.locationGoBtn}>
+                                            <Text style={styles.locationGoBtnText}>→</Text>
+                                        </TouchableOpacity>
+                                    )
+                                }
+                            </View>
+                        </View>
+
+                        {locationError && (
+                            <Text style={styles.locationError}>{locationError}</Text>
+                        )}
+
+                        {/* Resolved zone badge */}
+                        {activeZoneLabel && (
+                            <View style={styles.zoneBadge}>
+                                <Text style={styles.zoneBadgeText}>✅ {activeZoneLabel}</Text>
+                            </View>
+                        )}
+
+                        {/* Manual zone chip picker */}
+                        <Text style={styles.zonePickerLabel}>— or pick your USDA zone —</Text>
+                        <ScrollView
+                            horizontal
+                            showsHorizontalScrollIndicator={false}
+                            contentContainerStyle={styles.zoneChipsContent}
+                        >
+                            {USDA_ZONES.map(zone => (
+                                <TouchableOpacity
+                                    key={zone}
+                                    style={[styles.zoneChip, selectedZone === zone && styles.zoneChipActive]}
+                                    onPress={() => handleZonePick(zone)}
+                                >
+                                    <Text style={[styles.zoneChipText, selectedZone === zone && styles.zoneChipTextActive]}>
+                                        {zone.toUpperCase()}
+                                    </Text>
+                                </TouchableOpacity>
+                            ))}
+                        </ScrollView>
+
                         <TouchableOpacity
                             style={[styles.primaryBtn, Shadows.button, { marginTop: Spacing.lg }]}
                             onPress={handleCalculate}
                         >
                             <Text style={styles.primaryBtnText}>Calculate My Space →</Text>
                         </TouchableOpacity>
+
 
                         <View style={{ height: Spacing.xl }} />
                     </ScrollView>
@@ -931,6 +1082,19 @@ export default function GardenSpacePlannerScreen({ navigation }) {
                                 you'll decide what fits where
                             </Text>
                         </View>
+
+                        {/* Zone badge — visible when zone was set in Step 1 */}
+                        {activeZoneLabel ? (
+                            <View style={styles.zoneBadgeStep3}>
+                                <Text style={styles.zoneBadgeStep3Text}>📍 {activeZoneLabel} · planting dates included</Text>
+                            </View>
+                        ) : (
+                            <View style={styles.zoneBadgeStep3Absent}>
+                                <Text style={styles.zoneBadgeStep3AbsentText}>
+                                    💡 No growing zone set — go back to Step 1 to add planting dates
+                                </Text>
+                            </View>
+                        )}
 
                         {/* Free-tier bar */}
                         {getActiveTier() === TIER.FREE && (
@@ -1434,4 +1598,135 @@ const styles = StyleSheet.create({
         paddingHorizontal: Spacing.md,
     },
     secondaryBtnText: { color: Colors.primaryGreen, fontSize: Typography.base, fontWeight: Typography.semiBold },
+
+    // ── Growing Zone styles ───────────────────────────────────────────────────
+    optionalTag: {
+        fontSize: Typography.sm,
+        fontWeight: Typography.regular ?? '400',
+        color: Colors.mutedText,
+    },
+    sectionHint: {
+        fontSize: Typography.sm,
+        color: Colors.mutedText,
+        marginTop: -Spacing.sm,
+        marginBottom: Spacing.sm,
+        lineHeight: 18,
+    },
+    locationRow: {
+        marginBottom: Spacing.sm,
+    },
+    locationInput: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: Colors.white ?? '#fff',
+        borderRadius: Radius.md,
+        borderWidth: 1.5,
+        borderColor: 'rgba(45,79,30,0.2)',
+        paddingHorizontal: Spacing.sm,
+        paddingVertical: 6,
+        gap: 6,
+    },
+    locationTextInput: {
+        flex: 1,
+        fontSize: Typography.base,
+        color: Colors.darkText,
+        paddingVertical: 8,
+    },
+    locationGoBtn: {
+        backgroundColor: Colors.primaryGreen,
+        borderRadius: Radius.sm,
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+    },
+    locationGoBtnText: {
+        color: Colors.cream,
+        fontWeight: Typography.bold,
+        fontSize: Typography.md,
+    },
+    locationError: {
+        fontSize: Typography.xs,
+        color: Colors.burntOrange,
+        marginBottom: Spacing.sm,
+    },
+    zoneBadge: {
+        backgroundColor: 'rgba(45,79,30,0.1)',
+        borderRadius: Radius.sm,
+        paddingHorizontal: Spacing.sm,
+        paddingVertical: 8,
+        marginBottom: Spacing.sm,
+        borderWidth: 1,
+        borderColor: 'rgba(45,79,30,0.2)',
+    },
+    zoneBadgeText: {
+        fontSize: Typography.sm,
+        color: Colors.primaryGreen,
+        fontWeight: Typography.semiBold,
+    },
+    zonePickerLabel: {
+        fontSize: Typography.xs,
+        color: Colors.mutedText,
+        textAlign: 'center',
+        marginBottom: Spacing.sm,
+        letterSpacing: 0.5,
+    },
+    zoneChipsContent: {
+        paddingHorizontal: Spacing.lg,
+        gap: 6,
+        paddingBottom: 4,
+    },
+    zoneChip: {
+        paddingHorizontal: 10,
+        paddingVertical: 6,
+        borderRadius: Radius.sm,
+        borderWidth: 1.5,
+        borderColor: 'rgba(45,79,30,0.25)',
+        backgroundColor: Colors.white ?? '#fff',
+    },
+    zoneChipActive: {
+        backgroundColor: Colors.primaryGreen,
+        borderColor: Colors.primaryGreen,
+    },
+    zoneChipText: {
+        fontSize: Typography.xs,
+        fontWeight: Typography.semiBold,
+        color: Colors.primaryGreen,
+        letterSpacing: 0.5,
+    },
+    zoneChipTextActive: {
+        color: Colors.cream,
+    },
+
+    // Step 3 zone badges
+    zoneBadgeStep3: {
+        marginHorizontal: Spacing.md,
+        marginBottom: 4,
+        backgroundColor: 'rgba(45,79,30,0.09)',
+        borderRadius: Radius.sm,
+        paddingHorizontal: Spacing.sm,
+        paddingVertical: 7,
+        borderWidth: 1,
+        borderColor: 'rgba(45,79,30,0.18)',
+    },
+    zoneBadgeStep3Text: {
+        fontSize: Typography.xs,
+        color: Colors.primaryGreen,
+        fontWeight: Typography.semiBold,
+        letterSpacing: 0.2,
+    },
+    zoneBadgeStep3Absent: {
+        marginHorizontal: Spacing.md,
+        marginBottom: 4,
+        backgroundColor: 'rgba(204,85,0,0.06)',
+        borderRadius: Radius.sm,
+        paddingHorizontal: Spacing.sm,
+        paddingVertical: 7,
+        borderWidth: 1,
+        borderColor: 'rgba(204,85,0,0.18)',
+    },
+    zoneBadgeStep3AbsentText: {
+        fontSize: Typography.xs,
+        color: Colors.burntOrange,
+        letterSpacing: 0.2,
+    },
 });
+

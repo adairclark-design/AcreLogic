@@ -52,11 +52,40 @@ const CROPS = cropDbRaw.crops
     }))
     .sort((a, b) => a.name.localeCompare(b.name));
 
-const CATEGORIES = ['All', 'Vegetables', 'Fruits', 'Greens', 'Brassica', 'Root', 'Allium', 'Legume', 'Herb', 'Nightshade', 'Cucurbit', 'Flower', 'Specialty'];
+const CATEGORIES = [
+    'All',
+    'Vegetables',
+    'Fruits & Melons',
+    'Tomatoes',
+    'Peppers',
+    'Greens',
+    'Brassica',
+    'Root & Tuber',
+    'Allium',
+    'Beans & Peas',
+    'Herbs',
+    'Squash',
+    'Cucumbers',
+    'Melons',
+    'Flowers',
+    'Grains',
+    'Cover Crops',
+    'Specialty',
+    'Nightshade',
+    'Fruits & Berries',
+];
 
-// Super-category mappings — culinary groupings for quick filtering
-const VEGETABLE_CATEGORIES = new Set(['Greens', 'Brassica', 'Root', 'Allium', 'Legume']);
-const FRUIT_CATEGORIES = new Set(['Cucurbit', 'Nightshade']);
+// Super-category mappings
+const VEGETABLE_CATEGORIES   = new Set(['Greens', 'Brassica', 'Root', 'Tuber', 'Allium', 'Legume']);
+const FRUIT_MELON_CATEGORIES = new Set(['Cucurbit', 'Nightshade', 'Fruit']);
+const GRAIN_CATEGORIES       = new Set(['Grain']);
+const COVER_CROP_CATEGORIES  = new Set(['Cover Crop']);
+const SQUASH_IDS_PATTERN     = ['squash', 'pumpkin', 'zucchini'];
+const CUCUMBER_IDS_PATTERN   = ['cucumber'];
+const MELON_IDS_PATTERN      = ['melon', 'watermelon', 'cantaloupe'];
+const TOMATO_IDS_PATTERN     = ['tomato', 'tomatillo', 'ground_cherry'];
+const PEPPER_IDS_PATTERN     = ['pepper'];
+
 
 // ─── Frequency tracking (localStorage) ───────────────────────────────────────
 const FREQ_KEY = 'acrelogic_crop_frequency';
@@ -73,17 +102,22 @@ function bumpFrequency(ids) {
 
 // ─── Crop Card ────────────────────────────────────────────────────────────────
 const CATEGORY_COLORS = {
-    'Greens': { bg: '#E8F5E9', text: '#1B5E20' },
-    'Brassica': { bg: '#E8F5E9', text: '#2E7D32' },
-    'Root': { bg: '#FFF3E0', text: '#E65100' },
-    'Allium': { bg: '#F3E5F5', text: '#6A1B9A' },
-    'Legume': { bg: '#E3F2FD', text: '#0D47A1' },
-    'Herb': { bg: '#F1F8E9', text: '#33691E' },
+    'Greens':     { bg: '#E8F5E9', text: '#1B5E20' },
+    'Brassica':   { bg: '#E8F5E9', text: '#2E7D32' },
+    'Root':       { bg: '#FFF3E0', text: '#E65100' },
+    'Tuber':      { bg: '#FFF3E0', text: '#BF360C' },
+    'Allium':     { bg: '#F3E5F5', text: '#6A1B9A' },
+    'Legume':     { bg: '#E3F2FD', text: '#0D47A1' },
+    'Herb':       { bg: '#F1F8E9', text: '#33691E' },
     'Nightshade': { bg: '#FCE4EC', text: '#880E4F' },
-    'Cucurbit': { bg: '#E0F2F1', text: '#004D40' },
-    'Flower': { bg: '#F8BBD0', text: '#880E4F' },
-    'Specialty': { bg: '#FFF8E1', text: '#BF360C' },
+    'Cucurbit':   { bg: '#E0F2F1', text: '#004D40' },
+    'Flower':     { bg: '#F8BBD0', text: '#880E4F' },
+    'Specialty':  { bg: '#FFF8E1', text: '#BF360C' },
+    'Grain':      { bg: '#FFF9C4', text: '#F57F17' },
+    'Fruit':      { bg: '#FCE4EC', text: '#C62828' },
+    'Cover Crop': { bg: '#DCEDC8', text: '#33691E' },
 };
+
 
 const CropCard = ({ crop, selected, onPress, onLongPress, cardWidth }) => {
     const scaleAnim = useRef(new Animated.Value(1)).current;
@@ -186,12 +220,33 @@ export default function VegetableGridScreen({ navigation, route }) {
         setContextMenuCrop(null);
     };
 
-    const baseFiltered = (
-        activeCategory === 'All' ? CROPS :
-            activeCategory === 'Vegetables' ? CROPS.filter(c => VEGETABLE_CATEGORIES.has(c.category)) :
-                activeCategory === 'Fruits' ? CROPS.filter(c => FRUIT_CATEGORIES.has(c.category)) :
-                    CROPS.filter(c => c.category === activeCategory)
-    ).filter(c => !searchQuery.trim() || c.name.toLowerCase().includes(searchQuery.trim().toLowerCase()));
+    const baseFiltered = (() => {
+        const idMatch = (patterns) => CROPS.filter(c => patterns.some(p => c.id.includes(p)));
+        switch (activeCategory) {
+            case 'All':           return CROPS;
+            case 'Vegetables':    return CROPS.filter(c => VEGETABLE_CATEGORIES.has(c.category));
+            case 'Fruits & Melons': return CROPS.filter(c => FRUIT_MELON_CATEGORIES.has(c.category));
+            case 'Tomatoes':      return idMatch(TOMATO_IDS_PATTERN);
+            case 'Peppers':       return idMatch(PEPPER_IDS_PATTERN);
+            case 'Greens':        return CROPS.filter(c => c.category === 'Greens');
+            case 'Brassica':      return CROPS.filter(c => c.category === 'Brassica');
+            case 'Root & Tuber':  return CROPS.filter(c => c.category === 'Root' || c.category === 'Tuber');
+            case 'Allium':        return CROPS.filter(c => c.category === 'Allium');
+            case 'Beans & Peas':  return CROPS.filter(c => c.category === 'Legume');
+            case 'Herbs':         return CROPS.filter(c => c.category === 'Herb');
+            case 'Squash':        return idMatch(SQUASH_IDS_PATTERN);
+            case 'Cucumbers':     return idMatch(CUCUMBER_IDS_PATTERN);
+            case 'Melons':        return idMatch(MELON_IDS_PATTERN);
+            case 'Flowers':       return CROPS.filter(c => c.category === 'Flower');
+            case 'Grains':        return CROPS.filter(c => GRAIN_CATEGORIES.has(c.category));
+            case 'Cover Crops':   return CROPS.filter(c => COVER_CROP_CATEGORIES.has(c.category));
+            case 'Specialty':     return CROPS.filter(c => c.category === 'Specialty');
+            case 'Nightshade':    return CROPS.filter(c => c.category === 'Nightshade');
+            case 'Fruits & Berries': return CROPS.filter(c => c.category === 'Fruit');
+            default:              return CROPS.filter(c => c.category === activeCategory);
+        }
+    })().filter(c => !searchQuery.trim() || c.name.toLowerCase().includes(searchQuery.trim().toLowerCase()) || (c.variety ?? '').toLowerCase().includes(searchQuery.trim().toLowerCase()));
+
 
     // Stable frequency-sorted list — never reorders when you tap, so the grid
     // doesn't jump. Checkmark overlay shows what's selected in-place.
