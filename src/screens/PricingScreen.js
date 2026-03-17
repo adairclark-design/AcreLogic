@@ -21,8 +21,8 @@ import {
 import { Colors, Typography, Spacing, Radius, Shadows } from '../theme';
 
 // ─── Stripe Payment Links ─────────────────────────────────────────────────────
-const STRIPE_BASIC_URL       = 'https://buy.stripe.com/test_dRmaEX3nTb9A8wqgWkgMw00';
-const STRIPE_PREMIUM_URL     = 'https://buy.stripe.com/test_00wdR9gaFb9A5kefSggMw01';
+const STRIPE_BASIC_URL       = 'https://buy.stripe.com/test_cNi8wPbzp0kV3Mc1uz0sU02';
+const STRIPE_PREMIUM_URL     = 'https://buy.stripe.com/test_00w6oH0ULd7H96wc9d0sU03';
 const STRIPE_SEASON_PASS_URL = 'https://buy.stripe.com/test_8x23cvfPF9VvciI8X10sU01';
 
 // Monthly savings: 12 × $6.49 = $77.88 → round to $77.94 for messaging
