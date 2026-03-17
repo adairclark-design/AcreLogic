@@ -36,6 +36,9 @@ function getInitialRoute() {
     if (Platform.OS !== 'web') return 'Hero';
     try {
         const params = new URLSearchParams(window.location.search);
+        // Stripe post-payment redirect: /success?tier=premium or ?tier=basic
+        if (params.get('tier')) return 'Success';
+        // Legacy paid export redirect
         if (params.get('paid') === '1') return 'FamilyPlanner';
     } catch {}
     return 'Hero';
