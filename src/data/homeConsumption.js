@@ -25,32 +25,32 @@ const HOME_CONSUMPTION = {
     radish_french_breakfast: {
         lbs_per_person_season: 3,
         unit_label: 'lbs',
-        notes: 'Quick crop; most families want 2–3 small rounds per season',
+        notes: 'Pull-and-replant — the whole root is harvested at once (not cut-and-come-again). Ready in 30 days; plan 2–3 successive sowings 3 weeks apart. 3 lbs/person is 2–3 rounds for a family of 4.',
     },
     spinach_space: {
         lbs_per_person_season: 5,
         unit_label: 'lbs',
-        notes: 'Fresh salads and sautéed; ~5 lbs/person is a generous but realistic season target (spinach bolts fast — succession plantings recommended)',
+        notes: 'You are harvesting outer leaves weekly — the same plant keeps going. But spinach bolts (goes to seed) after ~20 warm days, so plan 2–3 succession sowings spaced 2–3 weeks apart. 5 lbs/person = ~10–12 ft of row per sowing for a family of 4.',
     },
     lettuce_mix: {
         lbs_per_person_season: 8,
         unit_label: 'lbs',
-        notes: 'Primary salad green; cut-and-come-again harvests weekly through the season. 8 lbs/person ≈ 1–2 salads/week for the full season.',
+        notes: 'You are harvesting outer leaves weekly from the same plant (cut-and-come-again). Each planting lasts ~3 weeks before bolting in heat. Succession plant every 3 weeks for a continuous salad supply. 8 lbs/person ≈ 1–2 salads/week through the season for a family of 4.',
     },
     arugula_standard: {
         lbs_per_person_season: 4,
         unit_label: 'lbs',
-        notes: 'Peppery; used as accent not primary salad base',
+        notes: 'Harvest outer leaves weekly (same plant, keeps growing). Bolt-prone in heat — succession plant every 2–3 weeks. Used as a peppery accent, not primary salad base, so quantities stay low.',
     },
     chard_rainbow: {
         lbs_per_person_season: 8,
         unit_label: 'lbs',
-        notes: 'Multi-harvest cut-and-come-again; 8 lbs covers regular side veg',
+        notes: 'Harvest outer stalks weekly — the same plant keeps producing all season (does not bolt in heat like spinach). One planting lasts the whole season. 8 lbs/person covers regular side-dish use for a family of 4.',
     },
     mizuna_standard: {
         lbs_per_person_season: 4,
         unit_label: 'lbs',
-        notes: 'Salad accent; lower consumption than primary greens',
+        notes: 'Harvest outer leaves weekly (cut-and-come-again). Mild bolt resistance — one planting lasts longer than spinach. Used as a salad accent alongside primary greens.',
     },
     tatsoi_standard: {
         lbs_per_person_season: 4,
@@ -102,7 +102,7 @@ const HOME_CONSUMPTION = {
     kale_red_russian: {
         lbs_per_person_season: 10,
         unit_label: 'lbs',
-        notes: 'Superfood staple; can be frozen, juiced, sautéed. Harvest outer leaves weekly from established plants — 10 lbs/person covers regular use without excess.',
+        notes: 'Harvest outer leaves weekly all season — kale is cold-hardy, does not bolt, and one planting lasts from spring through winter frost. 10 lbs/person covers regular fresh, frozen, and juiced use for a family of 4.',
     },
     broccoli_belstar: {
         lbs_per_person_season: 12,
@@ -216,7 +216,7 @@ const HOME_CONSUMPTION = {
     scallions_evergreen: {
         lbs_per_person_season: 4,
         unit_label: 'lbs',
-        notes: 'Constant use as garnish and in cooking; succession plant for sustained harvest',
+        notes: 'Cut the tops weekly (leave ~1" above soil — they regrow). Succession sow every 3–4 weeks for a continuous garnish supply. 4 lbs/person covers constant cooking use for a family of 4.',
     },
     leek_giant_musselburgh: {
         lbs_per_person_season: 8,

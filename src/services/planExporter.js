@@ -129,6 +129,9 @@ const BASE_CSS = `
     .fact .fv { font-weight: 600; text-align: right; max-width: 55%; }
     .fact .fv.hi { color: #2D4F1E; }
     .crop-note { padding: 0 10px 6px; font-size: 9px; color: #6B6B6B; font-style: italic; line-height: 1.4; }
+    .succession-note { margin: 0 10px 6px; padding: 5px 8px; font-size: 9px; color: #7A4500; line-height: 1.4;
+        background: rgba(204,120,0,0.07); border-left: 2px solid #CC7800; border-radius: 3px; }
+
     .info-card {
         background: #fff; border-radius: 8px; padding: 12px 16px;
         border: 1px solid rgba(45,79,30,0.12); margin-bottom: 12px;
@@ -165,6 +168,9 @@ function cropCardHTML(item, imgSrc) {
     var facts = [];
     if (item.dtm) {
         facts.push('<div class="fact"><span class="fi">&#9201;</span><span class="fl">DTM</span><span class="fv">' + item.dtm + 'd</span></div>');
+    }
+    if (item.inGroundDays && item.inGroundDays > item.dtm) {
+        facts.push('<div class="fact"><span class="fi">&#128197;</span><span class="fl">In-ground window</span><span class="fv">' + item.inGroundDays + ' days total</span></div>');
     }
     if (item.seedType) {
         facts.push('<div class="fact"><span class="fi">&#127807;</span><span class="fl">Method</span><span class="fv">' + (item.seedType === 'DS' ? 'Direct Sow' : 'Transplant') + '</span></div>');
@@ -207,6 +213,9 @@ function cropCardHTML(item, imgSrc) {
     var factsHTML = facts.length > 0
         ? '<div class="crop-facts">' + facts.join('') + '</div>'
         : '';
+    var successionHTML = (item.needsSuccession && item.successionNote)
+        ? '<div class="succession-note">&#9889; ' + item.successionNote + '</div>'
+        : '';
     var noteHTML = item.consumptionNotes
         ? '<div class="crop-note">&#128161; ' + item.consumptionNotes + '</div>'
         : '';
@@ -216,6 +225,7 @@ function cropCardHTML(item, imgSrc) {
         + '<span class="crop-row-name">' + item.cropName + '</span>' + variety + '</div>'
         + '<div class="crop-kpi">' + kpiHTML + '</div>'
         + factsHTML
+        + successionHTML
         + noteHTML
         + '</div>';
 }

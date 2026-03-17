@@ -106,13 +106,40 @@ export function calculatePlantsNeeded(crop, familySize, gardenProfile = null) {
     const yieldLow = Math.round(targetLbs * 0.8);
     const yieldHigh = Math.round(targetLbs * 1.2);
 
-    // ── Harvest style: clarify one-time vs cut-and-come-again ──
+    // ── Harvest style: precise language for each harvest pattern ──
     const CUT_AND_COME_AGAIN_CATEGORIES = new Set(['Greens', 'Herb']);
-    const harvestStyle = CUT_AND_COME_AGAIN_CATEGORIES.has(crop.category)
-        ? 'Weekly harvest (cut-and-come-again — harvest outer leaves, plant keeps producing)'
-        : (crop.harvest_count && crop.harvest_count <= 2)
-            ? 'Harvest once when ready'
-            : crop.harvest_frequency ?? null;
+    // Heading crops (broccoli, cabbage, cauliflower) produce one head then side shoots
+    const HEADING_CROPS = new Set(['broccoli_belstar','cauliflower_snowball','cabbage_storage',
+        'napa_cabbage','romanesco','brussels_sprouts','kohlrabi_kolibri']);
+    // Indeterminate fruiting crops — pick repeatedly all season
+    const INDETERMINATE_CROPS = new Set(['tomato_heirloom_beefsteak','cherry_tomato_sungold',
+        'pepper_sweet','pepper_jalapeño','hot_pepper_habanero','eggplant_ichiban',
+        'cucumber_marketmore','zucchini_black_beauty','summer_squash_pattypan',
+        'tomatillo_grande','ground_cherry_cossack','beans_green_bush','runner_beans',
+        'peas_sugar_snap','snap_peas_cascadia','okra_clemson']);
+    let harvestStyle;
+    if (CUT_AND_COME_AGAIN_CATEGORIES.has(crop.category)) {
+        harvestStyle = 'Cut-and-come-again — harvest outer leaves weekly, plant keeps producing';
+    } else if (HEADING_CROPS.has(crop.id)) {
+        harvestStyle = 'Harvest main head when ready, then pick side shoots over several weeks';
+    } else if (INDETERMINATE_CROPS.has(crop.id)) {
+        harvestStyle = 'Pick fruit repeatedly as it ripens — plant produces all season';
+    } else if (crop.harvest_count && crop.harvest_count <= 1) {
+        harvestStyle = 'Harvest once when ready, then pull plant';
+    } else {
+        harvestStyle = crop.harvest_frequency ?? null;
+    }
+
+    // ── In-ground days: total bed commitment (DTM + harvest window) ──
+    const inGroundDays = (crop.dtm ?? 0) + (crop.harvest_window_days ?? 0);
+
+    // ── Succession flag: quick-finish crops that need replanting for continuous supply ──
+    // True when harvest window < 35 days (plant finishes fast — need multiple sowings)
+    const needsSuccession = (crop.harvest_window_days ?? 60) < 35
+        && CUT_AND_COME_AGAIN_CATEGORIES.has(crop.category);
+    const successionNote = needsSuccession
+        ? `Sow every 2–3 weeks for a continuous supply — each sowing lasts ~${crop.harvest_window_days ?? 21} days before bolting`
+        : null;
 
     // ── Calendar dates (only when gardenProfile is available) ──
     let indoorSeedDate = null;
@@ -160,20 +187,19 @@ export function calculatePlantsNeeded(crop, familySize, gardenProfile = null) {
         // Rich metadata from the crop record
         dtm: crop.dtm,
         harvestWindowDays: crop.harvest_window_days,
+        inGroundDays: inGroundDays > 0 ? inGroundDays : null,
         seedType: crop.seed_type,               // 'DS' or 'TP'
         seedStartWeeks: crop.seed_start_weeks_before_transplant,
-        harvestMethod: crop.harvest_method,
-        harvestFrequency: crop.harvest_frequency,
-        harvestStyle,                           // NEW: plain-English harvest cadence
+        harvestStyle,                           // plain-English harvest cadence
         harvestCount: crop.harvest_count,
-        rowSpacingIn: crop.row_spacing_in,      // NEW: row spacing (30″-bed basis)
-        rowsPer30inBed: crop.rows_per_30in_bed, // NEW: rows per 30″ bed
+        rowSpacingIn: crop.row_spacing_in,      // row spacing (30"-bed basis)
+        rowsPer30inBed: crop.rows_per_30in_bed, // rows per 30" bed
         season: crop.season,
         minFrostFreeDays: crop.min_frost_free_days,
         frostFreeDays,                          // from gardenProfile
-        jangSeeder: crop.jang_seeder,
-        feedClass: crop.feed_class,
         notes: crop.notes,
+        needsSuccession,                        // true = bolt-prone, succession-plant
+        successionNote,                         // human-readable succession callout
 
         // Computed calendar dates (null if no gardenProfile)
         indoorSeedDate,

@@ -204,6 +204,9 @@ function ReportCard({ item }) {
                 {item.dtm ? (
                     <FactRow icon="⏱" label="Days to maturity" value={`${item.dtm} days`} />
                 ) : null}
+                {item.inGroundDays && item.inGroundDays > item.dtm ? (
+                    <FactRow icon="🗓" label="In-ground window" value={`${item.inGroundDays} days total`} />
+                ) : null}
                 {item.seedType ? (
                     <FactRow icon="🌱" label="Starting method" value={item.seedType === 'DS' ? 'Direct Sow' : 'Transplant'} />
                 ) : null}
@@ -221,13 +224,13 @@ function ReportCard({ item }) {
                 ) : null}
                 {/* Spacing */}
                 {item.inRowSpacingIn ? (
-                    <FactRow icon="↔️" label="In-row spacing" value={`${item.inRowSpacingIn} in`} />
+                    <FactRow icon="↔️" label="In-row spacing" value={`${item.inRowSpacingIn}"`} />
                 ) : null}
                 {item.rowSpacingIn ? (
-                    <FactRow icon="↕️" label="Row spacing" value={`${item.rowSpacingIn} in (30″-bed basis)`} />
+                    <FactRow icon="↕️" label="Row spacing (30’ bed)" value={`${item.rowSpacingIn}"`} />
                 ) : null}
                 {item.rowsPer30inBed ? (
-                    <FactRow icon="🛏" label="Rows per 30″ bed" value={`${item.rowsPer30inBed}`} />
+                    <FactRow icon="🛀" label="Rows per 30″ bed" value={`${item.rowsPer30inBed}`} />
                 ) : null}
                 {/* Harvest info */}
                 {item.harvestStyle ? (
@@ -243,6 +246,14 @@ function ReportCard({ item }) {
                     <FactRow icon="🗓" label="Season" value={item.season} />
                 ) : null}
             </View>
+
+            {/* Succession callout — only for bolt-prone / quick-finish crops */}
+            {item.needsSuccession && item.successionNote ? (
+                <View style={styles.successionCallout}>
+                    <Text style={styles.successionIcon}>⚡</Text>
+                    <Text style={styles.successionText}>{item.successionNote}</Text>
+                </View>
+            ) : null}
 
             {/* Consumption note */}
             {item.consumptionNotes ? (
@@ -1025,6 +1036,17 @@ const styles = StyleSheet.create({
         fontStyle: 'italic', lineHeight: 15,
         paddingHorizontal: Spacing.md, paddingBottom: Spacing.md,
     },
+
+    successionCallout: {
+        flexDirection: 'row', alignItems: 'flex-start', gap: 6,
+        backgroundColor: 'rgba(204,120,0,0.08)',
+        borderLeftWidth: 3, borderLeftColor: '#CC7800',
+        marginHorizontal: Spacing.md, marginBottom: Spacing.sm,
+        borderRadius: 4, paddingVertical: 7, paddingRight: Spacing.sm, paddingLeft: 8,
+    },
+    successionIcon: { fontSize: 12, lineHeight: 16, flexShrink: 0 },
+    successionText: { flex: 1, fontSize: Typography.xs, color: '#8B5000', lineHeight: 15 },
+
 
     // ── Good Luck banner ──────────────────────────────────────────────────────
     goodLuck: {
