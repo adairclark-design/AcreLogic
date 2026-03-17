@@ -71,12 +71,34 @@ export const LIMITS = {
 };
 
 // ─── Active tier (replace with auth/subscription lookup when billing is live) ─
-// For now, everyone is on FREE. Swap this for an AsyncStorage load or
-// a Stripe subscription check when the payment layer is integrated.
-let _activeTier = TIER.FREE;
+// Persisted to localStorage so upgrades survive navigation resets & refreshes.
+const TIER_STORAGE_KEY = 'acrelogic_active_tier';
 
-export function getActiveTier()        { return _activeTier; }
-export function setActiveTier(tier)    { _activeTier = tier; }
+function _readPersistedTier() {
+    try {
+        if (typeof localStorage !== 'undefined') {
+            const saved = localStorage.getItem(TIER_STORAGE_KEY);
+            if (saved && Object.values(TIER).includes(saved)) return saved;
+        }
+    } catch {}
+    return TIER.FREE;
+}
+
+let _activeTier = _readPersistedTier();
+
+export function getActiveTier()     { return _activeTier; }
+export function setActiveTier(tier) {
+    _activeTier = tier;
+    try {
+        if (typeof localStorage !== 'undefined') {
+            if (tier === TIER.FREE) {
+                localStorage.removeItem(TIER_STORAGE_KEY);
+            } else {
+                localStorage.setItem(TIER_STORAGE_KEY, tier);
+            }
+        }
+    } catch {}
+}
 export function getLimits(tier = _activeTier) { return LIMITS[tier] ?? LIMITS[TIER.FREE]; }
 
 // ─── Gate check helpers ───────────────────────────────────────────────────────

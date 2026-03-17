@@ -320,8 +320,15 @@ export default function FamilyPlannerScreen({ navigation }) {
         } catch {}
     }, []);
 
+    // ── Post-payment tier refresh ──────────────────────────────────────────
+    // Read the persisted tier on every mount so a purchase from SuccessScreen
+    // is immediately reflected without a hard reload.
+    const [activeTier, setActiveTierLocal] = useState(() => getActiveTier());
+    useEffect(() => {
+        setActiveTierLocal(getActiveTier());
+    }, []);
 
-    const limits = LIMITS[getActiveTier()] ?? LIMITS[TIER.FREE];
+    const limits = LIMITS[activeTier] ?? LIMITS[TIER.FREE];
 
     const filteredCrops = filterByCategory(category, searchQuery);
 
