@@ -654,12 +654,9 @@ export default function FamilyPlannerScreen({ navigation }) {
                         <View style={styles.summaryBar}>
                             <SumStat label="Crops" value={planResult.supported.length} />
                             <View style={styles.summaryDivider} />
-                            <SumStat label="Total row-ft" value={`${planResult.totalLinearFt} ft`} />
-                            <View style={styles.summaryDivider} />
-                            <SumStat label="Est. 4×8 beds" value={`~${planResult.totalBedsNeeded}`} />
-                            <View style={styles.summaryDivider} />
                             <SumStat label="Family of" value={planResult.familySize} />
                         </View>
+
                         {/* ━ Post-payment success banner ━━━━━━━━━━━━━━━━━━━━━ */}
                         {postPaymentReady && (
                             <View style={styles.paidSuccessBanner}>
