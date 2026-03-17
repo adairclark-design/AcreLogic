@@ -663,26 +663,49 @@ export default function FamilyPlannerScreen({ navigation }) {
                         )}
 
                         {/* Report cards — responsive multi-column grid */}
-                        <ScrollView
-                            style={Platform.OS === 'web' ? { overflowY: 'scroll', flex: 1 } : { flex: 1 }}
-                            showsVerticalScrollIndicator={false}
-                            contentContainerStyle={styles.reportGrid}
-                        >
-                            <View style={styles.reportGridRow}>
-                                {planResult.supported.map(item => (
-                                    <ReportCard
-                                        key={item.cropId}
-                                        item={item}
-                                        cardWidth={cardWidth}
-                                    />
-                                ))}
-                            </View>
-                            <View style={styles.goodLuck}>
-                                <Text style={styles.goodLuckEmoji}>🥬</Text>
-                                <Text style={styles.goodLuckTitle}>Good Luck Gardening!</Text>
-                                <Text style={styles.goodLuckSub}>Happy planting this season.</Text>
-                            </View>
-                        </ScrollView>
+                        {Platform.OS === 'web' ? (
+                            // Web: CSS Grid bypasses RN Web flex — cards fill grid cells automatically
+                            <ScrollView
+                                style={{ flex: 1, overflowY: 'scroll' }}
+                                showsVerticalScrollIndicator={false}
+                                contentContainerStyle={{ padding: Spacing.lg, paddingBottom: 180 }}
+                            >
+                                <View style={{
+                                    display: 'grid',
+                                    gridTemplateColumns: `repeat(${numColumns}, 1fr)`,
+                                    gap: 8,
+                                }}>
+                                    {planResult.supported.map(item => (
+                                        <ReportCard key={item.cropId} item={item} />
+                                    ))}
+                                </View>
+                                <View style={styles.goodLuck}>
+                                    <Text style={styles.goodLuckEmoji}>🥬</Text>
+                                    <Text style={styles.goodLuckTitle}>Good Luck Gardening!</Text>
+                                    <Text style={styles.goodLuckSub}>Happy planting this season.</Text>
+                                </View>
+                            </ScrollView>
+                        ) : (
+                            // Native: FlatList with numColumns
+                            <FlatList
+                                data={planResult.supported}
+                                keyExtractor={item => item.cropId}
+                                numColumns={numColumns}
+                                key={numColumns}
+                                contentContainerStyle={{ padding: Spacing.lg, paddingBottom: 180 }}
+                                columnWrapperStyle={numColumns > 1 ? { gap: 8, marginBottom: 8 } : null}
+                                showsVerticalScrollIndicator={false}
+                                style={{ flex: 1 }}
+                                ListFooterComponent={() => (
+                                    <View style={styles.goodLuck}>
+                                        <Text style={styles.goodLuckEmoji}>🥬</Text>
+                                        <Text style={styles.goodLuckTitle}>Good Luck Gardening!</Text>
+                                        <Text style={styles.goodLuckSub}>Happy planting this season.</Text>
+                                    </View>
+                                )}
+                                renderItem={({ item }) => <ReportCard item={item} cardWidth={cardWidth} />}
+                            />
+                        )}
 
                         {/* Report footer — edit + dual export */}
                         <View style={styles.footer}>
