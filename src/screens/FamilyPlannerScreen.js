@@ -31,8 +31,32 @@ import UpgradeModal from '../components/UpgradeModal';
 import CROP_IMAGES from '../data/cropImages';
 import { exportFamilyPlan } from '../services/planExporter';
 
-// ─── Stripe $4.99 PDF product link ──────────────────────────────────────────
-const STRIPE_FULL_PLAN_LINK = 'https://buy.stripe.com/test_9B66oH5b17Nn4Qgc9d0sU00'; // ← swap for live link before launch
+// ─── Full PDF monthly cap ────────────────────────────────────────────────────
+const FULL_PDF_MONTHLY_LIMIT = 10;
+const PDF_USAGE_KEY = 'acrelogic_pdf_usage';
+
+// Returns { count, remaining } for the current calendar month, and increments
+// the counter. Returns null if localStorage is unavailable.
+function getPdfUsage() {
+    try {
+        const monthKey = new Date().toISOString().slice(0, 7); // e.g. "2026-03"
+        const raw = localStorage.getItem(PDF_USAGE_KEY);
+        const saved = raw ? JSON.parse(raw) : {};
+        // Reset counter when the month rolls over
+        const count = saved.month === monthKey ? (saved.count ?? 0) : 0;
+        return { count, remaining: FULL_PDF_MONTHLY_LIMIT - count, monthKey };
+    } catch {
+        return null; // storage unavailable — treat generously
+    }
+}
+function incrementPdfUsage(monthKey, currentCount) {
+    try {
+        localStorage.setItem(PDF_USAGE_KEY, JSON.stringify({
+            month: monthKey,
+            count: currentCount + 1,
+        }));
+    } catch {}
+}
 
 // ─── Crop Data ────────────────────────────────────────────────────────────────
 import CROPS_DATA from '../data/crops.json';
@@ -333,38 +357,17 @@ export default function FamilyPlannerScreen({ navigation }) {
     const [upgradeBlockedBy, setUpgradeBlockedBy]       = useState(null);
     const [gardenProfile, setGardenProfile] = useState(null); // location data
     const [planResult, setPlanResult]       = useState(null);
-    const [postPaymentReady, setPostPaymentReady] = useState(false); // true when returning from Stripe
+    const [pdfRemaining, setPdfRemaining] = useState(() => {
+        if (Platform.OS !== 'web') return FULL_PDF_MONTHLY_LIMIT;
+        const u = getPdfUsage();
+        return u ? u.remaining : FULL_PDF_MONTHLY_LIMIT;
+    });
 
     const listRef  = useRef(null);
     const gridRef  = useRef(null);  // grid container for web DOM ref
     const slideAnim = useRef(new Animated.Value(0)).current;
 
-    // ── Detect return from Stripe (?paid=1) ───────────────────────────────────
-    useEffect(() => {
-        if (Platform.OS !== 'web') return;
-        const params = new URLSearchParams(window.location.search);
-        if (!params.get('paid')) return;
-
-        // Remove the flag from the URL without triggering a reload
-        window.history.replaceState({}, '', window.location.pathname);
-
-        // Restore saved plan and show the download banner
-        // (We don't auto-trigger the PDF — popup blockers block it from useEffect.
-        //  Instead we show a button so the export fires from a real user gesture.)
-        try {
-            const saved = localStorage.getItem('acrelogic_pending_pdf');
-            if (saved) {
-                const { planResult: pr, familySize: fs } = JSON.parse(saved);
-                localStorage.removeItem('acrelogic_pending_pdf');
-                if (pr) {
-                    setPlanResult(pr);
-                    setFamilySize(fs ?? 2);
-                    setStep(2);
-                    setPostPaymentReady(true);
-                }
-            }
-        } catch {}
-    }, []);
+    // (Stripe ?paid=1 flow removed — Full PDF is now a subscriber benefit)
 
     // ── Post-payment tier refresh ──────────────────────────────────────────
     // Read the persisted tier on every mount so a purchase from SuccessScreen
@@ -472,35 +475,35 @@ export default function FamilyPlannerScreen({ navigation }) {
         );
     };
 
-    // ── $4.99 full plan PDF — Stripe payment link ─────────────────────────
-    const handlePaidExport = () => {
-        // Persist the plan so we can restore it after the Stripe redirect
-        if (Platform.OS === 'web' && planResult) {
-            try {
-                localStorage.setItem('acrelogic_pending_pdf', JSON.stringify({
-                    planResult,
-                    familySize,
-                }));
-            } catch {}
+    // ── Full PDF — subscriber benefit with 10/month cap ───────────────────
+    const handleFullExport = () => {
+        // Must be a subscriber
+        if (activeTier === TIER.FREE) {
+            setUpgradeBlockedBy('fullPdf');
+            setUpgradeModalVisible(true);
+            return;
         }
 
-        // Build success redirect URL — Stripe appends &payment_intent=… automatically
-        const successUrl = Platform.OS === 'web'
-            ? `${window.location.origin}/?paid=1`
-            : null;
-
-        // Append ?success_url only if supported (Stripe payment links accept it)
-        const stripeUrl = successUrl
-            ? `${STRIPE_FULL_PLAN_LINK}?success_url=${encodeURIComponent(successUrl)}`
-            : STRIPE_FULL_PLAN_LINK;
-
-        if (Platform.OS === 'web') {
-            window.location.href = stripeUrl; // same-tab so we come back via redirect
-        } else {
-            import('expo-linking').then(Linking => {
-                Linking.openURL(STRIPE_FULL_PLAN_LINK);
-            });
+        // Check monthly cap
+        const usage = Platform.OS === 'web' ? getPdfUsage() : null;
+        if (usage && usage.remaining <= 0) {
+            Alert.alert(
+                'Monthly limit reached',
+                `You've generated ${FULL_PDF_MONTHLY_LIMIT} Full PDFs this month. Your limit resets on the 1st.`,
+                [{ text: 'OK' }]
+            );
+            return;
         }
+
+        // Increment counter then export
+        if (usage) {
+            incrementPdfUsage(usage.monthKey, usage.count);
+            setPdfRemaining(r => Math.max(0, r - 1));
+        }
+
+        exportFamilyPlan(planResult, familySize).catch(err =>
+            Alert.alert('Export failed', String(err?.message ?? err))
+        );
     };
 
     // ─── Render ────────────────────────────────────────────────────────────
@@ -657,25 +660,7 @@ export default function FamilyPlannerScreen({ navigation }) {
                             <SumStat label="Family of" value={planResult.familySize} />
                         </View>
 
-                        {/* ━ Post-payment success banner ━━━━━━━━━━━━━━━━━━━━━ */}
-                        {postPaymentReady && (
-                            <View style={styles.paidSuccessBanner}>
-                                <View style={styles.paidSuccessLeft}>
-                                    <Text style={styles.paidSuccessTitle}>✅ Payment successful!</Text>
-                                    <Text style={styles.paidSuccessBody}>Your Full Planting Plan PDF is ready to download.</Text>
-                                </View>
-                                <TouchableOpacity
-                                    style={styles.paidSuccessBtn}
-                                    onPress={() => {
-                                        setPostPaymentReady(false);
-                                        exportFamilyPlan(planResult, familySize).catch(() => {});
-                                    }}
-                                    activeOpacity={0.8}
-                                >
-                                    <Text style={styles.paidSuccessBtnText}>📄 Download PDF</Text>
-                                </TouchableOpacity>
-                            </View>
-                        )}
+
 
 
                         {!gardenProfile && (
@@ -756,13 +741,34 @@ export default function FamilyPlannerScreen({ navigation }) {
                                     <Text style={styles.exportBtnText}>📄 Quick PDF (free)</Text>
                                 </TouchableOpacity>
                             </View>
-                            <TouchableOpacity
-                                style={[styles.paidExportBtn, Shadows.button]}
-                                onPress={handlePaidExport}
-                            >
-                                <Text style={styles.paidExportBtnText}>💳 Full Planting Plan PDF — $4.99</Text>
-                                <Text style={styles.paidExportBtnSub}>Printable, Excel-style · exact dates · all crops on one page</Text>
-                            </TouchableOpacity>
+                            {activeTier === TIER.FREE ? (
+                                // Free users — upgrade prompt
+                                <TouchableOpacity
+                                    style={[styles.paidExportBtn, Shadows.button]}
+                                    onPress={() => {
+                                        setUpgradeBlockedBy('fullPdf');
+                                        setUpgradeModalVisible(true);
+                                    }}
+                                >
+                                    <Text style={styles.paidExportBtnText}>🔒 Full Planting Plan PDF — Subscribers Only</Text>
+                                    <Text style={styles.paidExportBtnSub}>Included with any subscription · Upgrade to unlock</Text>
+                                </TouchableOpacity>
+                            ) : pdfRemaining <= 0 ? (
+                                // Cap reached
+                                <View style={[styles.paidExportBtn, { opacity: 0.5 }]}>
+                                    <Text style={styles.paidExportBtnText}>📄 Full Planting Plan PDF — Limit Reached</Text>
+                                    <Text style={styles.paidExportBtnSub}>You've used all {FULL_PDF_MONTHLY_LIMIT} Full PDFs this month · Resets on the 1st</Text>
+                                </View>
+                            ) : (
+                                // Subscriber with uses remaining
+                                <TouchableOpacity
+                                    style={[styles.paidExportBtn, Shadows.button]}
+                                    onPress={handleFullExport}
+                                >
+                                    <Text style={styles.paidExportBtnText}>📄 Full Planting Plan PDF</Text>
+                                    <Text style={styles.paidExportBtnSub}>Printable · exact dates · all crops · {pdfRemaining} of {FULL_PDF_MONTHLY_LIMIT} remaining this month</Text>
+                                </TouchableOpacity>
+                            )}
                         </View>
                     </View>
                 )}
