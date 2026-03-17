@@ -218,9 +218,39 @@ function BedLayoutVisual({ spaceResult, containerWidth }) {
                     {spaceLengthFt}′ × {spaceWidthFt}′
                 </Text>
             </View>
+
+            {/* N/S Compass — top-right corner */}
+            <View style={{
+                position: 'absolute', top: 8, right: 8,
+                alignItems: 'center',
+                backgroundColor: 'rgba(255,255,255,0.82)',
+                borderRadius: 20, width: 36, height: 36,
+                justifyContent: 'center',
+                borderWidth: 1, borderColor: 'rgba(45,79,30,0.25)',
+            }}>
+                {/* N label */}
+                <Text style={{ fontSize: 7, fontWeight: '800', color: '#2D4F1E', letterSpacing: 0.5, marginBottom: 1 }}>N</Text>
+                {/* North arrow up (solid green) */}
+                <View style={{
+                    width: 0, height: 0,
+                    borderLeftWidth: 4, borderLeftColor: 'transparent',
+                    borderRightWidth: 4, borderRightColor: 'transparent',
+                    borderBottomWidth: 7, borderBottomColor: '#2D4F1E',
+                }} />
+                {/* South arrow down (faded) */}
+                <View style={{
+                    width: 0, height: 0,
+                    borderLeftWidth: 4, borderLeftColor: 'transparent',
+                    borderRightWidth: 4, borderRightColor: 'transparent',
+                    borderTopWidth: 7, borderTopColor: 'rgba(45,79,30,0.3)',
+                }} />
+                {/* S label */}
+                <Text style={{ fontSize: 7, fontWeight: '800', color: 'rgba(45,79,30,0.5)', letterSpacing: 0.5, marginTop: 1 }}>S</Text>
+            </View>
         </View>
     );
 }
+
 
 // ─── Labelled number input ────────────────────────────────────────────────────
 function DimInput({ label, hint, value, onChangeText, suffix = 'ft', keyboardType = 'decimal-pad' }) {
