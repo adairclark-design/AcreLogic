@@ -4532,9 +4532,10 @@
       "row_spacing_in": 9,
       "seed_oz_per_100ft": 1,
       "loss_buffer_pct": 15,
-      "yield_lbs_per_100ft": null,
-      "yield_unit": "bunches",
+      "yield_lbs_per_100ft": 25,
+      "yield_unit": "lbs",
       "yield_bunches_per_100ft": 80,
+
       "wholesale_price_per_lb": null,
       "wholesale_price_per_bunch": 2,
       "organic_premium_pct": 20,
