@@ -1374,9 +1374,11 @@ export default function VisualBedLayoutScreen({ navigation, route }) {
     useEffect(() => {
         if (Platform.OS !== 'web') return;
         const handler = (e) => {
-            // Skip if a text input actually has focus (check by type, not just tagName)
             const el = document.activeElement;
-            const isTyping = el && (
+            // If canvas has focus, always allow shortcuts.
+            // Only block if a text input/textarea is genuinely being edited.
+            const canvasHasFocus = el && el.tagName === 'CANVAS';
+            const isTyping = !canvasHasFocus && el && (
                 (el.tagName === 'INPUT' && el.type !== 'range') ||
                 el.tagName === 'TEXTAREA' ||
                 el.isContentEditable
@@ -1396,7 +1398,14 @@ export default function VisualBedLayoutScreen({ navigation, route }) {
                 });
             } else if ((e.key === 'Delete' || e.key === 'Backspace') && allSelectedIdsRef.current.length > 0) {
                 e.preventDefault();
-                deleteSelected();
+                // Inline deletion using refs — avoids stale closure over allSelectedIds
+                const toDelete = new Set(allSelectedIdsRef.current);
+                setBeds(prev => {
+                    pushUndo(prev);
+                    return prev.filter(b => !toDelete.has(b.id));
+                });
+                setSelectedIds([]);
+                setExtraSelectedIds(new Set());
             } else if (['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key) && selectedIdRef.current) {
                 e.preventDefault();
                 const stepPx = snapFtRef.current * PX_PER_FT;
