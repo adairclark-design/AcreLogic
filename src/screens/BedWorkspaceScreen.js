@@ -17,7 +17,7 @@ import {
 import { Colors, Typography, Spacing, Radius, Shadows } from '../theme';
 import { getSuccessionCandidatesRanked, autoGenerateSuccessions, AUTOFILL_STRATEGIES } from '../services/successionEngine';
 import { saveBedAssignment, getBedSuccessions, getCropById } from '../services/database';
-import { saveBedSuccessions, saveSeasonSnapshot, getPriorYearBedCrops, loadRotationHistory } from '../services/persistence';
+import { saveBedSuccessions, saveSeasonSnapshot, getPriorYearBedCrops, loadRotationHistory, loadSavedPlan } from '../services/persistence';
 import { checkBedCompanions, checkBlockNeighborWarnings } from '../services/companionService';
 import cropData from '../data/crops.json';
 import CompanionAlertBanner from '../components/CompanionAlertBanner';
@@ -771,9 +771,16 @@ export default function BedWorkspaceScreen({ navigation, route }) {
     const [calendarEntries, setCalendarEntries] = useState([]);
     const [noteBed, setNoteBed] = useState(null); // bed number being noted (null = modal closed)
     // Restore from localStorage if passed via Continue flow (HeroScreen restore)
-    const [bedSuccessions, setBedSuccessions] = useState(
-        route?.params?.bedSuccessions ?? {}
-    );
+    const [bedSuccessions, setBedSuccessions] = useState(() => {
+        // Prefer fully-hydrated params (passed by navigation)
+        const fromParams = route?.params?.bedSuccessions;
+        if (fromParams && Object.keys(fromParams).length > 0) return fromParams;
+        // Fall back to localStorage — covers the Crops ↔ BedWorkspace back-and-forth
+        // where the navigator pushes a fresh screen without re-supplying the data.
+        // bedSuccessions are auto-saved on every change, so this is always up to date.
+        const saved = loadSavedPlan();
+        return saved?.bedSuccessions ?? {};
+    });
     // ── Per-bed shelter type (Phase 2) ────────────────────────────────────────
     // 'none' | 'rowCover' | 'greenhouse'  — persisted in state, saved alongside successions
     const [bedShelter, setBedShelter] = useState({});
