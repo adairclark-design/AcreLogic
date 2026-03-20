@@ -255,6 +255,7 @@ export function calculatePlantsNeeded(crop, familySize, gardenProfile = null) {
         emoji: crop.emoji,
         isSupported: true,
         isFlower: false,
+        category: crop.category,   // needed by SeedShoppingList
 
         // Core numbers
         familySize,

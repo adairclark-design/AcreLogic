@@ -33,6 +33,7 @@ import { exportFamilyPlan } from '../services/planExporter';
 import MegaMenuBar from '../components/MegaMenuBar';
 import SharedCropCard from '../components/SharedCropCard';
 import ActionCalendar from '../components/ActionCalendar';
+import SeedShoppingList from '../components/SeedShoppingList';
 import { formatCropDisplayName, formatVarietyLabel } from '../utils/cropDisplay';
 
 // ─── Full PDF monthly cap ────────────────────────────────────────────────────
@@ -780,14 +781,14 @@ export default function FamilyPlannerScreen({ navigation }) {
                             </View>
                         )}
 
-                        {/* ── View mode tab bar ── */}
+                        {/* ── View mode tab bar (3 tabs) ── */}
                         <View style={styles.viewTabBar}>
                             <TouchableOpacity
                                 style={[styles.viewTab, viewMode === 'cards' && styles.viewTabActive]}
                                 onPress={() => setViewMode('cards')}
                             >
                                 <Text style={[styles.viewTabText, viewMode === 'cards' && styles.viewTabTextActive]}>
-                                    📋  Crop Cards
+                                    📋  Cards
                                 </Text>
                             </TouchableOpacity>
                             <TouchableOpacity
@@ -795,7 +796,15 @@ export default function FamilyPlannerScreen({ navigation }) {
                                 onPress={() => setViewMode('calendar')}
                             >
                                 <Text style={[styles.viewTabText, viewMode === 'calendar' && styles.viewTabTextActive]}>
-                                    📅  Action Calendar
+                                    📅  Calendar
+                                </Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                style={[styles.viewTab, viewMode === 'seeds' && styles.viewTabActive]}
+                                onPress={() => setViewMode('seeds')}
+                            >
+                                <Text style={[styles.viewTabText, viewMode === 'seeds' && styles.viewTabTextActive]}>
+                                    🛒  Seed List
                                 </Text>
                             </TouchableOpacity>
                         </View>
@@ -814,12 +823,14 @@ export default function FamilyPlannerScreen({ navigation }) {
                             Chunk cards into rows of numColumns, render each
                             row as flexDirection:'row'. Each cell is flex:1
                             so columns split width evenly — works everywhere. */}
-                        {/* Report cards OR Action Calendar based on view mode */}
+                        {/* Report cards, Action Calendar, or Seed List based on view mode */}
                         {viewMode === 'calendar' ? (
                             <ActionCalendar
                                 crops={planResult.supported}
                                 gardenProfile={gardenProfile?._raw ?? null}
                             />
+                        ) : viewMode === 'seeds' ? (
+                            <SeedShoppingList crops={planResult.supported} />
                         ) : (
                         (() => {
                             const cards = planResult.supported;
