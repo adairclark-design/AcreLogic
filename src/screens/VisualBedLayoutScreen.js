@@ -37,11 +37,26 @@ const ALL_CROPS = (CROPS_DATA.crops ?? []).filter(c => c.category !== 'Cover Cro
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const PX_PER_FT = 8;          // 8 canvas pixels per foot
-const SNAP_FT   = 1;          // snap to 1-foot grid
-const SNAP_PX   = PX_PER_FT * SNAP_FT;
-const MIN_ZOOM  = 0.3;
+const MIN_ZOOM  = 0.6;
 const MAX_ZOOM  = 4.0;
 const UNDO_LIMIT = 10;
+
+// Snap grid presets (feet). User scrolls through these in the sidebar.
+const SNAP_PRESETS = [
+    { label: '10 ft', ft: 10 },
+    { label: '5 ft',  ft: 5  },
+    { label: '2 ft',  ft: 2  },
+    { label: '1 ft',  ft: 1  },
+    { label: '6 in',  ft: 0.5 },
+];
+const DEFAULT_SNAP_FT = 1;
+const SNAP_PX = DEFAULT_SNAP_FT * PX_PER_FT; // 8 px — 1 foot in canvas pixels (used by grid and row-count calculations)
+
+// Dynamic snap helper: rounds val to the nearest multiple of snapFt in canvas pixels
+function snapTo(val, snapFt) {
+    const snapPx = Math.max(1, snapFt * PX_PER_FT);
+    return Math.round(val / snapPx) * snapPx;
+}
 
 const BED_DEFAULT_W_FT = 4;
 const BED_DEFAULT_H_FT = 8;
@@ -67,8 +82,50 @@ const ROW_COLORS = [
     '#AED6F1', // pale blue
 ];
 
-function snap(val) {
-    return Math.round(val / SNAP_PX) * SNAP_PX;
+// Backwards-compat alias at 1-ft granularity (used in initial bed placement only)
+function snap(val) { return snapTo(val, DEFAULT_SNAP_FT); }
+
+// ─── Overlap resolver ─────────────────────────────────────────────────────────
+// Nudges a moved bed away from any overlapping beds, respecting the minGapFt
+// margin and clamping to the space boundary. Returns the resolved { x, y }.
+function resolveOverlap(movedId, rawX, rawY, beds, spaceInfo, minGapFt = 1) {
+    const movedBed = beds.find(b => b.id === movedId);
+    if (!movedBed) return { x: rawX, y: rawY };
+    const gapPx = minGapFt * PX_PER_FT;
+    let x = rawX, y = rawY;
+    const { w: mw, h: mh } = bedPx(movedBed);
+    // Clamp to space boundary first
+    if (spaceInfo) {
+        x = Math.max(0, Math.min(x, spaceInfo.wPx - mw));
+        y = Math.max(0, Math.min(y, spaceInfo.hPx - mh));
+    }
+    // AABB collision + nudge against every other bed
+    for (const other of beds) {
+        if (other.id === movedId) continue;
+        const { w: ow, h: oh } = bedPx(other);
+        const ox = other.x ?? 0, oy = other.y ?? 0;
+        const overlapX = x < ox + ow + gapPx && x + mw + gapPx > ox;
+        const overlapY = y < oy + oh + gapPx && y + mh + gapPx > oy;
+        if (!overlapX || !overlapY) continue;
+        // Nudge in the axis that requires least movement
+        const pushRight = ox + ow + gapPx - x;
+        const pushLeft  = x + mw + gapPx - ox;
+        const pushDown  = oy + oh + gapPx - y;
+        const pushUp    = y + mh + gapPx - oy;
+        const minH = Math.min(pushRight, pushLeft);
+        const minV = Math.min(pushDown, pushUp);
+        if (minH <= minV) {
+            x = pushRight <= pushLeft ? ox + ow + gapPx : ox - mw - gapPx;
+        } else {
+            y = pushDown <= pushUp ? oy + oh + gapPx : oy - mh - gapPx;
+        }
+        // Re-clamp after nudge
+        if (spaceInfo) {
+            x = Math.max(0, Math.min(x, spaceInfo.wPx - mw));
+            y = Math.max(0, Math.min(y, spaceInfo.hPx - mh));
+        }
+    }
+    return { x, y };
 }
 
 function bedPx(bed) {
@@ -268,7 +325,7 @@ const cgo = StyleSheet.create({
 
 // ─── Add-Bed Sidebar ──────────────────────────────────────────────────────────
 // Fixed left panel on web/tablet with Create Bed form + selected bed actions.
-function AddBedSidebar({ onAdd, selectedBed, onRotate, onDelete, onAssignCrops, undoStack, onUndo }) {
+function AddBedSidebar({ onAdd, selectedBed, selectedCount = 1, onRotate, onDelete, onDeleteSelected, onAssignCrops, undoStack, onUndo, snapFt, onSnapChange, minGapFt, onMinGapChange }) {
     const [wFt, setWFt] = useState('4');
     const [hFt, setHFt] = useState('8');
     const [bedOri, setBedOri] = useState('NS');
@@ -277,7 +334,7 @@ function AddBedSidebar({ onAdd, selectedBed, onRotate, onDelete, onAssignCrops, 
     function handleCreate() {
         const w = parseFloat(wFt) || 4;
         const h = parseFloat(hFt) || 8;
-        onAdd({ wFt: Math.max(1, w), hFt: Math.max(1, h) });
+        onAdd({ wFt: Math.max(1, w), hFt: Math.max(1, h), ori: bedOri });
     }
 
     return (
@@ -289,9 +346,27 @@ function AddBedSidebar({ onAdd, selectedBed, onRotate, onDelete, onAssignCrops, 
             {open && (
                 <View style={sb.form}>
                     <Text style={sb.fieldLabel}>Length (ft)</Text>
-                    <TextInput style={sb.input} value={hFt} onChangeText={setHFt} keyboardType="decimal-pad" selectTextOnFocus />
+                    <TextInput
+                        style={sb.input}
+                        value={hFt}
+                        onChangeText={setHFt}
+                        keyboardType={Platform.OS === 'web' ? 'default' : 'decimal-pad'}
+                        inputMode="decimal"
+                        selectTextOnFocus
+                        placeholder="e.g. 8"
+                        placeholderTextColor="rgba(45,79,30,0.3)"
+                    />
                     <Text style={sb.fieldLabel}>Width (ft)</Text>
-                    <TextInput style={sb.input} value={wFt} onChangeText={setWFt} keyboardType="decimal-pad" selectTextOnFocus />
+                    <TextInput
+                        style={sb.input}
+                        value={wFt}
+                        onChangeText={setWFt}
+                        keyboardType={Platform.OS === 'web' ? 'default' : 'decimal-pad'}
+                        inputMode="decimal"
+                        selectTextOnFocus
+                        placeholder="e.g. 4"
+                        placeholderTextColor="rgba(45,79,30,0.3)"
+                    />
                     <Text style={sb.fieldLabel}>Orientation</Text>
                     <View style={sb.segRow}>
                         {['NS', 'EW'].map(opt => (
@@ -312,21 +387,68 @@ function AddBedSidebar({ onAdd, selectedBed, onRotate, onDelete, onAssignCrops, 
             )}
             <View style={sb.divider} />
             <Text style={sb.actionsLabel}>
-                {selectedBed ? `Bed ${selectedBed.label} — ${selectedBed.wFt ?? 4}×${selectedBed.hFt ?? 8}ft` : 'Select a bed'}
+                {selectedCount > 1
+                    ? `${selectedCount} beds selected`
+                    : selectedBed
+                        ? `Bed ${selectedBed.label} — ${selectedBed.wFt ?? 4}×${selectedBed.hFt ?? 8}ft`
+                        : 'Select a bed'}
             </Text>
-            <TouchableOpacity style={[sb.actionBtn, !selectedBed && sb.dim]} onPress={onAssignCrops} disabled={!selectedBed}>
-                <Text style={sb.actionTxt}>🌱 Assign Crops</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[sb.actionBtn, !selectedBed && sb.dim]} onPress={onRotate} disabled={!selectedBed}>
-                <Text style={sb.actionTxt}>↻ Rotate</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[sb.actionBtn, sb.delBtn, !selectedBed && sb.dim]} onPress={onDelete} disabled={!selectedBed}>
-                <Text style={[sb.actionTxt, { color: '#C62828' }]}>🗑 Delete</Text>
-            </TouchableOpacity>
+            {selectedCount > 1 ? (
+                <TouchableOpacity style={[sb.actionBtn, sb.delBtn]} onPress={onDeleteSelected}>
+                    <Text style={[sb.actionTxt, { color: '#C62828' }]}>🗑 Delete {selectedCount} Beds</Text>
+                </TouchableOpacity>
+            ) : (
+                <>
+                    <TouchableOpacity style={[sb.actionBtn, !selectedBed && sb.dim]} onPress={onAssignCrops} disabled={!selectedBed}>
+                        <Text style={sb.actionTxt}>🌱 Assign Crops</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={[sb.actionBtn, !selectedBed && sb.dim]} onPress={onRotate} disabled={!selectedBed}>
+                        <Text style={sb.actionTxt}>↻ Rotate</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={[sb.actionBtn, sb.delBtn, !selectedBed && sb.dim]} onPress={onDelete} disabled={!selectedBed}>
+                        <Text style={[sb.actionTxt, { color: '#C62828' }]}>🗑 Delete</Text>
+                    </TouchableOpacity>
+                </>
+            )}
             <View style={sb.divider} />
             <TouchableOpacity style={[sb.actionBtn, !undoStack.length && sb.dim]} onPress={onUndo} disabled={!undoStack.length}>
                 <Text style={sb.actionTxt}>↩ Undo</Text>
             </TouchableOpacity>
+            <View style={sb.divider} />
+            {/* Snap grid picker */}
+            <Text style={sb.fieldLabel}>Snap Grid</Text>
+            <View style={sb.snapRow}>
+                {SNAP_PRESETS.map(p => (
+                    <TouchableOpacity
+                        key={p.ft}
+                        style={[sb.snapBtn, snapFt === p.ft && sb.snapBtnActive]}
+                        onPress={() => onSnapChange(p.ft)}
+                    >
+                        <Text style={[sb.snapBtnTxt, snapFt === p.ft && sb.snapBtnTxtActive]}>
+                            {p.label}
+                        </Text>
+                    </TouchableOpacity>
+                ))}
+            </View>
+            {/* Min spacing picker */}
+            <View style={sb.divider} />
+            <Text style={sb.fieldLabel}>Min. Spacing</Text>
+            <View style={sb.snapRow}>
+                {[0, 0.5, 1, 2, 4].map(v => (
+                    <TouchableOpacity
+                        key={v}
+                        style={[sb.snapBtn, minGapFt === v && sb.snapBtnActive]}
+                        onPress={() => onMinGapChange(v)}
+                    >
+                        <Text style={[sb.snapBtnTxt, minGapFt === v && sb.snapBtnTxtActive]}>
+                            {v === 0 ? 'None' : v < 1 ? '6in' : `${v}ft`}
+                        </Text>
+                    </TouchableOpacity>
+                ))}
+            </View>
+            <Text style={[sb.fieldLabel, { fontSize: 8, marginTop: 2 }]}>
+                ↑↓←→ nudge · Del delete · ⇧+click multi
+            </Text>
         </View>
     );
 }
@@ -352,6 +474,12 @@ const sb = StyleSheet.create({
     delBtn: { backgroundColor: 'rgba(183,28,28,0.06)' },
     actionTxt: { fontSize: 12, fontWeight: '700', color: Colors.primaryGreen },
     dim: { opacity: 0.3 },
+    // Snap grid picker
+    snapRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 3 },
+    snapBtn: { paddingVertical: 4, paddingHorizontal: 5, borderRadius: 5, borderWidth: 1.5, borderColor: 'rgba(45,79,30,0.2)', backgroundColor: '#F7F5F0' },
+    snapBtnActive: { backgroundColor: Colors.primaryGreen, borderColor: Colors.primaryGreen },
+    snapBtnTxt: { fontSize: 9, fontWeight: '700', color: Colors.primaryGreen },
+    snapBtnTxtActive: { color: '#FFF8F0' },
 });
 
 // ─── Crop picker ──────────────────────────────────────────────────────────────
@@ -575,34 +703,39 @@ function AddBedSheet({ visible, onAdd, onClose }) {
 }
 
 // ─── Main Canvas Component ────────────────────────────────────────────────────
-function BedLayoutCanvas({ beds, selectedId, onBedDrop, onBedClick, width, height, spaceInfo }) {
+function BedLayoutCanvas({ beds, selectedIds, onBedDrop, onBedClick, width, height, spaceInfo, snapFt, minGapFt = 1 }) {
     const canvasRef = useRef(null);
     const stateRef  = useRef({
         beds,
-        selectedId,
+        selectedIds: selectedIds ?? [],
         zoom: 1,
-        pan: { x: 40, y: 40 },
+        pan: { x: 20, y: 20 },
         drag: null,
         panning: false,
         panStart: null,
         cropImages: {},
         spaceInfo: spaceInfo ?? null,
+        snapFt: (snapFt !== undefined && snapFt !== null) ? snapFt : DEFAULT_SNAP_FT,
+        minGapFt: minGapFt ?? 1,
     });
 
     // ── Sync props into stateRef ───────────────────────────────────────────────
     useEffect(() => {
         stateRef.current.beds = beds;
-        stateRef.current.selectedId = selectedId;
+        stateRef.current.selectedIds = selectedIds ?? [];
         stateRef.current.spaceInfo = spaceInfo ?? null;
+        stateRef.current.snapFt = (snapFt !== undefined && snapFt !== null) ? snapFt : DEFAULT_SNAP_FT;
+        stateRef.current.minGapFt = minGapFt ?? 1;
         redraw();
-    }, [beds, selectedId, spaceInfo]);
+    }, [beds, selectedIds, spaceInfo, snapFt, minGapFt]);
 
     // ── Draw ──────────────────────────────────────────────────────────────────
     const redraw = useCallback(() => {
         const canvas = canvasRef.current;
         if (!canvas) return;
         const ctx = canvas.getContext('2d');
-        const { zoom, pan, beds: bs, selectedId: sel, spaceInfo: si } = stateRef.current;
+        const { zoom, pan, beds: bs, selectedIds: selIdsArr, spaceInfo: si } = stateRef.current;
+        const selIdSet = new Set(selIdsArr);
 
         ctx.clearRect(0, 0, width, height);
 
@@ -662,7 +795,7 @@ function BedLayoutCanvas({ beds, selectedId, onBedDrop, onBedClick, width, heigh
         // Draw each bed
         for (const bed of bs) {
             const { w, h } = bedPx(bed);
-            const isSelected = bed.id === sel;
+            const isSelected = selIdSet.has(bed.id);
             const cx = bed.x ?? 60;
             const cy = bed.y ?? 60;
 
@@ -752,6 +885,8 @@ function BedLayoutCanvas({ beds, selectedId, onBedDrop, onBedClick, width, heigh
 
         // North compass rose (top-right, screen-space)
         drawCompass(ctx, width - 50, 50, zoom);
+        // Scale ruler (bottom-left, screen-space)
+        drawRuler(ctx, width, height, zoom);
 
         ctx.restore();
     }, [width, height]);
@@ -788,6 +923,40 @@ function BedLayoutCanvas({ beds, selectedId, onBedDrop, onBedClick, width, heigh
         ctx.textAlign = 'center';
         ctx.textBaseline = 'top';
         ctx.fillText('N', x, y - r - 14);
+        ctx.restore();
+    }
+
+    function drawRuler(ctx, canvasW, canvasH, zoom) {
+        // Pick a round ruler length that represents a sensible real-world distance
+        const targetPx = 80; // target pixel width of the bar
+        const ftOptions = [1, 2, 5, 10, 20, 25, 50];
+        let rulerFt = ftOptions[0];
+        for (const f of ftOptions) {
+            if (f * PX_PER_FT * zoom <= targetPx) rulerFt = f;
+        }
+        const barPx = rulerFt * PX_PER_FT * zoom;
+        const bx = 16, by = canvasH - 30;
+        ctx.save();
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        // Background pill
+        ctx.fillStyle = 'rgba(255,255,255,0.85)';
+        ctx.beginPath();
+        ctx.roundRect(bx - 6, by - 8, barPx + 36, 24, 6);
+        ctx.fill();
+        // Ruler bar
+        ctx.strokeStyle = BED_STROKE;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(bx, by + 4); ctx.lineTo(bx, by);
+        ctx.lineTo(bx + barPx, by);
+        ctx.lineTo(bx + barPx, by + 4);
+        ctx.stroke();
+        // Label
+        ctx.fillStyle = BED_STROKE;
+        ctx.font = 'bold 10px sans-serif';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'top';
+        ctx.fillText(`${rulerFt} ft`, bx + barPx + 5, by - 3);
         ctx.restore();
     }
 
@@ -909,9 +1078,13 @@ function BedLayoutCanvas({ beds, selectedId, onBedDrop, onBedClick, width, heigh
                             rawY = Math.max(0, Math.min(rawY, st.spaceInfo.hPx - h));
                         }
                     }
-                    onBedDrop(st.drag.bedId, snap(rawX), snap(rawY));
+                    const snappedX = snapTo(rawX, st.snapFt);
+                    const snappedY = snapTo(rawY, st.snapFt);
+                    // ── Resolve overlaps with other beds ─────────────────────
+                    const resolved = resolveOverlap(st.drag.bedId, snappedX, snappedY, st.beds, st.spaceInfo, st.minGapFt);
+                    onBedDrop(st.drag.bedId, resolved.x, resolved.y);
                 } else {
-                    onBedClick(st.drag.bedId);
+                    onBedClick(st.drag.bedId, e.shiftKey || false);
                 }
                 st.drag = null;
             } else if (st.panning) {
@@ -990,20 +1163,37 @@ export default function VisualBedLayoutScreen({ navigation, route }) {
     const { width, height } = useWindowDimensions();
     const HEADER_H = 56;
     const TOOLBAR_H = 60;
-    const canvasH = height - HEADER_H - TOOLBAR_H;
+    // Web has no bottom toolbar — use full remaining height
+    const canvasH = Platform.OS === 'web' ? height - HEADER_H : height - HEADER_H - TOOLBAR_H;
 
     // State
     const [beds, setBeds] = useState([]);
-    const [selectedId, setSelectedId] = useState(null);
+    // Multi-select: array of selected bed IDs. Primary = [0]. Extra = rest.
+    const [selectedIds, setSelectedIds]         = useState([]);
+    const [extraSelectedIds, setExtraSelectedIds] = useState(new Set());
     const [undoStack, setUndoStack] = useState([]);
     const [showCropPicker, setShowCropPicker] = useState(false);
     const [showAddBed, setShowAddBed] = useState(false);
     const [showCellGrid, setShowCellGrid] = useState(false);
     const [companionAlert, setCompanionAlert] = useState(null);
     const [spaceInfo, setSpaceInfo] = useState(null);  // canvas boundary + path strips
+    const [minGapFt, setMinGapFt] = useState(1);       // minimum bed-to-bed spacing (ft)
     const bedCounter = useRef(1);
+    // Guards against useFocusEffect re-clearing beds when browser focus cycles
+    const sandboxInitialized = useRef(false);
+    // Configurable snap grid (feet). Shown as pill buttons in the sidebar.
+    const [snapFt, setSnapFt] = useState(DEFAULT_SNAP_FT);
+    const snapFtRef = useRef(DEFAULT_SNAP_FT);
+    useEffect(() => { snapFtRef.current = snapFt; }, [snapFt]);
 
+    // Derived: primary selected ID + bed object (for single-bed sidebar ops)
+    const selectedId  = selectedIds[0] ?? null;
     const selectedBed = beds.find(b => b.id === selectedId);
+    // Full selection set for canvas highlighting and multi-delete
+    const allSelectedIds = selectedId
+        ? [selectedId, ...Array.from(extraSelectedIds).filter(id => id !== selectedId)]
+        : [];
+    const selectedCount = allSelectedIds.length;
 
     // ── Load from persistence ────────────────────────────────────────────────
     useFocusEffect(useCallback(() => {
@@ -1043,10 +1233,8 @@ export default function VisualBedLayoutScreen({ navigation, route }) {
 
             if (nsPathwayCount > 0 && pathPx > 0) {
                 if (!equidistant) {
-                    // Edge: path on east border
                     pathStrips.push({ x: canvasW - pathPx, y: 0, w: pathPx, h: canvasH });
                 } else {
-                    // Evenly distributed: path between column groups
                     let curX = 0;
                     for (let cg = 0; cg < cGroups.length; cg++) {
                         curX += cGroups[cg] * (bedWPx + pathWPx);
@@ -1059,7 +1247,6 @@ export default function VisualBedLayoutScreen({ navigation, route }) {
             }
             if (ewPathwayCount > 0 && pathPx > 0) {
                 if (!equidistant) {
-                    // Edge: path on south border
                     pathStrips.push({ x: 0, y: canvasH - pathPx, w: canvasW, h: pathPx });
                 } else {
                     let curY = 0;
@@ -1076,15 +1263,33 @@ export default function VisualBedLayoutScreen({ navigation, route }) {
             setSpaceInfo({
                 wPx: canvasW, hPx: canvasH,
                 pathStrips,
-                label: `${spaceWidthFt}′ × ${spaceLengthFt}′`,
+                label: `${spaceWidthFt}\u2032 \u00d7 ${spaceLengthFt}\u2032`,
             });
 
-            // Pre-populate beds only if no saved layout
-            if (!saved?.beds?.length) {
-                const numRows = sp.bedsAlongLength;
-                const numCols = sp.bedsAcrossWidth;
+            // ── Sandbox mode: start with empty canvas — user adds beds manually ──
+            if (sp.isSandbox) {
+                if (!sandboxInitialized.current) {
+                    sandboxInitialized.current = true;
+                    // Restore any previously saved sandbox layout, or start empty
+                    if (saved?.beds?.length) {
+                        setBeds(saved.beds);
+                        const maxLabel = saved.beds.reduce((m, b) => Math.max(m, b.label ?? 0), 0);
+                        bedCounter.current = maxLabel + 1;
+                    }
+                    // else: stay empty — sidebar "Add Bed" is the entry point
+                }
+                return;
+            }
+
+            // Pre-populate beds only if no saved layout, but skip if clearOnLoad requested
+            const clearOnLoad = !!(route?.params?.clearOnLoad);
+            if (!clearOnLoad && saved?.beds?.length) {
+                setBeds(saved.beds);
+                const maxLabel = saved.beds.reduce((m, b) => Math.max(m, b.label ?? 0), 0);
+                bedCounter.current = maxLabel + 1;
+            } else if (!saved?.beds?.length) {
                 const rotation = isEW ? 90 : 0;
-                const rowCount = Math.max(1, Math.floor(bedWPx / SNAP_PX)); // crop rows per bed
+                const rowCount = Math.max(1, Math.floor(bedWPx / SNAP_PX));
 
                 const initBeds = [];
                 let label = 1;
@@ -1115,16 +1320,14 @@ export default function VisualBedLayoutScreen({ navigation, route }) {
                 }
                 bedCounter.current = label;
                 setBeds(initBeds);
-            } else {
-                setBeds(saved.beds);
-                const maxLabel = saved.beds.reduce((m, b) => Math.max(m, b.label ?? 0), 0);
-                bedCounter.current = maxLabel + 1;
             }
+
             return;
         }
 
         // ── Legacy: old route format (initialBedCount) ─────────────────────
-        if (saved?.beds?.length) {
+        const clearOnLoad = !!(route?.params?.clearOnLoad);
+        if (!clearOnLoad && saved?.beds?.length) {
             setBeds(saved.beds);
             const maxLabel = saved.beds.reduce((m, b) => Math.max(m, b.label ?? 0), 0);
             bedCounter.current = maxLabel + 1;
@@ -1145,7 +1348,8 @@ export default function VisualBedLayoutScreen({ navigation, route }) {
             bedCounter.current = initialBedCount + 1;
             setBeds(initBeds);
         }
-    }, [route?.params?.spaceJson, route?.params?.initialBedCount]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [route?.params?.spaceJson, route?.params?.initialBedCount, route?.params?.clearOnLoad]));
 
     // ── Persist on every change ───────────────────────────────────────────────
     useEffect(() => {
@@ -1166,11 +1370,50 @@ export default function VisualBedLayoutScreen({ navigation, route }) {
         });
     }
 
-    // Keyboard undo
+    // Keyboard shortcuts (web only)
+    // • Cmd/Ctrl+Z  → undo
+    // • Delete / Backspace → delete selected bed (when no text input is focused)
+    // • Arrow keys → nudge selected bed one snap unit in that direction
+    const selectedIdRef = useRef(selectedId);
+    const allSelectedIdsRef = useRef(allSelectedIds);
+    useEffect(() => { selectedIdRef.current = selectedId; }, [selectedId]);
+    useEffect(() => { allSelectedIdsRef.current = allSelectedIds; }, [allSelectedIds]);
+
     useEffect(() => {
         if (Platform.OS !== 'web') return;
         const handler = (e) => {
-            if ((e.metaKey || e.ctrlKey) && e.key === 'z') undo();
+            // Skip if a text input actually has focus (check by type, not just tagName)
+            const el = document.activeElement;
+            const isTyping = el && (
+                (el.tagName === 'INPUT' && el.type !== 'range') ||
+                el.tagName === 'TEXTAREA' ||
+                el.isContentEditable
+            );
+            if (isTyping) return;
+
+            if ((e.metaKey || e.ctrlKey) && e.key === 'z') {
+                undo();
+            } else if ((e.metaKey || e.ctrlKey) && e.key === 'a') {
+                // Select all beds
+                e.preventDefault();
+                setBeds(prev => {
+                    if (prev.length === 0) return prev;
+                    setSelectedIds([prev[0].id]);
+                    setExtraSelectedIds(new Set(prev.slice(1).map(b => b.id)));
+                    return prev;
+                });
+            } else if ((e.key === 'Delete' || e.key === 'Backspace') && allSelectedIdsRef.current.length > 0) {
+                e.preventDefault();
+                deleteSelected();
+            } else if (['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key) && selectedIdRef.current) {
+                e.preventDefault();
+                const stepPx = snapFtRef.current * PX_PER_FT;
+                const dx = e.key === 'ArrowLeft' ? -stepPx : e.key === 'ArrowRight' ? stepPx : 0;
+                const dy = e.key === 'ArrowUp'   ? -stepPx : e.key === 'ArrowDown'  ? stepPx : 0;
+                setBeds(prev => prev.map(b =>
+                    allSelectedIdsRef.current.includes(b.id) ? { ...b, x: b.x + dx, y: b.y + dy } : b
+                ));
+            }
         };
         window.addEventListener('keydown', handler);
         return () => window.removeEventListener('keydown', handler);
@@ -1184,25 +1427,61 @@ export default function VisualBedLayoutScreen({ navigation, route }) {
         });
     }, []);
 
-    const handleBedClick = useCallback((bedId) => {
-        setSelectedId(id => id === bedId ? id : bedId);
+    const handleBedClick = useCallback((bedId, shiftKey = false) => {
+        if (shiftKey && bedId) {
+            // Shift+click: toggle bed in/out of extra selection
+            setExtraSelectedIds(prev => {
+                const next = new Set(prev);
+                if (next.has(bedId)) {
+                    next.delete(bedId);
+                } else {
+                    next.add(bedId);
+                }
+                return next;
+            });
+        } else {
+            // Normal click: single selection
+            setSelectedIds(bedId ? [bedId] : []);
+            setExtraSelectedIds(new Set());
+        }
     }, []);
 
-    function addBed({ wFt, hFt }) {
+    function addBed({ wFt, hFt, ori = 'NS' }) {
         const label = bedCounter.current++;
-        const rowCount = Math.max(1, Math.floor((wFt * PX_PER_FT) / SNAP_PX));
+        const rotation = ori === 'EW' ? 90 : 0;
+        // Effective footprint on the canvas (accounting for 90° rotation)
+        const footW = ori === 'EW' ? hFt * PX_PER_FT : wFt * PX_PER_FT;
+        const footH = ori === 'EW' ? wFt * PX_PER_FT : hFt * PX_PER_FT;
+        const gapPx = minGapFt * PX_PER_FT;
+        // Place new bed inside boundary if available, else 1ft from top-left
+        let baseX = snap(PX_PER_FT);
+        let baseY = snap(PX_PER_FT);
+        if (spaceInfo) {
+            // Stack beds vertically inside the boundary with spacing
+            const placed = beds.length;
+            const stride = footH + gapPx;
+            const col = spaceInfo.wPx > 0 ? Math.floor((placed * stride) / spaceInfo.hPx) : 0;
+            const row = placed - col * Math.max(1, Math.floor(spaceInfo.hPx / stride));
+            baseX = snap(col * (footW + gapPx));
+            baseY = snap(row * stride);
+            // Clamp so bed stays inside boundary
+            baseX = Math.max(0, Math.min(baseX, spaceInfo.wPx - footW));
+            baseY = Math.max(0, Math.min(baseY, spaceInfo.hPx - footH));
+        }
+        const rowCount = Math.max(1, Math.floor((wFt * PX_PER_FT) / (DEFAULT_SNAP_FT * PX_PER_FT)));
         const newBed = {
             id: makeId(),
             label,
-            x: snap(40 + (beds.length % 4) * (wFt * PX_PER_FT + 24)),
-            y: snap(40 + Math.floor(beds.length / 4) * (hFt * PX_PER_FT + 24)),
-            rotation: 0,
+            x: baseX,
+            y: baseY,
+            rotation,
             wFt,
             hFt,
             rows: Array(rowCount).fill(null),
         };
         setBeds(prev => { pushUndo(prev); return [...prev, newBed]; });
-        setSelectedId(newBed.id);
+        setSelectedIds([newBed.id]);
+        setExtraSelectedIds(new Set());
     }
 
     function rotateBed() {
@@ -1220,7 +1499,16 @@ export default function VisualBedLayoutScreen({ navigation, route }) {
     function deleteBed() {
         if (!selectedId) return;
         setBeds(prev => { pushUndo(prev); return prev.filter(b => b.id !== selectedId); });
-        setSelectedId(null);
+        setSelectedIds([]);
+        setExtraSelectedIds(new Set());
+    }
+
+    function deleteSelected() {
+        const toDelete = new Set(allSelectedIds);
+        if (toDelete.size === 0) return;
+        setBeds(prev => { pushUndo(prev); return prev.filter(b => !toDelete.has(b.id)); });
+        setSelectedIds([]);
+        setExtraSelectedIds(new Set());
     }
 
     function assignCrop(cropId) {
@@ -1229,7 +1517,7 @@ export default function VisualBedLayoutScreen({ navigation, route }) {
             pushUndo(prev);
             return prev.map(b => b.id === selectedId ? { ...b, cropId } : b);
         });
-        setShowCropPicker(false);
+        setShowCropPicker(false); // eslint-disable-line
 
         // companion check vs all other beds (first non-null row)
         if (cropId) {
@@ -1297,7 +1585,8 @@ export default function VisualBedLayoutScreen({ navigation, route }) {
     function clearAll() {
         pushUndo(beds);
         setBeds([]);
-        setSelectedId(null);
+        setSelectedIds([]);
+        setExtraSelectedIds(new Set());
         bedCounter.current = 1;
     }
 
@@ -1312,7 +1601,7 @@ export default function VisualBedLayoutScreen({ navigation, route }) {
 
     // ── Render ────────────────────────────────────────────────────────────────
     return (
-        <View style={styles.container}>
+        <View style={[styles.container, Platform.OS === 'web' && { overflow: 'hidden', maxHeight: '100dvh' }]}>
             {/* Companion conflict flash banner */}
             {companionAlert && (
                 <CompanionAlertBanner
@@ -1339,22 +1628,30 @@ export default function VisualBedLayoutScreen({ navigation, route }) {
                     <AddBedSidebar
                         onAdd={addBed}
                         selectedBed={selectedBed}
+                        selectedCount={selectedCount}
                         onRotate={rotateBed}
                         onDelete={deleteBed}
+                        onDeleteSelected={deleteSelected}
                         onAssignCrops={() => setShowCellGrid(true)}
                         undoStack={undoStack}
                         onUndo={undo}
+                        snapFt={snapFt}
+                        onSnapChange={setSnapFt}
+                        minGapFt={minGapFt}
+                        onMinGapChange={setMinGapFt}
                     />
                 )}
                 <View style={{ flex: 1, height: canvasH }}>
                     <BedLayoutCanvas
                         beds={beds}
-                        selectedId={selectedId}
+                        selectedIds={allSelectedIds}
                         onBedDrop={handleBedDrop}
                         onBedClick={handleBedClick}
                         width={Platform.OS === 'web' ? width - 176 : width}
                         height={canvasH}
                         spaceInfo={spaceInfo}
+                        snapFt={snapFt}
+                        minGapFt={minGapFt}
                     />
                 </View>
             </View>
@@ -1404,8 +1701,8 @@ export default function VisualBedLayoutScreen({ navigation, route }) {
                     <Text style={styles.emptyTitle}>Start Designing</Text>
                     <Text style={styles.emptyBody}>
                         {Platform.OS === 'web'
-                            ? 'Use the sidebar to add your first bed, then drag it into position.'
-                            : 'Tap "+ Add Bed" to place your first garden bed.'}
+                            ? 'Drag a bed to reposition it. Tap to select, then use the sidebar to rotate or delete.'
+                            : 'Use the ＋ Add Bed panel on the left to place your first bed, then drag it into position.'}
                     </Text>
                 </View>
             )}
