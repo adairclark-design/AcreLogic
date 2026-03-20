@@ -238,6 +238,30 @@ export function calculatePlantsNeeded(crop, familySize, gardenProfile = null) {
         }
     }
 
+    // \u2500\u2500 Succession dates: exact sow rounds for bolt-prone crops \u2500\u2500
+    // needsSuccession is already calculated above; here we turn the generic
+    // "sow every 2-3 weeks" into explicit Round 2, Round 3... dates.
+    let successionDates = [];  // [{ round, dateRaw, dateDisplay }]
+    if (needsSuccession && directSowDateRaw && gardenProfile?.first_frost_date) {
+        const interval    = crop.harvest_window_days ?? 14;  // days between rounds
+        const dtm         = crop.dtm ?? 30;
+        const firstFrost  = gardenProfile.first_frost_date;  // "YYYY-MM-DD"
+
+        for (let round = 2; round <= 8; round++) {
+            const sowRaw      = addDays(directSowDateRaw, (round - 1) * interval);
+            const maturityRaw = addDays(sowRaw, dtm);
+            // ISO strings compare lexicographically — "2026-10-30" > "2026-10-15"
+            const sow10 = typeof sowRaw === 'string' ? sowRaw.substring(0, 10) : sowRaw;
+            const mat10 = typeof maturityRaw === 'string' ? maturityRaw.substring(0, 10) : maturityRaw;
+            if (mat10 > firstFrost) break;
+            successionDates.push({
+                round,
+                dateRaw:     sow10,
+                dateDisplay: formatDateDisplay(sow10),
+            });
+        }
+    }
+
     // Late-start caveat — triggered if today's dates are past the ideal window
     if (isLateStart) {
         const isTimePressed = crop.min_frost_free_days >= 90 || crop.season === 'warm' || crop.dtm >= 80;
@@ -282,6 +306,7 @@ export function calculatePlantsNeeded(crop, familySize, gardenProfile = null) {
         frostFreeDays,                          // from gardenProfile
         notes: crop.notes,
         needsSuccession,                        // true = bolt-prone, succession-plant
+        successionDates,                        // [{round, dateRaw, dateDisplay}] — exact sow dates
         successionNote,                         // human-readable succession callout
 
         // Computed calendar dates (null if no gardenProfile)

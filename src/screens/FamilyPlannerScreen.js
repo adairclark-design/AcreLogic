@@ -345,13 +345,31 @@ function ReportCard({ item, cardWidth }) {
                 ) : null}
             </View>
 
-            {/* Succession callout — only for bolt-prone / quick-finish crops */}
-            {item.needsSuccession && item.successionNote ? (
+            {/* Succession callout — shows exact round dates if available, generic note as fallback */}
+            {item.needsSuccession ? (
                 <View style={styles.successionCallout}>
                     <Text style={styles.successionIcon}>⚡</Text>
-                    <Text style={styles.successionText}>{item.successionNote}</Text>
+                    <View style={{ flex: 1 }}>
+                        <Text style={styles.successionTitle}>Succession Schedule</Text>
+                        {item.successionDates?.length > 0 ? (
+                            <>
+                                {/* Round 1 = the directSowDate itself */}
+                                <Text style={styles.successionRound}>
+                                    Round 1: {item.directSowDate ?? 'See sow date above'}
+                                </Text>
+                                {item.successionDates.map(d => (
+                                    <Text key={d.round} style={styles.successionRound}>
+                                        Round {d.round}: {d.dateDisplay}
+                                    </Text>
+                                ))}
+                            </>
+                        ) : (
+                            <Text style={styles.successionText}>{item.successionNote}</Text>
+                        )}
+                    </View>
                 </View>
             ) : null}
+
 
             {/* Consumption note */}
             {item.consumptionNotes ? (
@@ -1386,7 +1404,10 @@ const styles = StyleSheet.create({
         borderRadius: 4, paddingVertical: 7, paddingRight: Spacing.sm, paddingLeft: 8,
     },
     successionIcon: { fontSize: 12, lineHeight: 16, flexShrink: 0 },
+    successionTitle: { fontSize: Typography.xs, fontWeight: Typography.semiBold, color: '#8B5000', marginBottom: 3 },
     successionText: { flex: 1, fontSize: Typography.xs, color: '#8B5000', lineHeight: 15 },
+    successionRound: { fontSize: Typography.xs, color: '#8B5000', lineHeight: 17, fontWeight: Typography.medium },
+
 
 
     // ── Good Luck banner ──────────────────────────────────────────────────────

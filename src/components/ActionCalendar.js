@@ -59,7 +59,7 @@ const EVENT_TYPES = {
 
 /**
  * Extracts all calendar events from a list of crop plan items.
- * Returns a flat array of { date, weekKey, cropName, variety, type }
+ * Returns a flat array of { date, weekKey, cropName, variety, type, roundLabel? }
  */
 function extractEvents(crops) {
     const events = [];
@@ -69,7 +69,7 @@ function extractEvents(crops) {
             ? `${c.cropName} (${c.variety})`
             : c.cropName;
 
-        const push = (dateRaw, type) => {
+        const push = (dateRaw, type, roundLabel = null) => {
             const date = parseISO(dateRaw);
             if (!date) return;
             const weekStart = startOfWeek(date);
@@ -84,13 +84,22 @@ function extractEvents(crops) {
                 variety: c.variety,
                 displayName: name,
                 type,
+                roundLabel,   // e.g. "Round 2" for succession events
             });
         };
 
         push(c.indoorSeedDateRaw,  'indoor');
-        push(c.directSowDateRaw,   'sow');
+        // Round 1 direct sow (label it only if there are succession rounds)
+        push(c.directSowDateRaw,   'sow', c.successionDates?.length > 0 ? 'Round 1' : null);
         push(c.transplantDateRaw,  'transplant');
         push(c.harvestStartDateRaw,'harvest');
+
+        // Succession rounds (Round 2, 3, …)
+        if (c.successionDates?.length > 0) {
+            for (const succ of c.successionDates) {
+                push(succ.dateRaw, 'sow', `Round ${succ.round}`);
+            }
+        }
     }
 
     // Sort by date ascending
@@ -128,6 +137,9 @@ function groupEvents(events) {
 
 function EventRow({ ev }) {
     const t = EVENT_TYPES[ev.type];
+    const actionLabel = ev.roundLabel
+        ? `${t.label} — ${ev.roundLabel}`
+        : t.label;
     return (
         <View style={[styles.eventRow, { backgroundColor: t.bg }]}>
             <Text style={styles.eventEmoji}>{t.emoji}</Text>
@@ -135,7 +147,7 @@ function EventRow({ ev }) {
                 <Text style={[styles.eventCrop, { color: t.color }]} numberOfLines={1}>
                     {ev.displayName}
                 </Text>
-                <Text style={styles.eventAction}>{t.label}</Text>
+                <Text style={styles.eventAction}>{actionLabel}</Text>
             </View>
         </View>
     );
