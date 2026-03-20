@@ -726,8 +726,21 @@ function BedLayoutCanvas({ beds, selectedIds, onBedDrop, onBedClick, width, heig
         stateRef.current.spaceInfo = spaceInfo ?? null;
         stateRef.current.snapFt = (snapFt !== undefined && snapFt !== null) ? snapFt : DEFAULT_SNAP_FT;
         stateRef.current.minGapFt = minGapFt ?? 1;
+        // Auto-fit: lock zoom+pan so the boundary fills the canvas
+        const si = stateRef.current.spaceInfo;
+        if (si && si.wPx > 0 && si.hPx > 0 && width > 0 && height > 0) {
+            const PAD = 28;
+            const scaleX = (width  - PAD * 2) / si.wPx;
+            const scaleY = (height - PAD * 2) / si.hPx;
+            const z = Math.min(scaleX, scaleY);
+            stateRef.current.zoom = z;
+            stateRef.current.pan  = {
+                x: (width  - si.wPx * z) / 2,
+                y: (height - si.hPx * z) / 2,
+            };
+        }
         redraw();
-    }, [beds, selectedIds, spaceInfo, snapFt, minGapFt]);
+    }, [beds, selectedIds, spaceInfo, snapFt, minGapFt, width, height]);
 
     // ── Draw ──────────────────────────────────────────────────────────────────
     const redraw = useCallback(() => {
@@ -1032,9 +1045,6 @@ function BedLayoutCanvas({ beds, selectedIds, onBedDrop, onBedClick, width, heig
                     origX: hit.x ?? 60,
                     origY: hit.y ?? 60,
                 };
-            } else {
-                st.panning = true;
-                st.panStart = { px: st.pan.x, py: st.pan.y, mx: pos.x, my: pos.y };
             }
         }
 
@@ -1049,12 +1059,6 @@ function BedLayoutCanvas({ beds, selectedIds, onBedDrop, onBedClick, width, heig
                 // Optimistic local update for smooth drag
                 const bed = st.beds.find(b => b.id === st.drag.bedId);
                 if (bed) { bed.x = newX; bed.y = newY; }
-                redraw();
-            } else if (st.panning && st.panStart) {
-                st.pan = {
-                    x: st.panStart.px + pos.x - st.panStart.mx,
-                    y: st.panStart.py + pos.y - st.panStart.my,
-                };
                 redraw();
             }
         }
@@ -1087,35 +1091,22 @@ function BedLayoutCanvas({ beds, selectedIds, onBedDrop, onBedClick, width, heig
                     onBedClick(st.drag.bedId, e.shiftKey || false);
                 }
                 st.drag = null;
-            } else if (st.panning) {
-                st.panning = false;
-                st.panStart = null;
-                const dt = Date.now() - clickStart.t;
+            } else {
+                // Click on empty canvas — deselect
+                const dt  = Date.now() - clickStart.t;
                 const ddx = pos.x - clickStart.x;
                 const ddy = pos.y - clickStart.y;
                 if (dt < 250 && Math.sqrt(ddx * ddx + ddy * ddy) < 5) {
-                    onBedClick(null);
+                    onBedClick(null, false);
                 }
             }
         }
 
-        function onWheel(e) {
-            e.preventDefault();
-            const st = stateRef.current;
-            const pos = toCanvas(e);
-            const factor = e.deltaY < 0 ? 1.1 : 0.9;
-            const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, st.zoom * factor));
-            // Zoom around cursor point
-            st.pan.x = pos.x - (pos.x - st.pan.x) * (newZoom / st.zoom);
-            st.pan.y = pos.y - (pos.y - st.pan.y) * (newZoom / st.zoom);
-            st.zoom = newZoom;
-            redraw();
-        }
+        // Zoom/pan intentionally removed — canvas uses auto-fit (static viewport)
 
         canvas.addEventListener('mousedown', onDown);
         canvas.addEventListener('mousemove', onMove);
         canvas.addEventListener('mouseup', onUp);
-        canvas.addEventListener('wheel', onWheel, { passive: false });
         canvas.addEventListener('touchstart', onDown, { passive: true });
         canvas.addEventListener('touchmove', onMove, { passive: true });
         canvas.addEventListener('touchend', onUp);
@@ -1124,15 +1115,13 @@ function BedLayoutCanvas({ beds, selectedIds, onBedDrop, onBedClick, width, heig
             canvas.removeEventListener('mousedown', onDown);
             canvas.removeEventListener('mousemove', onMove);
             canvas.removeEventListener('mouseup', onUp);
-            canvas.removeEventListener('wheel', onWheel);
             canvas.removeEventListener('touchstart', onDown);
             canvas.removeEventListener('touchmove', onMove);
             canvas.removeEventListener('touchend', onUp);
         };
     }, [onBedDrop, onBedClick, redraw]);
 
-    // Redraw on resize
-    useEffect(() => { redraw(); }, [width, height, redraw]);
+    // Redraw handled by main sync useEffect (which now includes width/height deps)
 
     if (Platform.OS !== 'web') {
         return (
@@ -1153,7 +1142,7 @@ function BedLayoutCanvas({ beds, selectedIds, onBedDrop, onBedClick, width, heig
             ref={canvasRef}
             width={width}
             height={height}
-            style={{ display: 'block', cursor: 'crosshair' }}
+            style={{ display: 'block', cursor: 'default' }}
         />
     );
 }
