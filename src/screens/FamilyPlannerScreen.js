@@ -34,6 +34,7 @@ import MegaMenuBar from '../components/MegaMenuBar';
 import SharedCropCard from '../components/SharedCropCard';
 import ActionCalendar from '../components/ActionCalendar';
 import SeedShoppingList from '../components/SeedShoppingList';
+import YieldForecast from '../components/YieldForecast';
 import { formatCropDisplayName, formatVarietyLabel } from '../utils/cropDisplay';
 
 // ─── Full PDF monthly cap ────────────────────────────────────────────────────
@@ -781,7 +782,7 @@ export default function FamilyPlannerScreen({ navigation }) {
                             </View>
                         )}
 
-                        {/* ── View mode tab bar (3 tabs) ── */}
+                        {/* ── View mode tab bar (4 tabs) ── */}
                         <View style={styles.viewTabBar}>
                             <TouchableOpacity
                                 style={[styles.viewTab, viewMode === 'cards' && styles.viewTabActive]}
@@ -804,7 +805,15 @@ export default function FamilyPlannerScreen({ navigation }) {
                                 onPress={() => setViewMode('seeds')}
                             >
                                 <Text style={[styles.viewTabText, viewMode === 'seeds' && styles.viewTabTextActive]}>
-                                    🛒  Seed List
+                                    🛒  Seeds
+                                </Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                style={[styles.viewTab, viewMode === 'yield' && styles.viewTabActive]}
+                                onPress={() => setViewMode('yield')}
+                            >
+                                <Text style={[styles.viewTabText, viewMode === 'yield' && styles.viewTabTextActive]}>
+                                    📊  Yield
                                 </Text>
                             </TouchableOpacity>
                         </View>
@@ -823,7 +832,7 @@ export default function FamilyPlannerScreen({ navigation }) {
                             Chunk cards into rows of numColumns, render each
                             row as flexDirection:'row'. Each cell is flex:1
                             so columns split width evenly — works everywhere. */}
-                        {/* Report cards, Action Calendar, or Seed List based on view mode */}
+                        {/* Cards / Calendar / Seed List / Yield Forecast based on view mode */}
                         {viewMode === 'calendar' ? (
                             <ActionCalendar
                                 crops={planResult.supported}
@@ -831,6 +840,8 @@ export default function FamilyPlannerScreen({ navigation }) {
                             />
                         ) : viewMode === 'seeds' ? (
                             <SeedShoppingList crops={planResult.supported} />
+                        ) : viewMode === 'yield' ? (
+                            <YieldForecast crops={planResult.supported} />
                         ) : (
                         (() => {
                             const cards = planResult.supported;
