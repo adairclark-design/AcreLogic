@@ -11,12 +11,15 @@ import {
     ActivityIndicator,
     Image,
     Platform,
+    TextInput,
+    Alert,
 } from 'react-native';
 import { Colors, Typography, Spacing, Radius, Shadows } from '../theme';
 import { getSuccessionCandidatesRanked, autoGenerateSuccessions, AUTOFILL_STRATEGIES } from '../services/successionEngine';
 import { saveBedAssignment, getBedSuccessions, getCropById } from '../services/database';
 import { saveBedSuccessions, saveSeasonSnapshot, getPriorYearBedCrops, loadRotationHistory } from '../services/persistence';
 import { checkBedCompanions, checkBlockNeighborWarnings } from '../services/companionService';
+import cropData from '../data/crops.json';
 import CompanionAlertBanner from '../components/CompanionAlertBanner';
 import BedNoteModal from '../components/BedNoteModal';
 import AIPlanGeneratorModal from '../components/AIPlanGeneratorModal';
@@ -92,11 +95,20 @@ function rotationChipStyle(priorCrops, currentSuccessions) {
 }
 
 // ─── Bed Component (with Gantt timeline) ─────────────────────────────────────
-const BedRow = ({ bedNumber, successions, onPress, seasonStart, seasonEnd, priorCrops }) => {
+const BedRow = ({ bedNumber, successions, onPress, seasonStart, seasonEnd, firstFrostDate, priorCrops, shelterType }) => {
     const hasSuccessions = successions?.length > 0;
     const seasonDays = seasonStart && seasonEnd ? daysBetween(seasonStart, seasonEnd) : 0;
     const showGantt = hasSuccessions && seasonDays > 10 &&
         successions.some(s => s.start_date && s.end_date);
+
+    // IN / OUT / remaining days computation
+    const firstIn   = hasSuccessions ? successions.reduce((min, s) => !s.start_date ? min : (!min || s.start_date < min ? s.start_date : min), null) : null;
+    const lastOut   = hasSuccessions ? successions.reduce((max, s) => !s.end_date   ? max : (!max || s.end_date   > max ? s.end_date   : max), null) : null;
+    const frostDate = firstFrostDate ?? seasonEnd;
+    const daysRemaining = (lastOut && frostDate) ? Math.max(0, daysBetween(lastOut, frostDate)) : null;
+    const remainingColor = daysRemaining === null ? null : daysRemaining >= 45 ? '#2E7D32' : daysRemaining >= 15 ? '#E65100' : '#C62828';
+    const remainingBg    = daysRemaining === null ? null : daysRemaining >= 45 ? '#E8F5E9' : daysRemaining >= 15 ? '#FFF3E0' : '#FFEBEE';
+
 
     // Month tick marks for the season
     const monthTicks = [];
@@ -125,6 +137,12 @@ const BedRow = ({ bedNumber, successions, onPress, seasonStart, seasonEnd, prior
             <View style={styles.bedLabel}>
                 <Text style={styles.bedLabelNum}>Bed</Text>
                 <Text style={styles.bedLabelText}>{bedNumber}</Text>
+                {/* Shelter badge */}
+                {shelterType && shelterType !== 'none' && (
+                    <Text style={styles.shelterBadge}>
+                        {shelterType === 'greenhouse' ? '🏡' : '☔'}
+                    </Text>
+                )}
                 {/* Last Year chip */}
                 {(() => {
                     const chip = rotationChipStyle(priorCrops, successions);
@@ -214,6 +232,31 @@ const BedRow = ({ bedNumber, successions, onPress, seasonStart, seasonEnd, prior
                     </View>
                 )}
             </View>
+
+            {/* IN / OUT / remaining strip */}
+            {hasSuccessions && (firstIn || lastOut || daysRemaining !== null) && (
+                <View style={styles.seasonStrip}>
+                    {firstIn && (
+                        <Text style={styles.seasonStripItem}>
+                            <Text style={styles.seasonStripLabel}>IN </Text>
+                            <Text style={styles.seasonStripValue}>{fmtShortDate(firstIn)}</Text>
+                        </Text>
+                    )}
+                    {lastOut && (
+                        <Text style={styles.seasonStripItem}>
+                            <Text style={styles.seasonStripLabel}> OUT </Text>
+                            <Text style={styles.seasonStripValue}>{fmtShortDate(lastOut)}</Text>
+                        </Text>
+                    )}
+                    {daysRemaining !== null && (
+                        <View style={[styles.seasonStripRemaining, { backgroundColor: remainingBg }]}>
+                            <Text style={[styles.seasonStripRemainingText, { color: remainingColor }]}>
+                                {daysRemaining > 0 ? `🟢 ${daysRemaining}d left` : '🔴 Season full'}
+                            </Text>
+                        </View>
+                    )}
+                </View>
+            )}
 
             <View style={styles.bedArrow}>
                 <Text style={styles.bedArrowText}>›</Text>
@@ -325,13 +368,39 @@ const OverheadGrid = ({ bedSuccessions, onPressBed, onLongPressBed }) => {
 
 
 // ─── Succession Drawer ────────────────────────────────────────────────────────
-const SuccessionDrawer = ({ visible, bedNumber, currentSuccessions, allBedSuccessions, candidates, loading, frostFreeDays, onClose, onPlant, onRemoveSuccession }) => {
+const SuccessionDrawer = ({ visible, bedNumber, currentSuccessions, allBedSuccessions, candidates, loading, frostFreeDays, onClose, onPlant, onPlantOutOfSeason, onRemoveSuccession, fillRemainingDtm, onEditCoverage, bedShelterType, onSetShelter }) => {
     const [frostFilter, setFrostFilter] = React.useState(false);
-    const [coverageFraction, setCoverageFraction] = React.useState(1.0);  // 0.25 / 0.5 / 0.75 / 1.0
+    const [searchQuery, setSearchQuery] = React.useState('');
+    const [coverageFraction, setCoverageFraction] = React.useState(1.0);
+    const [editingIdx, setEditingIdx] = React.useState(null); // index of current-plan row being edited
     const translateY = useRef(new Animated.Value(height)).current;
     const opacity = useRef(new Animated.Value(0)).current;
 
-    useEffect(() => {
+    // Reset search & fraction when drawer closes or bed changes
+    React.useEffect(() => {
+        if (!visible) {
+            setSearchQuery('');
+            setEditingIdx(null);
+        }
+        if (visible) setCoverageFraction(1.0);
+    }, [visible, bedNumber]);
+
+    // When entering fill-remaining mode, snap coverageFraction to the largest fraction that fits.
+    // This prevents it being stuck at a previous value that's now out of range or auto-selected.
+    React.useEffect(() => {
+        if (fillRemainingDtm != null) {
+            // remainingCoverage is computed below, but we can derive it directly here
+            const total = (currentSuccessions ?? []).reduce((sum, s) => sum + (s.coverage_fraction ?? 1.0), 0);
+            const remaining = Math.max(0, 1.0 - total);
+            // Pick the largest fraction that fits (prefer full remaining if it's a clean step)
+            const STEPS = [1.0, 0.75, 0.5, 0.25];
+            const best = STEPS.find(v => v <= remaining + 0.01) ?? 0.25;
+            setCoverageFraction(best);
+        }
+    }, [fillRemainingDtm]);
+
+    // Animation open/close
+    React.useEffect(() => {
         if (visible) {
             Animated.parallel([
                 Animated.spring(translateY, { toValue: 0, tension: 65, friction: 11, useNativeDriver: true }),
@@ -344,6 +413,38 @@ const SuccessionDrawer = ({ visible, bedNumber, currentSuccessions, allBedSucces
             ]).start();
         }
     }, [visible]);
+
+    // Derived coverage state
+    const currentTotal = (currentSuccessions ?? []).reduce((sum, s) => sum + (s.coverage_fraction ?? 1.0), 0);
+    const remainingCoverage = Math.max(0, 1.0 - currentTotal);
+    const isFillRemainingMode = fillRemainingDtm != null && remainingCoverage > 0 && remainingCoverage < 1.0;
+
+    // Filter + sort candidates for display
+    const displayedCandidates = React.useMemo(() => {
+        let list = frostFilter ? candidates.filter(c => c.crop.frost_tolerant) : candidates;
+        if (searchQuery.trim().length >= 2) {
+            const q = searchQuery.trim().toLowerCase();
+            list = list.filter(c =>
+                `${c.crop.name} ${c.crop.variety ?? ''} ${c.crop.category}`.toLowerCase().includes(q)
+            );
+        }
+        if (isFillRemainingMode && fillRemainingDtm) {
+            const similar = list.filter(c => Math.abs((c.crop.dtm ?? 0) - fillRemainingDtm) <= 25);
+            const others = list.filter(c => Math.abs((c.crop.dtm ?? 0) - fillRemainingDtm) > 25);
+            return [...similar, ...others];
+        }
+        return list;
+    }, [candidates, frostFilter, searchQuery, isFillRemainingMode, fillRemainingDtm]);
+
+    // Compute at component level so FlatList renderItem can access it
+    // (was previously scoped inside the coverage-picker IIFE — caused ReferenceError on crop tap)
+    const _coverageSteps = [0.25, 0.5, 0.75, 1.0];
+    const _validSteps = isFillRemainingMode
+        ? _coverageSteps.filter(v => v <= remainingCoverage + 0.01)
+        : _coverageSteps;
+    const effectiveFraction = _validSteps.some(v => Math.abs(v - coverageFraction) < 0.01)
+        ? coverageFraction
+        : (_validSteps[_validSteps.length - 1] ?? 1.0);
 
     return (
         <>
@@ -358,10 +459,16 @@ const SuccessionDrawer = ({ visible, bedNumber, currentSuccessions, allBedSucces
                 <View style={styles.drawerHandle} />
 
                 <View style={styles.drawerHeader}>
-                    <View>
-                        <Text style={styles.drawerTitle}>Succession Planner</Text>
+                    <View style={{ flex: 1 }}>
+                        <Text style={styles.drawerTitle}>
+                            {isFillRemainingMode
+                                ? `What fills the rest of Bed ${bedNumber}?`
+                                : 'Succession Planner'}
+                        </Text>
                         <Text style={styles.drawerSubtitle}>
-                            Bed {bedNumber} · {frostFreeDays ?? '—'} Frost-Free Days Available
+                            {isFillRemainingMode
+                                ? `${Math.round(remainingCoverage * 100)}% of the bed still open · similar DTM shown first`
+                                : `Bed ${bedNumber} · ${frostFreeDays ?? '—'} Frost-Free Days Available`}
                         </Text>
                     </View>
                     <TouchableOpacity style={styles.drawerCloseBtn} onPress={onClose}>
@@ -369,33 +476,118 @@ const SuccessionDrawer = ({ visible, bedNumber, currentSuccessions, allBedSucces
                     </TouchableOpacity>
                 </View>
 
-                {/* Current bed plan — tap ✕ to remove a succession */}
+                {/* ── Shelter toggle ── */}
+                <View style={styles.shelterToggleWrap}>
+                    <Text style={styles.shelterToggleLabel}>Bed protection:</Text>
+                    <View style={styles.shelterToggleRow}>
+                        {[
+                            { key: 'none',       label: '🌿 Open',        ext: 0  },
+                            { key: 'rowCover',   label: '☔ Row Cover',  ext: 14 },
+                            { key: 'greenhouse', label: '🏡 Greenhouse', ext: 42 },
+                        ].map(opt => {
+                            const active = (bedShelterType ?? 'none') === opt.key;
+                            return (
+                                <TouchableOpacity
+                                    key={opt.key}
+                                    style={[styles.shelterBtn, active && styles.shelterBtnActive]}
+                                    onPress={() => onSetShelter?.(opt.key)}
+                                >
+                                    <Text style={[styles.shelterBtnText, active && styles.shelterBtnTextActive]}>
+                                        {opt.label}
+                                    </Text>
+                                    {opt.ext > 0 && (
+                                        <Text style={[styles.shelterBtnExt, active && { color: 'rgba(255,248,240,0.8)' }]}>
+                                            +{opt.ext}d season
+                                        </Text>
+                                    )}
+                                </TouchableOpacity>
+                            );
+                        })}
+                    </View>
+                </View>
+
+                {/* ── Remaining days banner ── */}
+                {frostFreeDays != null && frostFreeDays <= 60 && (
+                    <View style={[styles.seasonBanner, frostFreeDays < 20 && styles.seasonBannerUrgent]}>
+                        <Text style={[styles.seasonBannerText, frostFreeDays < 20 && styles.seasonBannerTextUrgent]}>
+                            {frostFreeDays < 20
+                                ? `🔴 Only ${frostFreeDays} days left — cool-season crops recommended`
+                                : `⚠️ ${frostFreeDays} frost-free days remaining — cool crops prioritized`}
+                        </Text>
+                    </View>
+                )}
+
+                {/* Current bed plan — tap a row to edit coverage, tap ✕ to remove */}
                 {currentSuccessions?.length > 0 && (
                     <View style={styles.drawerCurrentPlan}>
-                        <Text style={styles.drawerCurrentPlanTitle}>Current Plan — tap ✕ to remove</Text>
+                        <Text style={styles.drawerCurrentPlanTitle}>Current Plan — tap to edit coverage</Text>
                         {currentSuccessions.map((s, idx) => {
                             const dateRange = fmtDateRange(s.start_date, s.end_date);
+                            const isEditing = editingIdx === idx;
+                            const FRACTIONS = [
+                                { value: 0.25, label: '¼' },
+                                { value: 0.5,  label: '½' },
+                                { value: 0.75, label: '¾' },
+                                { value: 1.0,  label: 'Full' },
+                            ];
+                            const currentFrac = s.coverage_fraction ?? 1.0;
+                            const fracLabel = FRACTIONS.find(f => Math.abs(f.value - currentFrac) < 0.01)?.label ?? `${Math.round(currentFrac * 100)}%`;
                             return (
-                                <View key={idx} style={styles.drawerCurrentRow}>
-                                    <Text style={styles.drawerCurrentEmoji}>{s.emoji ?? '🌱'}</Text>
-                                    <View style={styles.drawerCurrentInfo}>
-                                        <Text style={styles.drawerCurrentName}>{s.crop_name ?? s.name}</Text>
-                                        <Text style={styles.drawerCurrentVariety}>{s.variety}</Text>
-                                        {dateRange && (
-                                            <Text style={styles.drawerCurrentDateRange}>{dateRange}</Text>
-                                        )}
-                                    </View>
-                                    <View style={styles.drawerCurrentDtm}>
-                                        <Text style={styles.drawerCurrentDtmText}>
-                                            {s.dtm > 0 ? `${s.dtm}d` : 'CC'}
-                                        </Text>
-                                    </View>
+                                <View key={idx}>
                                     <TouchableOpacity
-                                        style={styles.drawerRemoveBtn}
-                                        onPress={() => onRemoveSuccession(idx)}
+                                        style={[styles.drawerCurrentRow, isEditing && styles.drawerCurrentRowEditing]}
+                                        onPress={() => setEditingIdx(isEditing ? null : idx)}
+                                        activeOpacity={0.75}
                                     >
-                                        <Text style={styles.drawerRemoveBtnText}>✕</Text>
+                                        <Text style={styles.drawerCurrentEmoji}>{s.emoji ?? '🌱'}</Text>
+                                        <View style={styles.drawerCurrentInfo}>
+                                            <Text style={styles.drawerCurrentName}>{s.crop_name ?? s.name}</Text>
+                                            <Text style={styles.drawerCurrentVariety}>{s.variety}</Text>
+                                            {dateRange && (
+                                                <Text style={styles.drawerCurrentDateRange}>{dateRange}</Text>
+                                            )}
+                                        </View>
+                                        {/* Coverage badge */}
+                                        <View style={styles.drawerCoverageBadge}>
+                                            <Text style={styles.drawerCoverageBadgeText}>{fracLabel}</Text>
+                                        </View>
+                                        <View style={styles.drawerCurrentDtm}>
+                                            <Text style={styles.drawerCurrentDtmText}>
+                                                {s.dtm > 0 ? `${s.dtm}d` : 'CC'}
+                                            </Text>
+                                        </View>
+                                        <TouchableOpacity
+                                            style={styles.drawerRemoveBtn}
+                                            onPress={() => { setEditingIdx(null); onRemoveSuccession(idx); }}
+                                            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                                        >
+                                            <Text style={styles.drawerRemoveBtnText}>✕</Text>
+                                        </TouchableOpacity>
                                     </TouchableOpacity>
+
+                                    {/* Inline fraction editor */}
+                                    {isEditing && (
+                                        <View style={styles.drawerInlineEditor}>
+                                            <Text style={styles.drawerInlineEditorLabel}>Adjust coverage:</Text>
+                                            <View style={styles.drawerInlineEditorRow}>
+                                                {FRACTIONS.map(f => {
+                                                    const active = Math.abs(f.value - currentFrac) < 0.01;
+                                                    return (
+                                                        <TouchableOpacity
+                                                            key={f.value}
+                                                            style={[styles.drawerInlineFracBtn, active && styles.drawerInlineFracBtnActive]}
+                                                            onPress={() => {
+                                                                onEditCoverage(idx, f.value);
+                                                                setEditingIdx(null);
+                                                            }}
+                                                        >
+                                                            <Text style={[styles.drawerInlineFracText, active && styles.drawerInlineFracTextActive]}>{f.label}</Text>
+                                                        </TouchableOpacity>
+                                                    );
+                                                })}
+                                            </View>
+                                        </View>
+                                    )}
                                 </View>
                             );
                         })}
@@ -404,35 +596,61 @@ const SuccessionDrawer = ({ visible, bedNumber, currentSuccessions, allBedSucces
                     </View>
                 )}
 
+                {/* 🔍 Search bar */}
+                <View style={styles.drawerSearchWrap}>
+                    <Text style={styles.drawerSearchIcon}>🔍</Text>
+                    <TextInput
+                        style={styles.drawerSearchInput}
+                        value={searchQuery}
+                        onChangeText={setSearchQuery}
+                        placeholder="Search crops…"
+                        placeholderTextColor={Colors.mutedText}
+                        autoCorrect={false}
+                        clearButtonMode="while-editing"
+                    />
+                    {searchQuery.length > 0 && (
+                        <TouchableOpacity onPress={() => setSearchQuery('')} style={{ padding: 4 }}>
+                            <Text style={{ fontSize: 13, color: Colors.mutedText }}>✕</Text>
+                        </TouchableOpacity>
+                    )}
+                </View>
+
                 {/* 📏 Bed Coverage Fraction selector */}
                 {(() => {
-                    // Only show if the bed already has crops (interplanting) OR if it's the first crop
                     const FRACTIONS = [
                         { value: 0.25, label: '¼ Bed' },
                         { value: 0.5,  label: '½ Bed' },
                         { value: 0.75, label: '¾ Bed' },
                         { value: 1.0,  label: 'Full' },
                     ];
-                    const currentTotal = (currentSuccessions ?? []).reduce((sum, s) => sum + (s.coverage_fraction ?? 1.0), 0);
-                    // Only show if there's room for interplanting (less than full bed used)
-                    if (currentTotal >= 1.0 && currentSuccessions?.length > 0) return null;
+                    // Only show if there's still room in the bed
+                    // Use remainingCoverage (already computed above) to avoid stale currentTotal
+                    if (remainingCoverage <= 0.01) return null;
+                    // In fill-remaining mode, only show fractions that fit
+                    const validFractions = isFillRemainingMode
+                        ? FRACTIONS.filter(f => f.value <= remainingCoverage + 0.01)
+                        : FRACTIONS;
+                    // effectiveFraction computed at component level above (in scope for FlatList renderItem)
                     return (
                         <View style={styles.coveragePickerWrap}>
                             <Text style={styles.coveragePickerLabel}>🌱 Bed Coverage</Text>
                             <View style={styles.coveragePickerRow}>
-                                {FRACTIONS.map(f => (
+                                {validFractions.map(f => (
                                     <TouchableOpacity
                                         key={f.value}
-                                        style={[styles.coverageBtn, coverageFraction === f.value && styles.coverageBtnActive]}
+                                        style={[styles.coverageBtn, Math.abs(effectiveFraction - f.value) < 0.01 && styles.coverageBtnActive]}
                                         onPress={() => setCoverageFraction(f.value)}
                                     >
-                                        <Text style={[styles.coverageBtnText, coverageFraction === f.value && styles.coverageBtnTextActive]}>{f.label}</Text>
+                                        <Text style={[styles.coverageBtnText, Math.abs(effectiveFraction - f.value) < 0.01 && styles.coverageBtnTextActive]}>{f.label}</Text>
                                     </TouchableOpacity>
                                 ))}
                             </View>
-                            {coverageFraction < 1.0 && (
+                            {effectiveFraction < 1.0 && (
                                 <Text style={styles.coveragePickerNote}>
-                                    Plan {Math.round(coverageFraction * 100)}% of this bed. Remaining {Math.round((1 - coverageFraction) * 100)}% can hold another crop.
+                                    Plan {Math.round(effectiveFraction * 100)}% of this bed.{' '}
+                                    {Math.round(Math.max(0, remainingCoverage - effectiveFraction) * 100) > 0
+                                        ? `${Math.round(Math.max(0, remainingCoverage - effectiveFraction) * 100)}% still open.`
+                                        : 'Bed will be full.'}
                                 </Text>
                             )}
                         </View>
@@ -462,8 +680,11 @@ const SuccessionDrawer = ({ visible, bedNumber, currentSuccessions, allBedSucces
                     </View>
                 ) : (
                     <FlatList
-                        data={frostFilter ? candidates.filter(c => c.crop.frost_tolerant) : candidates}
+                        style={{ flex: 1 }}
+                        data={displayedCandidates}
                         keyExtractor={(item) => item.crop.id}
+                        numColumns={4}
+                        columnWrapperStyle={{ justifyContent: 'space-between', paddingHorizontal: 2 }}
                         contentContainerStyle={styles.drawerList}
                         showsVerticalScrollIndicator={false}
                         ListEmptyComponent={
@@ -486,70 +707,45 @@ const SuccessionDrawer = ({ visible, bedNumber, currentSuccessions, allBedSucces
                             const hasCompanionConflict = companionWarnings.length > 0;
                             return (
                                 <TouchableOpacity
-                                    style={[styles.drawerCropRow, !item.fits && styles.drawerCropRowDim, hasCompanionConflict && styles.drawerCropRowConflict]}
-                                    onPress={() => item.fits && onPlant({ ...item, coverage_fraction: coverageFraction })}
-                                    activeOpacity={item.fits ? 0.8 : 1}
+                                    style={[
+                                        styles.drawerCropBox,
+                                        !item.fits && styles.drawerCropBoxDim,
+                                        hasCompanionConflict && styles.drawerCropBoxConflict
+                                    ]}
+                                    onPress={() => {
+                                        if (item.fits) {
+                                            onPlant({ ...item, coverage_fraction: effectiveFraction });
+                                        } else {
+                                            // Out-of-season: offer force-add with protection warning
+                                            onPlantOutOfSeason({ ...item, coverage_fraction: effectiveFraction });
+                                        }
+                                    }}
+                                    activeOpacity={0.8}
                                 >
                                     {CROP_IMAGES[item.crop.id]
                                         ? <Image
                                             source={CROP_IMAGES[item.crop.id]}
-                                            style={styles.drawerCropImage}
+                                            style={styles.drawerCropBoxImg}
                                             resizeMode="cover"
                                         />
-                                        : <Text style={styles.drawerCropEmoji}>{item.crop.emoji}</Text>
+                                        : <Text style={styles.drawerCropBoxEmoji}>{item.crop.emoji}</Text>
                                     }
-                                    <View style={styles.drawerCropInfo}>
-                                        <View style={styles.drawerCropTopRow}>
-                                            <Text style={[styles.drawerCropName, !item.fits && styles.drawerCropNameDim]}>
-                                                {item.crop.name}
-                                                {item.crop.frost_tolerant ? ' ❄️' : ''}
-                                            </Text>
-                                            <View style={[styles.drawerDtmPill, !item.fits && styles.drawerDtmPillDim]}>
-                                                <Text style={styles.drawerDtmText}>DTM {item.crop.dtm > 0 ? `${item.crop.dtm}d` : 'Cover'}</Text>
-                                            </View>
-                                            {item.score > 20 && (
-                                                <View style={styles.topPickBadge}>
-                                                    <Text style={styles.topPickText}>Best</Text>
-                                                </View>
-                                            )}
-                                        </View>
-                                        {dateRange && (
-                                            <Text style={styles.drawerCropDateRange}>{dateRange}</Text>
-                                        )}
-                                        <Text style={[styles.drawerCropReason, !item.fits && styles.drawerCropReasonDim]}>
-                                            {item.reasons?.[0] ?? `Fits in remaining window`}
-                                        </Text>
-                                        {item.fits && item.remaining_days_after !== undefined && (
-                                            <Text style={styles.drawerRemainingDays}>
-                                                {item.remaining_days_after > 10
-                                                    ? `✓ ${item.remaining_days_after}d left for another succession`
-                                                    : `⚠ Season nearly full after this crop`
-                                                }
-                                            </Text>
-                                        )}
-                                        {item.warnings?.length > 0 && (
-                                            <Text style={styles.drawerCropWarning}>⚠ {item.warnings[0]}</Text>
-                                        )}
-                                        {/* Companion planting conflicts */}
-                                        {companionWarnings.map((w, i) => (
-                                            <View key={i} style={styles.companionWarningBadge}>
-                                                <Text style={styles.companionWarningText}>
-                                                    {w.scope === 'neighbor'
-                                                        ? `⚠️ Bad neighbor (Bed ${w.bedNum}): ${w.reason}`
-                                                        : `⚠️ Companion conflict: ${w.reason}`
-                                                    }
-                                                </Text>
-                                            </View>
-                                        ))}
-                                    </View>
-                                    {item.fits ? (
-                                        <View style={[styles.drawerPlantBtn, hasCompanionConflict && styles.drawerPlantBtnWarn]}>
-                                            <Text style={styles.drawerPlantBtnText}>{hasCompanionConflict ? '⚠ Plan' : '+ Plan'}</Text>
-                                        </View>
-                                    ) : (
-                                        <View style={styles.drawerNoFitBadge}>
-                                            <Text style={styles.drawerNoFitText}>✗</Text>
-                                        </View>
+                                    <Text style={styles.drawerCropBoxName} numberOfLines={2}>
+                                        {item.crop.name}{item.crop.variety ? `\n${item.crop.variety}` : ''}
+                                    </Text>
+                                    <Text style={styles.drawerCropBoxMeta} numberOfLines={1}>
+                                        {item.crop.dtm > 0 ? `${item.crop.dtm}d` : 'Cover'} · {item.crop.season === 'cool' ? '❄️' : '☀️'}
+                                    </Text>
+
+                                    {/* Badges overlay */}
+                                    {item.score > 20 && (
+                                        <View style={styles.drawerCropBoxBestBadge}><Text style={{fontSize: 8, color: '#FFF'}}>★</Text></View>
+                                    )}
+                                    {hasCompanionConflict && (
+                                        <View style={styles.drawerCropBoxWarnBadge}><Text style={{fontSize: 8, color: '#FFF'}}>⚠️</Text></View>
+                                    )}
+                                    {!item.fits && !hasCompanionConflict && (
+                                        <View style={styles.drawerCropBoxWarnBadge}><Text style={{fontSize: 8, color: '#FFF'}}>🚫</Text></View>
                                     )}
                                 </TouchableOpacity>
                             );
@@ -578,12 +774,47 @@ export default function BedWorkspaceScreen({ navigation, route }) {
     const [bedSuccessions, setBedSuccessions] = useState(
         route?.params?.bedSuccessions ?? {}
     );
+    // ── Per-bed shelter type (Phase 2) ────────────────────────────────────────
+    // 'none' | 'rowCover' | 'greenhouse'  — persisted in state, saved alongside successions
+    const [bedShelter, setBedShelter] = useState({});
+
+    // Extension in days (net gain on each end of season) per shelter type
+    const SHELTER_EXT = { none: 0, rowCover: 7, greenhouse: 21 };
+
+    function buildEffectiveProfile(profile, shelterType) {
+        const ext = SHELTER_EXT[shelterType ?? 'none'] ?? 0;
+        if (!ext || !profile) return profile;
+        const shiftDate = (iso, days) => {
+            if (!iso) return iso;
+            const d = new Date(iso + 'T12:00:00');
+            d.setDate(d.getDate() + days);
+            return d.toISOString().split('T')[0];
+        };
+        return {
+            ...profile,
+            frost_free_days: (profile.frost_free_days ?? 170) + ext * 2,
+            last_frost_date:  shiftDate(profile.last_frost_date,  -ext),
+            first_frost_date: shiftDate(profile.first_frost_date,  ext),
+        };
+    }
     const [drawerCandidates, setDrawerCandidates] = useState([]);
     const [drawerLoading, setDrawerLoading] = useState(false);
     const [showStrategyPicker, setShowStrategyPicker] = useState(false);
     const [autoFillStrategy, setAutoFillStrategy] = useState('balanced');
+    const [autoFillFilters, setAutoFillFilters] = useState({
+        flowers: true,
+        specialty: true,
+        berries: true,
+        vegetables: true,
+        longDtm: true,
+        shortDtm: true,
+    });
+    const toggleFilter = (key) => setAutoFillFilters(prev => ({ ...prev, [key]: !prev[key] }));
     const [preAutoFillSnapshot, setPreAutoFillSnapshot] = useState(null); // snapshot before last auto-fill
     const [rotationHistory, setRotationHistory] = useState(() => loadRotationHistory());
+    // fillRemainingDtm: set when the last-added crop used < 100% coverage.
+    // Signals the drawer to stay open in “fill the rest” mode, DTM-sorted.
+    const [fillRemainingDtm, setFillRemainingDtm] = useState(null);
 
     // Season range from farmProfile (for Gantt timeline)
     const seasonStart = farmProfile?.last_frost_date ?? null;
@@ -602,7 +833,7 @@ export default function BedWorkspaceScreen({ navigation, route }) {
         setNoteBed(bedNumber);
     }, []);
 
-    const openBed = useCallback(async (bedNumber) => {
+    const openBed = useCallback(async (bedNumber, shelterOverride) => {
         setActiveBed(bedNumber);
         setDrawerOpen(true);
         setDrawerLoading(true);
@@ -610,14 +841,62 @@ export default function BedWorkspaceScreen({ navigation, route }) {
 
         try {
             const currentSuccessions = bedSuccessions[bedNumber] ?? [];
-            const profile = farmProfile ?? { frost_free_days: 170, last_frost_date: `${new Date().getFullYear()}-04-15`, first_frost_date: `${new Date().getFullYear()}-10-15`, lat: 45.5 };
+            const rawProfile = farmProfile ?? { frost_free_days: 170, last_frost_date: `${new Date().getFullYear()}-04-15`, first_frost_date: `${new Date().getFullYear()}-10-15`, lat: 45.5 };
+            const currentShelter = shelterOverride !== undefined ? shelterOverride : (bedShelter[bedNumber] ?? 'none');
+            const profile = buildEffectiveProfile(rawProfile, currentShelter);
+
+            // ── Find the earliest unfilled window ─────────────────────────────────────
+            // After deleting a crop, remaining crops may have a gap at the start or middle.
+            // The engine always anchors to the LAST succession's end_date, so we must
+            // only pass it the contiguous block before the first open window.
+            //
+            // Cases:
+            //   [empty]                              → pass [] → engine starts at last_frost_date
+            //   [crop2: Jul-Sep] (crop1 deleted)     → gap before first crop → pass [] → engine starts at last_frost_date
+            //   [crop1: Apr-Jun, gap, crop2: Aug-Sep]→ internal gap → pass [crop1] → engine starts at Jun+1
+            //   [crop1, crop2, crop3] (contiguous)   → no gap → pass all → engine starts at crop3.end+1
+
+            let successionsForEngine = currentSuccessions;
+
+            if (currentSuccessions.length > 0) {
+                // Sort by start_date so gap detection works regardless of insertion order
+                const sorted = [...currentSuccessions].sort(
+                    (a, b) => new Date(a.start_date) - new Date(b.start_date)
+                );
+
+                const seasonStart = new Date(profile.last_frost_date);
+
+                // Check for a gap at the BEGINNING (first crop doesn't start at season start)
+                const firstCropStart = new Date(sorted[0].start_date);
+                const daysBeforeFirst = Math.round((firstCropStart - seasonStart) / 86400000);
+
+                if (daysBeforeFirst > 5) {
+                    // There's a meaningful open window before the first crop — offer season start
+                    successionsForEngine = [];
+                } else {
+                    // Walk consecutive crops and find first internal gap (>7 days)
+                    let gapAfterIdx = null;
+                    for (let i = 0; i < sorted.length - 1; i++) {
+                        const endMs  = new Date(sorted[i].end_date).getTime();
+                        const startMs = new Date(sorted[i + 1].start_date).getTime();
+                        const gapDays = Math.round((startMs - endMs) / 86400000);
+                        if (gapDays > 7) {
+                            gapAfterIdx = i;
+                            break;
+                        }
+                    }
+                    successionsForEngine = gapAfterIdx !== null
+                        ? sorted.slice(0, gapAfterIdx + 1)  // only crops before the gap
+                        : sorted;                            // no gap — normal tail append
+                }
+            }
 
             // Pass prior-year crops for this bed so engine applies rotation penalties/bonuses
             const priorYearCrops = getPriorYearBedCrops(bedNumber);
 
             // ── Pass 1: normal engine run (respects season / DTM filters) ─────────────
             const engineCandidates = await getSuccessionCandidatesRanked(
-                { successions: currentSuccessions },
+                { successions: successionsForEngine },
                 profile,
                 { maxResults: 200, priorYearCrops }
             );
@@ -661,11 +940,12 @@ export default function BedWorkspaceScreen({ navigation, route }) {
         } finally {
             setDrawerLoading(false);
         }
-    }, [bedSuccessions, farmProfile, selectedCropIds]);
+    }, [bedSuccessions, farmProfile, selectedCropIds, bedShelter]);
 
 
     const closeDrawer = useCallback(() => {
         setDrawerOpen(false);
+        setFillRemainingDtm(null);
         setTimeout(() => setActiveBed(null), 300);
     }, []);
 
@@ -709,6 +989,9 @@ export default function BedWorkspaceScreen({ navigation, route }) {
             end_date,
             coverage_fraction: candidateItem.coverage_fraction ?? 1.0,
             is_auto_generated: false,
+            // Out-of-season protection flag — persisted so rotation history captures it
+            requires_protection: candidateItem.requires_protection ?? false,
+            notes: candidateItem.requires_protection ? '🌿 Planned with row cover / greenhouse protection' : undefined,
         };
 
         // Save to SQLite if planId available
@@ -740,13 +1023,34 @@ export default function BedWorkspaceScreen({ navigation, route }) {
         }
         // ───────────────────────────────────────────────────────────────────
 
-        setBedSuccessions(prev => ({
-            ...prev,
-            [activeBed]: [...(prev[activeBed] ?? []), newSuccession],
-        }));
+        setBedSuccessions(prev => {
+            const updated = { ...prev, [activeBed]: [...(prev[activeBed] ?? []), newSuccession] };
 
-        closeDrawer();
-    }, [activeBed, bedSuccessions, planId, closeDrawer]);
+            // ── Partial-coverage: stay open and prompt for the rest ──────────────
+            const addedCoverage = candidateItem.coverage_fraction ?? 1.0;
+            const priorTotal = (prev[activeBed] ?? []).reduce((sum, s) => sum + (s.coverage_fraction ?? 1.0), 0);
+            const newTotal = priorTotal + addedCoverage;
+
+            if (newTotal < 0.99) {
+                // Bed still has capacity — keep drawer open in fill-remaining mode.
+                // Re-query using the SAME succession list (engine will use same start date
+                // since coverage doesn’t advance the clock — the bed shares its time window).
+                setFillRemainingDtm(crop.dtm ?? null);
+                // Re-run candidate loading with the updated successions
+                setTimeout(() => {
+                    openBed(activeBed);
+                    // Restore drawer open (openBed sets it, but let's be explicit)
+                    setDrawerOpen(true);
+                }, 50);
+            } else {
+                // Bed is fully covered (or overflow) — close the drawer
+                setFillRemainingDtm(null);
+                closeDrawer();
+            }
+
+            return updated;
+        });
+    }, [activeBed, bedSuccessions, planId, closeDrawer, openBed]);
 
     // Remove a succession by index from the active bed (called from drawer)
     const removeSuccessionFromBed = useCallback((idx) => {
@@ -758,14 +1062,15 @@ export default function BedWorkspaceScreen({ navigation, route }) {
     }, [activeBed]);
 
 
-    const handleAutoFill = useCallback(async (strategyId) => {
-        // Include beds that are empty OR have only 1-2 successions (need more filling).
-        // Beds with 3+ successions are considered "done" and skipped.
+    const handleAutoFill = useCallback(async (strategyId, filters) => {
+        // Only auto-fill beds that have NO manually-placed crops.
+        // A bed is "manually filled" if it contains any succession with is_auto_generated !== true.
+        // This prevents Auto-Fill from overwriting the user's intentional picks.
+        const hasManualCrops = (n) => (bedSuccessions[n] ?? []).some(s => !s.is_auto_generated);
         const bedsToFill = Array.from({ length: NUM_BEDS }, (_, i) => i + 1)
-            .filter(n => (bedSuccessions[n]?.length ?? 0) < 3);
+            .filter(n => !hasManualCrops(n));
 
         if (bedsToFill.length === 0) return;
-
 
         // Snapshot current state so user can revert if they don't like the result
         setPreAutoFillSnapshot({ ...bedSuccessions });
@@ -773,16 +1078,13 @@ export default function BedWorkspaceScreen({ navigation, route }) {
         const profile = farmProfile ?? { frost_free_days: 170, last_frost_date: `${new Date().getFullYear()}-04-15`, first_frost_date: `${new Date().getFullYear()}-10-15`, lat: 45.5 };
 
         const { autoFillRemainingBeds } = await import('../services/successionEngine');
-        // "filledBeds" = beds with 3+ successions (considered complete, used for farm-wide diversity counting)
-        const filledBeds = Object.entries(bedSuccessions)
-            .filter(([num]) => (bedSuccessions[parseInt(num)]?.length ?? 0) >= 3)
-            .map(([num, succs]) => ({
-                bed_number: parseInt(num),
-                successions: succs,
-            }));
+        // "filledBeds" = all beds NOT in bedsToFill (includes manually-filled beds and
+        // beds with 3+ auto-generated crops). These seed farm-wide diversity counting.
+        const filledBeds = Array.from({ length: NUM_BEDS }, (_, i) => i + 1)
+            .filter(n => !bedsToFill.includes(n))
+            .map(n => ({ bed_number: n, successions: bedSuccessions[n] ?? [] }));
 
-        const autoFilled = await autoFillRemainingBeds(filledBeds, bedsToFill, profile, strategyId);
-
+        const autoFilled = await autoFillRemainingBeds(filledBeds, bedsToFill, profile, strategyId, filters ?? autoFillFilters);
 
         const updatedSuccessions = { ...bedSuccessions };
         for (const [bedNum, succs] of Object.entries(autoFilled)) {
@@ -790,13 +1092,58 @@ export default function BedWorkspaceScreen({ navigation, route }) {
         }
         setBedSuccessions(updatedSuccessions);
         setShowStrategyPicker(false);
-    }, [bedSuccessions, farmProfile]);
+    }, [bedSuccessions, farmProfile, autoFillFilters]);
 
     const handleRevertAutoFill = useCallback(() => {
         if (!preAutoFillSnapshot) return;
         setBedSuccessions(preAutoFillSnapshot);
-        setPreAutoFillSnapshot(null); // clear snapshot after reverting
+        setPreAutoFillSnapshot(null);
     }, [preAutoFillSnapshot]);
+
+    // Edit the coverage_fraction of an existing succession in the active bed
+    const editSuccessionCoverage = useCallback((idx, newFraction) => {
+        setBedSuccessions(prev => {
+            const updated = [...(prev[activeBed] ?? [])];
+            if (!updated[idx]) return prev;
+            updated[idx] = { ...updated[idx], coverage_fraction: newFraction };
+            return { ...prev, [activeBed]: updated };
+        });
+    }, [activeBed]);
+
+    // Plant an out-of-season crop with a row-cover/greenhouse protection warning.
+    // Uses Alert.alert (native on iOS/Android, browser confirm() on web via Expo polyfill).
+    const handlePlantOutOfSeason = useCallback((candidateItem) => {
+        const cropName = candidateItem.crop.name;
+        const protectedMsg =
+            `“${cropName}” is outside the current frost-free window.\n\n` +
+            `It won’t perform well without a row cover or greenhouse.\n\n` +
+            `Add it anyway? It will be saved and counted in next year’s rotation history.`;
+
+        Alert.alert(
+            '🌿 Outside Growing Window',
+            protectedMsg,
+            [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                    text: 'Yes, Add with Protection',
+                    onPress: () => {
+                        // Compute end_date from start_date + dtm if engine returned null
+                        const profile = farmProfile ?? {};
+                        const startDate = candidateItem.start_date ?? profile.first_frost_date ?? new Date().toISOString().slice(0, 10);
+                        let endDate = candidateItem.end_date;
+                        if (!endDate) {
+                            const dtm = candidateItem.crop.dtm ?? 60;
+                            const start = new Date(startDate);
+                            start.setDate(start.getDate() + dtm);
+                            endDate = start.toISOString().slice(0, 10);
+                        }
+                        plantCrop({ ...candidateItem, start_date: startDate, end_date: endDate, requires_protection: true });
+                    },
+                },
+            ],
+            { cancelable: true }
+        );
+    }, [farmProfile, plantCrop]);
 
     const handleGeneratePlan = () => {
         navigation.navigate('YieldSummary', {
@@ -833,10 +1180,10 @@ export default function BedWorkspaceScreen({ navigation, route }) {
                     </TouchableOpacity>
                     <View style={styles.headerText}>
                         <Text style={styles.stepLabel}>PHASE 3 OF 3</Text>
-                        <Text style={styles.heading} numberOfLines={1}>Your 8-Bed Workspace</Text>
+                        <Text style={styles.heading} numberOfLines={1}>Farm Block</Text>
                     </View>
                     <View style={styles.progressPill}>
-                        <Text style={styles.progressText}>{plannedCount}/8</Text>
+                        <Text style={styles.progressText}>{plannedCount}/{NUM_BEDS}</Text>
                     </View>
                 </View>
 
@@ -866,7 +1213,11 @@ export default function BedWorkspaceScreen({ navigation, route }) {
                     </TouchableOpacity>
                     <TouchableOpacity
                         style={styles.viewToggleBtn}
-                        onPress={() => navigation.navigate('VisualBedLayout', { farmProfile })}
+                        onPress={() => navigation.navigate('VisualBedLayout', {
+                            farmProfile,
+                            clearOnLoad: true,
+                            initialBedCount: NUM_BEDS,
+                        })}
                     >
                         <Text style={styles.viewToggleBtnText}>🖊 Layout</Text>
                     </TouchableOpacity>
@@ -889,6 +1240,61 @@ export default function BedWorkspaceScreen({ navigation, route }) {
             <Text style={styles.subheading}>
                 Tap a bed to assign crops. The drawer shows only what fits your {frostFreeDays}-day frost window.
             </Text>
+
+            {/* ── Crop Queue Confirmation Panel ─────────────────────────────────── */}
+            {selectedCropIds.length > 0 && (
+                <View style={[styles.cropQueueBanner, Platform.OS === 'web' && { paddingBottom: 16 }]}>
+                    <Text style={styles.cropQueueTitle}>
+                        🌱 Your Selected Crops ({selectedCropIds.length}) — confirm before assigning beds
+                    </Text>
+                    <ScrollView
+                        horizontal
+                        showsHorizontalScrollIndicator={true}
+                        contentContainerStyle={styles.cropQueueScroll}
+                    >
+                        {selectedCropIds.map(id => {
+                            const crop = cropData.crops.find(c => c.id === id);
+                            if (!crop) return null;
+                            const isCool = crop.season === 'cool';
+                            const isWarm = crop.season === 'warm';
+                            return (
+                                <View key={id} style={styles.cropQueueChip}>
+                                    <Text style={styles.cropQueueChipEmoji}>
+                                        {crop.emoji ?? '🌱'}
+                                    </Text>
+                                    <View style={{ flex: 1 }}>
+                                        <Text style={styles.cropQueueChipName} numberOfLines={1}>
+                                            {crop.name}{crop.variety ? ` — ${crop.variety}` : ''}
+                                        </Text>
+                                        <View style={styles.cropQueueChipBadges}>
+                                            {crop.dtm != null && (
+                                                <View style={styles.queueBadge}>
+                                                    <Text style={styles.queueBadgeText}>{crop.dtm}d</Text>
+                                                </View>
+                                            )}
+                                            {isCool && (
+                                                <View style={[styles.queueBadge, styles.queueBadgeCool]}>
+                                                    <Text style={[styles.queueBadgeText, styles.queueBadgeCoolText]}>❄️ Cool</Text>
+                                                </View>
+                                            )}
+                                            {isWarm && (
+                                                <View style={[styles.queueBadge, styles.queueBadgeWarm]}>
+                                                    <Text style={[styles.queueBadgeText, styles.queueBadgeWarmText]}>☀️ Warm</Text>
+                                                </View>
+                                            )}
+                                            {crop.seed_type && (
+                                                <View style={styles.queueBadge}>
+                                                    <Text style={styles.queueBadgeText}>{crop.seed_type}</Text>
+                                                </View>
+                                            )}
+                                        </View>
+                                    </View>
+                                </View>
+                            );
+                        })}
+                    </ScrollView>
+                </View>
+            )}
 
             <View style={styles.progressBarTrack}>
                 <View style={[styles.progressBarFill, { width: `${(plannedCount / NUM_BEDS) * 100}%` }]} />
@@ -918,6 +1324,8 @@ export default function BedWorkspaceScreen({ navigation, route }) {
                         delayLongPress={600}
                         seasonStart={seasonStart}
                         seasonEnd={seasonEnd}
+                        firstFrostDate={seasonEnd}
+                        shelterType={bedShelter[bedNum] ?? 'none'}
                         priorCrops={getPriorYearBedCrops(bedNum)}
                     />
                 ))}
@@ -975,12 +1383,45 @@ export default function BedWorkspaceScreen({ navigation, route }) {
                                                     <Text style={styles.strategyBarLabel}>💰 Profit</Text>
                                                     <Text style={styles.strategyBarLabel}>🌿 Diversity</Text>
                                                 </View>
+
+                                                {/* ── Crop Filters (shown on selected card only) ────────────────────────────── */}
+                                                {selected && (
+                                                    <View style={styles.filterSection}>
+                                                        <Text style={styles.filterSectionLabel}>Crop Filters</Text>
+                                                        <View style={styles.filterGrid}>
+                                                            {[
+                                                                { key: 'vegetables', emoji: '🥦', label: 'Vegetables' },
+                                                                { key: 'berries',    emoji: '🍓', label: 'Berries' },
+                                                                { key: 'flowers',    emoji: '🏵', label: 'Flowers' },
+                                                                { key: 'specialty',  emoji: '✨', label: 'Specialty' },
+                                                                { key: 'shortDtm',  emoji: '⚡', label: 'Short DTM' },
+                                                                { key: 'longDtm',   emoji: '📅', label: 'Long DTM' },
+                                                            ].map(f => {
+                                                                const on = autoFillFilters[f.key];
+                                                                return (
+                                                                    <TouchableOpacity
+                                                                        key={f.key}
+                                                                        style={[styles.filterChip, on && styles.filterChipOn]}
+                                                                        onPress={() => toggleFilter(f.key)}
+                                                                        activeOpacity={0.75}
+                                                                    >
+                                                                        <Text style={styles.filterChipEmoji}>{f.emoji}</Text>
+                                                                        <Text style={[styles.filterChipLabel, on && styles.filterChipLabelOn]}>{f.label}</Text>
+                                                                        <View style={[styles.filterChipBadge, on && styles.filterChipBadgeOn]}>
+                                                                            <Text style={[styles.filterChipBadgeText, on && styles.filterChipBadgeTextOn]}>{on ? 'Y' : 'N'}</Text>
+                                                                        </View>
+                                                                    </TouchableOpacity>
+                                                                );
+                                                            })}
+                                                        </View>
+                                                    </View>
+                                                )}
                                             </TouchableOpacity>
                                         );
                                     })}
                                     <TouchableOpacity
                                         style={styles.strategyConfirmBtn}
-                                        onPress={() => handleAutoFill(autoFillStrategy)}
+                                        onPress={() => handleAutoFill(autoFillStrategy, autoFillFilters)}
                                     >
                                         <Text style={styles.strategyConfirmBtnText}>✨ Fill Beds with This Strategy</Text>
                                     </TouchableOpacity>
@@ -1025,10 +1466,25 @@ export default function BedWorkspaceScreen({ navigation, route }) {
                 allBedSuccessions={bedSuccessions}
                 candidates={drawerCandidates}
                 loading={drawerLoading}
-                frostFreeDays={frostFreeDays}
+                frostFreeDays={activeBed
+                    ? (buildEffectiveProfile(
+                        farmProfile ?? { frost_free_days: 170 },
+                        bedShelter[activeBed] ?? 'none'
+                      ).frost_free_days)
+                    : frostFreeDays}
                 onClose={closeDrawer}
                 onPlant={plantCrop}
+                onPlantOutOfSeason={handlePlantOutOfSeason}
                 onRemoveSuccession={removeSuccessionFromBed}
+                onEditCoverage={editSuccessionCoverage}
+                fillRemainingDtm={fillRemainingDtm}
+                bedShelterType={activeBed ? (bedShelter[activeBed] ?? 'none') : 'none'}
+                onSetShelter={(shelterType) => {
+                    if (!activeBed) return;
+                    setBedShelter(prev => ({ ...prev, [activeBed]: shelterType }));
+                    // Re-run candidate fetch with new effective profile immediately using override
+                    openBed(activeBed, shelterType);
+                }}
             />
 
             {/* ── AI Plan Generator Modal ── */}
@@ -1110,6 +1566,75 @@ const styles = StyleSheet.create({
         paddingBottom: Spacing.sm,
         lineHeight: 18,
     },
+
+    // ── Crop Queue Confirmation Panel ─────────────────────────────────────────
+    cropQueueBanner: {
+        backgroundColor: 'rgba(45,79,30,0.05)',
+        borderTopWidth: 1,
+        borderBottomWidth: 1,
+        borderColor: 'rgba(45,79,30,0.13)',
+        paddingTop: 10,
+        paddingBottom: 12,
+        paddingLeft: Spacing.lg,
+        marginBottom: 2,
+    },
+    cropQueueTitle: {
+        fontSize: 10,
+        fontWeight: '800',
+        color: Colors.primaryGreen,
+        letterSpacing: 0.4,
+        marginBottom: 8,
+        textTransform: 'uppercase',
+    },
+    cropQueueScroll: {
+        gap: 8,
+        paddingRight: Spacing.lg,
+    },
+    cropQueueChip: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        gap: 6,
+        backgroundColor: Colors.white,
+        borderRadius: 10,
+        paddingVertical: 8,
+        paddingHorizontal: 10,
+        borderWidth: 1.5,
+        borderColor: 'rgba(45,79,30,0.15)',
+        minWidth: 130,
+        maxWidth: 200,
+        ...Shadows.card,
+    },
+    cropQueueChipEmoji: {
+        fontSize: 20,
+        lineHeight: 24,
+    },
+    cropQueueChipName: {
+        fontSize: 11,
+        fontWeight: '800',
+        color: Colors.primaryGreen,
+        marginBottom: 4,
+        flexWrap: 'wrap',
+    },
+    cropQueueChipBadges: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 3,
+    },
+    queueBadge: {
+        backgroundColor: 'rgba(45,79,30,0.09)',
+        borderRadius: 4,
+        paddingVertical: 1,
+        paddingHorizontal: 5,
+    },
+    queueBadgeText: {
+        fontSize: 8,
+        fontWeight: '800',
+        color: Colors.primaryGreen,
+    },
+    queueBadgeCool: { backgroundColor: '#dff0fa' },
+    queueBadgeCoolText: { color: '#005f80' },
+    queueBadgeWarm: { backgroundColor: '#fff0e0' },
+    queueBadgeWarmText: { color: '#bf5400' },
 
     progressBarTrack: { height: 4, backgroundColor: 'rgba(45,79,30,0.15)', marginHorizontal: Spacing.lg, borderRadius: 2, marginBottom: Spacing.md },
     progressBarFill: { height: 4, backgroundColor: Colors.burntOrange, borderRadius: 2 },
@@ -1247,6 +1772,58 @@ const styles = StyleSheet.create({
     bedArrow: { paddingRight: Spacing.sm },
     bedArrowText: { fontSize: 22, color: Colors.primaryGreen, opacity: 0.4 },
 
+    // ── Season strip (IN / OUT / days remaining) ────────────────────────────
+    seasonStrip: {
+        flexDirection: 'row', alignItems: 'center', gap: 6,
+        paddingHorizontal: Spacing.sm, paddingBottom: 6, flexWrap: 'wrap',
+    },
+    seasonStripItem: { fontSize: 10, color: Colors.mutedText },
+    seasonStripLabel: { fontWeight: '700', color: Colors.mutedText, opacity: 0.7 },
+    seasonStripValue: { fontWeight: '800', color: Colors.primaryGreen },
+    seasonStripRemaining: {
+        borderRadius: Radius.full, paddingHorizontal: 8, paddingVertical: 2,
+        marginLeft: 2,
+    },
+    seasonStripRemainingText: { fontSize: 10, fontWeight: '800' },
+
+    // ── Shelter badge (on bed label) ────────────────────────────────────────
+    shelterBadge: { fontSize: 14, marginLeft: 4 },
+
+    // ── Shelter toggle (in drawer header) ───────────────────────────────────
+    shelterToggleWrap: {
+        paddingHorizontal: Spacing.lg, paddingVertical: 8,
+        borderBottomWidth: 1, borderBottomColor: 'rgba(45,79,30,0.08)',
+    },
+    shelterToggleLabel: { fontSize: 10, fontWeight: '700', color: Colors.mutedText, letterSpacing: 0.5, marginBottom: 6, textTransform: 'uppercase' },
+    shelterToggleRow: { flexDirection: 'row', gap: 8 },
+    shelterBtn: {
+        flex: 1, alignItems: 'center', paddingVertical: 8, paddingHorizontal: 4,
+        borderRadius: Radius.md, borderWidth: 1.5, borderColor: 'rgba(45,79,30,0.18)',
+        backgroundColor: '#F5F3EE', gap: 2,
+    },
+    shelterBtnActive: { backgroundColor: Colors.primaryGreen, borderColor: Colors.primaryGreen },
+    shelterBtnText: { fontSize: 11, fontWeight: '800', color: Colors.primaryGreen, textAlign: 'center' },
+    shelterBtnTextActive: { color: '#FFF8F0' },
+    shelterBtnExt: { fontSize: 9, color: Colors.mutedText, fontWeight: '600' },
+
+    // ── Season remaining warning banner ─────────────────────────────────────
+    seasonBanner: {
+        marginHorizontal: Spacing.lg, marginTop: 8, borderRadius: Radius.md,
+        paddingVertical: 8, paddingHorizontal: 12,
+        backgroundColor: '#FFF3E0', borderWidth: 1, borderColor: 'rgba(230,81,0,0.2)',
+    },
+    seasonBannerUrgent: { backgroundColor: '#FFEBEE', borderColor: 'rgba(198,40,40,0.25)' },
+    seasonBannerText: { fontSize: 12, fontWeight: '700', color: '#E65100' },
+    seasonBannerTextUrgent: { color: '#C62828' },
+
+    // ── Season chip on crop candidate card ──────────────────────────────────
+    seasonChip: {
+        borderRadius: Radius.full, paddingHorizontal: 6, paddingVertical: 2, marginLeft: 4,
+    },
+    seasonChipCool: { backgroundColor: '#E3F2FD' },
+    seasonChipWarm: { backgroundColor: '#FFF8E1' },
+    seasonChipText: { fontSize: 9, fontWeight: '800', color: Colors.mutedText },
+
     // ── Succession chain (all slots in a horizontal row) ───────────────────────
     bedRowPlanted: { minHeight: 64 },
     successionChain: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 4, flex: 1 },
@@ -1311,6 +1888,34 @@ const styles = StyleSheet.create({
     strategyConfirmBtn: { backgroundColor: Colors.primaryGreen, paddingVertical: 14, borderRadius: Radius.md, alignItems: 'center', marginTop: 4 },
     strategyConfirmBtnText: { color: Colors.cream, fontSize: Typography.sm, fontWeight: '800', letterSpacing: 0.5 },
 
+    // ── Auto-Fill crop filters ─────────────────────────────────────────────────
+    filterSection: {
+        marginTop: Spacing.sm, paddingTop: Spacing.sm,
+        borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.25)',
+    },
+    filterSectionLabel: {
+        fontSize: 9, fontWeight: '800', color: 'rgba(255,255,255,0.7)',
+        textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 6,
+    },
+    filterGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+    filterChip: {
+        flexDirection: 'row', alignItems: 'center', gap: 4,
+        paddingVertical: 5, paddingHorizontal: 8, borderRadius: Radius.sm,
+        backgroundColor: 'rgba(255,255,255,0.12)',
+        borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)',
+    },
+    filterChipOn: { backgroundColor: 'rgba(255,255,255,0.22)', borderColor: 'rgba(255,255,255,0.5)' },
+    filterChipEmoji: { fontSize: 11 },
+    filterChipLabel: { fontSize: 10, fontWeight: '700', color: 'rgba(255,255,255,0.6)' },
+    filterChipLabelOn: { color: Colors.cream },
+    filterChipBadge: {
+        width: 16, height: 16, borderRadius: 8,
+        backgroundColor: 'rgba(255,255,255,0.15)', alignItems: 'center', justifyContent: 'center',
+    },
+    filterChipBadgeOn: { backgroundColor: Colors.warmTan },
+    filterChipBadgeText: { fontSize: 8, fontWeight: '900', color: 'rgba(255,255,255,0.5)' },
+    filterChipBadgeTextOn: { color: Colors.primaryGreen },
+
     drawerScrim: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.48)', zIndex: 10 },
     drawer: { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: Colors.cardBg, borderTopLeftRadius: Radius.xl, borderTopRightRadius: Radius.xl, maxHeight: height * 0.75, zIndex: 11, paddingBottom: 32 },
     drawerHandle: { width: 40, height: 4, backgroundColor: 'rgba(45,79,30,0.25)', borderRadius: 2, alignSelf: 'center', marginTop: Spacing.sm, marginBottom: 4 },
@@ -1323,25 +1928,20 @@ const styles = StyleSheet.create({
     drawerLoadingText: { fontSize: Typography.sm, color: Colors.mutedText, fontStyle: 'italic' },
     drawerEmpty: { padding: Spacing.lg, color: Colors.mutedText, fontSize: Typography.sm, textAlign: 'center' },
     drawerList: { paddingHorizontal: Spacing.lg, paddingTop: Spacing.sm },
-    drawerCropRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: Spacing.md, borderBottomWidth: 1, borderBottomColor: 'rgba(45,79,30,0.07)', gap: Spacing.sm },
-    drawerCropRowDim: { opacity: 0.45 },
-    drawerCropEmoji: { fontSize: 26 },
-    drawerCropImage: { width: 48, height: 48, borderRadius: 8, backgroundColor: '#E8E0D5' },
-    drawerCropInfo: { flex: 1, gap: 3 },
-    drawerCropTopRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, flexWrap: 'wrap' },
-    drawerCropName: { fontSize: Typography.base, fontWeight: Typography.semiBold, color: Colors.primaryGreen },
-    drawerCropNameDim: { color: Colors.mutedText },
-    drawerDtmPill: { backgroundColor: 'rgba(45,79,30,0.12)', paddingVertical: 2, paddingHorizontal: 8, borderRadius: Radius.full },
-    drawerDtmPillDim: { backgroundColor: 'rgba(0,0,0,0.06)' },
-    drawerDtmText: { fontSize: 10, color: Colors.primaryGreen, fontWeight: Typography.medium },
-    topPickBadge: { backgroundColor: Colors.burntOrange, paddingVertical: 2, paddingHorizontal: 6, borderRadius: Radius.full },
-    topPickText: { fontSize: 9, color: Colors.white, fontWeight: Typography.bold },
-    drawerCropReason: { fontSize: Typography.xs, color: Colors.mutedText, lineHeight: 15 },
-    drawerCropReasonDim: { color: 'rgba(0,0,0,0.3)' },
-    drawerCropWarning: { fontSize: Typography.xs, color: Colors.burntOrange, lineHeight: 14 },
-    drawerRemainingDays: { fontSize: Typography.xs, color: Colors.primaryGreen, opacity: 0.75, lineHeight: 14, marginTop: 1 },
-    drawerPlantBtn: { backgroundColor: Colors.primaryGreen, paddingVertical: 7, paddingHorizontal: 14, borderRadius: Radius.full },
-    drawerPlantBtnText: { color: Colors.cream, fontSize: Typography.xs, fontWeight: Typography.bold, letterSpacing: 0.5 },
+    drawerCropBox: {
+        width: '23.5%', aspectRatio: 0.95, borderRadius: Radius.sm,
+        backgroundColor: '#FFF', borderWidth: 1, borderColor: 'rgba(45,79,30,0.15)',
+        alignItems: 'center', justifyContent: 'center', padding: 4,
+        marginBottom: 8, gap: 2,
+    },
+    drawerCropBoxDim: { opacity: 0.45 },
+    drawerCropBoxConflict: { borderColor: '#EF5350', backgroundColor: 'rgba(183,28,28,0.04)' },
+    drawerCropBoxImg: { width: 44, height: 44, borderRadius: 6, marginBottom: 2 },
+    drawerCropBoxEmoji: { fontSize: 26, marginBottom: 2 },
+    drawerCropBoxName: { fontSize: 9, fontWeight: '800', color: Colors.primaryGreen, textAlign: 'center', lineHeight: 11 },
+    drawerCropBoxMeta: { fontSize: 8, color: Colors.mutedText, textAlign: 'center' },
+    drawerCropBoxBestBadge: { position: 'absolute', top: 4, left: 4, backgroundColor: Colors.burntOrange, borderRadius: Radius.full, paddingHorizontal: 4, paddingVertical: 2, zIndex: 2 },
+    drawerCropBoxWarnBadge: { position: 'absolute', top: 4, right: 4, backgroundColor: '#EF5350', borderRadius: Radius.full, paddingHorizontal: 4, paddingVertical: 2, zIndex: 2 },
 
     // ── Current plan section ──────────────────────────────────────────
     drawerCurrentPlan: { paddingHorizontal: Spacing.lg, paddingTop: Spacing.sm, paddingBottom: Spacing.xs },
@@ -1358,8 +1958,37 @@ const styles = StyleSheet.create({
     drawerRemoveBtnText: { fontSize: 12, color: '#C62828', fontWeight: Typography.bold },
     drawerDivider: { height: 1, backgroundColor: 'rgba(0,0,0,0.08)', marginVertical: Spacing.sm },
     drawerAddMoreLabel: { fontSize: 12, fontWeight: Typography.semiBold, color: Colors.primaryGreen, opacity: 0.8 },
+
+    // ── Inline coverage editor ─────────────────────────────────────────────────
+    drawerCurrentRowEditing: { backgroundColor: 'rgba(45,79,30,0.06)', borderRadius: Radius.sm },
+    drawerCoverageBadge: {
+        backgroundColor: 'rgba(45,79,30,0.12)', paddingVertical: 2, paddingHorizontal: 7,
+        borderRadius: Radius.full, marginRight: 2,
+    },
+    drawerCoverageBadgeText: { fontSize: 10, color: Colors.primaryGreen, fontWeight: '800' },
+    drawerInlineEditor: {
+        marginHorizontal: Spacing.sm, marginBottom: 6, paddingVertical: 8, paddingHorizontal: 10,
+        backgroundColor: 'rgba(45,79,30,0.06)', borderRadius: Radius.sm,
+        borderLeftWidth: 3, borderLeftColor: Colors.primaryGreen,
+    },
+    drawerInlineEditorLabel: { fontSize: 10, fontWeight: '700', color: Colors.primaryGreen, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 },
+    drawerInlineEditorRow: { flexDirection: 'row', gap: 8 },
+    drawerInlineFracBtn: {
+        flex: 1, paddingVertical: 8, alignItems: 'center', borderRadius: Radius.sm,
+        borderWidth: 1.5, borderColor: 'rgba(45,79,30,0.2)',
+        backgroundColor: Colors.white,
+    },
+    drawerInlineFracBtnActive: { backgroundColor: Colors.primaryGreen, borderColor: Colors.primaryGreen },
+    drawerInlineFracText: { fontSize: 12, fontWeight: '700', color: Colors.primaryGreen },
+    drawerInlineFracTextActive: { color: Colors.cream },
     drawerNoFitBadge: { width: 28, height: 28, borderRadius: 14, backgroundColor: 'rgba(0,0,0,0.08)', alignItems: 'center', justifyContent: 'center' },
     drawerNoFitText: { fontSize: 14, color: Colors.mutedText },
+    // Force-add button for out-of-season crops
+    drawerForceAddBtn: {
+        paddingVertical: 5, paddingHorizontal: 10, borderRadius: Radius.sm,
+        backgroundColor: 'rgba(180,120,30,0.12)', borderWidth: 1.5, borderColor: 'rgba(180,120,30,0.4)',
+    },
+    drawerForceAddText: { fontSize: 11, fontWeight: '800', color: '#A0620A' },
     drawerCropDateRange: { fontSize: 10, color: Colors.burntOrange, fontWeight: '600', marginBottom: 1 },
 
     // ── Frost filter toggle ──────────────────────────────────────────────
@@ -1368,6 +1997,17 @@ const styles = StyleSheet.create({
     frostFilterText: { fontSize: Typography.xs, fontWeight: '700', color: '#01579B' },
     frostFilterTextActive: { color: '#01579B' },
     frostFilterNote: { marginHorizontal: Spacing.lg, marginTop: 4, fontSize: Typography.xs, color: Colors.mutedText, fontStyle: 'italic', lineHeight: 16 },
+
+    // ── Search bar ─────────────────────────────────────────────────────────────
+    drawerSearchWrap: {
+        flexDirection: 'row', alignItems: 'center',
+        marginHorizontal: Spacing.lg, marginBottom: Spacing.sm,
+        backgroundColor: 'rgba(45,79,30,0.06)',
+        borderRadius: Radius.sm, borderWidth: 1.5,
+        borderColor: 'rgba(45,79,30,0.15)', paddingHorizontal: 10, height: 38,
+    },
+    drawerSearchIcon: { fontSize: 13, marginRight: 6, color: Colors.mutedText },
+    drawerSearchInput: { flex: 1, fontSize: Typography.sm, color: Colors.primaryGreen, padding: 0 },
 
     // ── Companion conflict styles ───────────────────────────────────────────────
     drawerCropRowConflict: { backgroundColor: 'rgba(183,28,28,0.04)', borderLeftWidth: 3, borderLeftColor: '#EF9A9A' },
