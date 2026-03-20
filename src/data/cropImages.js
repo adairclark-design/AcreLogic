@@ -229,6 +229,7 @@ const CROP_IMAGES = {
   'juneberry': require('../../assets/crops/juneberry.jpg'),
   'kabocha_squash': require('../../assets/crops/kabocha_squash.png'),
   'kale_red_russian': require('../../assets/crops/kale_red_russian.png'),
+  'kale_red_russian_2': require('../../assets/crops/kale_red_russian.png'),
   'kalettes': require('../../assets/crops/kalettes.png'),
   'kohlrabi_kolibri': require('../../assets/crops/kohlrabi_kolibri.png'),
   'kohlrabi_white_vienna': require('../../assets/crops/kohlrabi_white_vienna.png'),
