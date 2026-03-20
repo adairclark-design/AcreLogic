@@ -308,14 +308,16 @@ export default function VegetableGridScreen({ navigation, route }) {
                         if (selectedCrops.size === 0) return;
                         bumpFrequency(Array.from(selectedCrops));
                         setCropFrequency(loadFrequency());
-                        // Thread bedSuccessions back if they came from BedWorkspace (same session).
-                        // This ensures returning from the Crops tab doesn't wipe planned beds.
+                        // Always pass `bedSuccessions` param — even as {} on a fresh start.
+                        // BedWorkspace uses key-presence (not value) to decide whether to
+                        // restore from localStorage or start clean. This avoids flaky
+                        // location/frost-date comparisons.
                         const previousBedSuccessions = route?.params?.bedSuccessions;
                         navigation.navigate('BedWorkspace', {
                             farmProfile,
                             planId,
                             selectedCropIds: Array.from(selectedCrops),
-                            ...(previousBedSuccessions ? { bedSuccessions: previousBedSuccessions } : {}),
+                            bedSuccessions: previousBedSuccessions ?? {}, // {} = fresh, or threaded
                         });
                     }}
                     disabled={selectedCrops.size === 0}

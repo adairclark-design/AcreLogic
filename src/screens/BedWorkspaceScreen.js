@@ -772,34 +772,24 @@ export default function BedWorkspaceScreen({ navigation, route }) {
     const [noteBed, setNoteBed] = useState(null); // bed number being noted (null = modal closed)
     // Restore from localStorage if passed via Continue flow (HeroScreen restore)
     const [bedSuccessions, setBedSuccessions] = useState(() => {
-        // Priority 1: explicit bedSuccessions in route params.
-        // This covers both HeroScreen restore AND same-session Crops↔BedWorkspace navigation
-        // (bedSuccessions is now threaded through VegetableGrid round-trip).
-        const fromParams = route?.params?.bedSuccessions;
-        if (fromParams && Object.keys(fromParams).length > 0) return fromParams;
+        const params = route?.params ?? {};
 
-        // Priority 2: localStorage — only when we can CONFIRM it's the same farm.
-        // We require a saved farmProfile to compare against. If it's absent (pre-fix
-        // sessions or first-ever visit), we can't verify the farm identity → start fresh.
-        const saved = loadSavedPlan();
-        if (!saved?.bedSuccessions || Object.keys(saved.bedSuccessions).length === 0) return {};
-
-        const currentProfile = route?.params?.farmProfile;
-        const savedProfile   = saved?.farmProfile;
-
-        // Without a savedProfile we cannot confirm same-farm → always start fresh.
-        // (savedProfile is written on first bed change, so absent = previous session never filled beds)
-        if (!savedProfile) return {};
-
-        // With both profiles available, compare frost dates (derived from zip/location)
-        if (currentProfile) {
-            const sameLastFrost  = currentProfile.last_frost_date  === savedProfile.last_frost_date;
-            const sameFirstFrost = currentProfile.first_frost_date === savedProfile.first_frost_date;
-            if (!sameLastFrost || !sameFirstFrost) return {}; // new farm → clear
+        // VegetableGrid ALWAYS passes 'bedSuccessions' as a param key:
+        //   {}           → fresh start (new farm or zip change)
+        //   {1:[...], …} → same-session Crops↔BedWorkspace round-trip
+        // HeroScreen also passes it when restoring a saved plan (non-empty).
+        //
+        // If the key is present, trust the param value entirely — no localStorage.
+        if ('bedSuccessions' in params) {
+            const fromParams = params.bedSuccessions;
+            if (fromParams && Object.keys(fromParams).length > 0) return fromParams;
+            return {}; // explicit empty = fresh start
         }
 
-        // Same farm confirmed → restore beds
-        return saved.bedSuccessions;
+        // Key absent = arrived via DashboardScreen, page refresh, or deep-link.
+        // Restore from localStorage so the user doesn't lose work on refresh.
+        const saved = loadSavedPlan();
+        return saved?.bedSuccessions ?? {};
     });
     // ── Per-bed shelter type (Phase 2) ────────────────────────────────────────
     // 'none' | 'rowCover' | 'greenhouse'  — persisted in state, saved alongside successions
