@@ -15,6 +15,9 @@
  * pick up the change automatically.
  */
 
+// ─── Hard CSA ceiling — above this is a commercial CSA, push to Market Farm ───
+export const HARD_FAMILY_CAP = 60;
+
 // ─── Tier identifiers ─────────────────────────────────────────────────────────
 export const TIER = {
     FREE:    'free',
@@ -56,8 +59,8 @@ export const LIMITS = {
     },
 
     [TIER.PREMIUM]: {
-        // Unlimited — existing Farm Designer
-        maxFamilyMembers:   Infinity,
+        // Family planner capped at HARD_FAMILY_CAP — above that is a CSA
+        maxFamilyMembers:   HARD_FAMILY_CAP,  // 60 — push larger groups to Market Farm
         maxCropsSelected:   Infinity,
         maxAcrePlot:        Infinity,
         maxSqFtPlot:        Infinity,
@@ -99,6 +102,31 @@ export function setActiveTier(tier) {
         }
     } catch {}
 }
+
+/**
+ * DEV ONLY — wipes all persisted tier + planner state and resets to free tier.
+ * Called by the ?dev=1 reset banner. Never shown to real users.
+ */
+export function resetTierForTesting() {
+    _activeTier = TIER.FREE;
+    try {
+        if (typeof localStorage !== 'undefined') {
+            // Clear tier
+            localStorage.removeItem(TIER_STORAGE_KEY);
+            // Clear FamilyPlanner saved state
+            localStorage.removeItem('acrelogic_family_size');
+            localStorage.removeItem('acrelogic_selected_crops');
+            // Clear any other acrelogic keys
+            const toRemove = [];
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (key && key.startsWith('acrelogic_')) toRemove.push(key);
+            }
+            toRemove.forEach(k => localStorage.removeItem(k));
+        }
+    } catch {}
+}
+
 export function getLimits(tier = _activeTier) { return LIMITS[tier] ?? LIMITS[TIER.FREE]; }
 
 // ─── Gate check helpers ───────────────────────────────────────────────────────
@@ -114,6 +142,16 @@ export function getLimits(tier = _activeTier) { return LIMITS[tier] ?? LIMITS[TI
  * @returns {{ allowed: boolean, blockedBy: string|null, limit: number|null }}
  */
 export function checkFamilyGate({ familySize = 0, cropCount = 0 }, tier = _activeTier) {
+    // Hard CSA ceiling — above HARD_FAMILY_CAP (60) on any tier → redirect to Market Farm
+    if (familySize > HARD_FAMILY_CAP) {
+        return {
+            allowed: false,
+            blockedBy: 'csaSize',
+            limit: HARD_FAMILY_CAP,
+            message: `At ${HARD_FAMILY_CAP}+ people you\'re running a CSA. Switch to Market Farm for commercial planning tools.`,
+        };
+    }
+
     const limits = getLimits(tier);
 
     if (familySize > limits.maxFamilyMembers) {
@@ -201,9 +239,14 @@ export function checkFeatureGate(featureName, tier = _activeTier) {
  */
 export function getUpgradePrompt(blockedBy) {
     const prompts = {
+        csaSize: {
+            headline: 'Sounds like you\'re running a CSA! 🌱',
+            body: 'At 60+ people, Feed My Family isn\'t the right tool — you need Market Farm mode. It\'s built for commercial-scale planning, revenue tracking, and succession scheduling.',
+            cta: 'Switch to Market Farm',
+        },
         familySize: {
             headline: 'Growing for a bigger family?',
-            body: 'Upgrade to Premium to plan for unlimited household sizes, plus unlock AI garden layout, succession scheduling, and full market tools.',
+            body: 'Upgrade to Premium to plan for up to 60 people, plus unlock AI garden layout, succession scheduling, and full market tools.',
             cta: 'See Premium Plans',
         },
         cropCount: {

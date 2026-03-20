@@ -152,6 +152,21 @@ export default function ModeSelectScreen({ navigation }) {
                 <Text style={styles.footerNote}>
                     All plans start free. Upgrade anytime to unlock the full suite.
                 </Text>
+
+                {/* ── DEV ONLY: remove before launch ── */}
+                {Platform.OS === 'web' && (
+                    <TouchableOpacity
+                        style={styles.devLink}
+                        onPress={() => {
+                            if (typeof window !== 'undefined') {
+                                window.location.href = window.location.pathname + '?dev=1';
+                            }
+                        }}
+                    >
+                        <Text style={styles.devLinkText}>🛠 Dev Testing Tools</Text>
+                    </TouchableOpacity>
+                )}
+
             </ScrollView>
         </View>
     );
@@ -257,7 +272,25 @@ const styles = StyleSheet.create({
         fontSize: Typography.xs,
         color: Colors.mutedText,
         marginTop: Spacing.lg,
-        marginBottom: Spacing.xl,
+        marginBottom: Spacing.sm,
         lineHeight: 16,
     },
+
+    // ── DEV ONLY — remove before launch ──────────────────────────────────────
+    devLink: {
+        alignSelf: 'center',
+        marginBottom: Spacing.xl,
+        paddingVertical: 6,
+        paddingHorizontal: 14,
+        borderRadius: Radius.full,
+        borderWidth: 1,
+        borderColor: 'rgba(0,0,0,0.12)',
+        backgroundColor: 'rgba(0,0,0,0.03)',
+    },
+    devLinkText: {
+        fontSize: 11,
+        color: Colors.mutedText,
+        fontFamily: Platform.OS === 'web' ? 'monospace' : undefined,
+    },
 });
+

@@ -106,6 +106,25 @@ export default function BlockSetupWizard({ route, navigation }) {
     const [dupeCountStr, setDupeCountStr] = useState('2');
     // dupeNames[0] is always the primary name; extra entries for copies
     const [dupeNames, setDupeNames] = useState(['', '']);
+    // dupeGridPositions[i] is the explicit grid slot for block i (parallel to dupeNames)
+    // Initialized with auto-sequential defaults from available slots.
+    const [dupeGridPositions, setDupeGridPositions] = useState(() => {
+        // Block 0 gets the user's chosen gridPos; blocks 1+ get the next 1 available slot
+        const used = new Set(gridPos ? [`${gridPos.col}_${gridPos.row}`] : []);
+        const available = GRID_POSITIONS.filter(p => !used.has(`${p.col}_${p.row}`));
+        return [gridPos ?? null, available[0] ?? null];
+    });
+
+    // Recompute available positions for auto-defaults, given what other blocks in the
+    // batch have already claimed. Returns positions NOT claimed by any other index.
+    const getAvailableForIdx = (positions, skipIdx) => {
+        const used = new Set(
+            positions
+                .filter((p, i) => i !== skipIdx && p)
+                .map(p => `${p.col}_${p.row}`)
+        );
+        return GRID_POSITIONS.filter(p => !used.has(`${p.col}_${p.row}`));
+    };
 
     // Update dupeNames array when count changes
     const applyDupeCount = (val) => {
@@ -115,12 +134,32 @@ export default function BlockSetupWizard({ route, navigation }) {
             const arr = Array.from({ length: n }, (_, i) => prev[i] ?? '');
             return arr;
         });
+        // Also resize dupeGridPositions, filling new slots with next auto-available position
+        setDupeGridPositions(prev => {
+            const arr = Array.from({ length: n }, (_, i) => prev[i] ?? null);
+            // Fill any nulls (newly added slots) with the next available unoccupied position
+            for (let i = 0; i < n; i++) {
+                if (!arr[i]) {
+                    const avail = getAvailableForIdx(arr, i);
+                    arr[i] = avail[0] ?? null;
+                }
+            }
+            return arr;
+        });
     };
 
     const updateDupeName = (idx, val) => {
         setDupeNames(prev => {
             const arr = [...prev];
             arr[idx] = val;
+            return arr;
+        });
+    };
+
+    const updateDupeGridPos = (idx, pos) => {
+        setDupeGridPositions(prev => {
+            const arr = [...prev];
+            arr[idx] = pos;
             return arr;
         });
     };
@@ -184,17 +223,18 @@ export default function BlockSetupWizard({ route, navigation }) {
         };
 
         if (!isEditing && isDuplicate) {
-            // Save multiple blocks — one per name entered
+            // Save multiple blocks — one per name entered, each with explicit grid position
             const count = parseInt(dupeCountStr) || 2;
             for (let i = 0; i < count; i++) {
                 const rawName = dupeNames[i]?.trim();
                 const name = rawName || `${blockName.trim() || 'Block'} ${String.fromCharCode(65 + i)}`;
+                // Use the explicit per-block position chosen in Step 1
+                const assignedPos = dupeGridPositions[i] ?? null;
                 saveBlock({
                     ...baseBlock,
                     id: generateBlockId(),
                     name,
-                    // Grid position: first block gets chosen pos; others get null (no grid pos)
-                    gridPosition: i === 0 ? gridPos : null,
+                    gridPosition: assignedPos,
                 });
             }
         } else {
@@ -292,19 +332,62 @@ export default function BlockSetupWizard({ route, navigation }) {
                         Leave blank to auto-name (Block A, Block B…)
                     </Text>
 
-                    {dupeNames.map((name, idx) => (
-                        <View key={idx} style={styles.fieldRow}>
-                            <Text style={styles.fieldLabel}>Block {idx + 1}</Text>
-                            <TextInput
-                                style={styles.fieldInput}
-                                value={name}
-                                onChangeText={val => updateDupeName(idx, val)}
-                                placeholder={`e.g. ${blockName.trim() || 'Block'} ${String.fromCharCode(65 + idx)}`}
-                                placeholderTextColor={Colors.mutedText}
-                                keyboardType="default"
-                            />
-                        </View>
-                    ))}
+                    {dupeNames.map((name, idx) => {
+                        // Positions taken by OTHER blocks in this batch (not self)
+                        const takenByOthers = new Set(
+                            dupeGridPositions
+                                .filter((p, i) => i !== idx && p)
+                                .map(p => `${p.col}_${p.row}`)
+                        );
+                        const myPos = dupeGridPositions[idx];
+                        return (
+                            <View key={idx} style={styles.dupeBlockCard}>
+                                {/* Block label + name field */}
+                                <View style={styles.dupeBlockHeader}>
+                                    <Text style={styles.dupeBadge}>{String.fromCharCode(65 + idx)}</Text>
+                                    <TextInput
+                                        style={[styles.fieldInput, { flex: 1 }]}
+                                        value={name}
+                                        onChangeText={val => updateDupeName(idx, val)}
+                                        placeholder={`e.g. ${blockName.trim() || 'Block'} ${String.fromCharCode(65 + idx)}`}
+                                        placeholderTextColor={Colors.mutedText}
+                                        keyboardType="default"
+                                    />
+                                </View>
+
+                                {/* Mini 3×3 grid position picker */}
+                                <View style={styles.dupeGridWrap}>
+                                    <Text style={styles.dupeGridLabel}>📍 Grid Position</Text>
+                                    <View style={styles.dupeGrid}>
+                                        {GRID_POSITIONS.map(pos => {
+                                            const isSelected = myPos?.label === pos.label;
+                                            const isTaken = takenByOthers.has(`${pos.col}_${pos.row}`);
+                                            return (
+                                                <TouchableOpacity
+                                                    key={pos.label}
+                                                    style={[
+                                                        styles.dupeGridCell,
+                                                        isSelected && styles.dupeGridCellActive,
+                                                        isTaken && styles.dupeGridCellTaken,
+                                                    ]}
+                                                    onPress={() => !isTaken && updateDupeGridPos(idx, pos)}
+                                                    activeOpacity={isTaken ? 1 : 0.7}
+                                                >
+                                                    <Text style={[
+                                                        styles.dupeGridCellText,
+                                                        isSelected && styles.dupeGridCellTextActive,
+                                                        isTaken && styles.dupeGridCellTextTaken,
+                                                    ]}>
+                                                        {pos.label}
+                                                    </Text>
+                                                </TouchableOpacity>
+                                            );
+                                        })}
+                                    </View>
+                                </View>
+                            </View>
+                        );
+                    })}
                 </>
             )}
             <View style={{ height: 40 }} />
@@ -401,8 +484,8 @@ export default function BlockSetupWizard({ route, navigation }) {
                         {dupeNames.map((n, i) => (
                             <Row
                                 key={i}
-                                label={`Block ${i + 1} name`}
-                                value={n.trim() || `${blockName.trim() || 'Block'} ${String.fromCharCode(65 + i)}`}
+                                label={`Block ${String.fromCharCode(65 + i)}`}
+                                value={`${n.trim() || `${blockName.trim() || 'Block'} ${String.fromCharCode(65 + i)}`} · ${dupeGridPositions[i]?.label ?? '—'}`}
                             />
                         ))}
                         <View style={styles.reviewDivider} />
@@ -572,4 +655,35 @@ const styles = StyleSheet.create({
     nextBtn: { backgroundColor: Colors.primaryGreen, borderRadius: Radius.md, paddingVertical: 16, alignItems: 'center' },
     nextBtnDisabled: { opacity: 0.4 },
     nextBtnText: { color: Colors.cream, fontWeight: '800', fontSize: Typography.md },
+
+    // ── Per-block duplicate card styles ──────────────────────────────────────
+    dupeBlockCard: {
+        backgroundColor: Colors.white ?? '#FFF',
+        borderRadius: Radius.md, borderWidth: 1.5,
+        borderColor: 'rgba(45,79,30,0.15)', padding: Spacing.sm, gap: 8,
+    },
+    dupeBlockHeader: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+    dupeBadge: {
+        width: 28, height: 28, borderRadius: 14,
+        backgroundColor: Colors.primaryGreen, textAlign: 'center',
+        fontSize: Typography.sm, fontWeight: '900', color: Colors.cream,
+        lineHeight: 28, overflow: 'hidden',
+    },
+
+    // Mini 3×3 grid position picker inside each dupe block card
+    dupeGridWrap: { gap: 4 },
+    dupeGridLabel: { fontSize: 9, fontWeight: '800', color: Colors.mutedText, textTransform: 'uppercase', letterSpacing: 0.5 },
+    dupeGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 3 },
+    dupeGridCell: {
+        width: '30%', paddingVertical: 5,
+        borderRadius: Radius.sm, borderWidth: 1,
+        borderColor: 'rgba(45,79,30,0.18)',
+        alignItems: 'center',
+        backgroundColor: 'rgba(45,79,30,0.04)',
+    },
+    dupeGridCellActive: { backgroundColor: Colors.primaryGreen, borderColor: Colors.primaryGreen },
+    dupeGridCellTaken: { backgroundColor: 'rgba(0,0,0,0.04)', borderColor: 'rgba(0,0,0,0.08)', opacity: 0.4 },
+    dupeGridCellText: { fontSize: 10, fontWeight: '700', color: Colors.primaryGreen },
+    dupeGridCellTextActive: { color: Colors.cream },
+    dupeGridCellTextTaken: { color: Colors.mutedText },
 });

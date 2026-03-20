@@ -21,7 +21,7 @@
  *   • Report cards driven by calculateGardenPlan()
  *   • "Good Luck Gardening!" footer + Export stub
  */
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import {
     View, Text, StyleSheet, TouchableOpacity, ScrollView,
     FlatList, TextInput, Image, Switch, Animated,
@@ -47,25 +47,51 @@ import {
     getProfileFromZone,
     formatDateDisplay,
 } from '../services/climateService';
+import { formatCropDisplayName, formatVarietyLabel } from '../utils/cropDisplay';
+import { useFocusEffect } from '@react-navigation/native';
+import MegaMenuBar from '../components/MegaMenuBar';
+import SharedCropCard from '../components/SharedCropCard';
 
 const ALL_CROPS = CROPS_DATA.crops ?? [];
-const PLANTABLE_CROPS = ALL_CROPS.filter(c => c.category !== 'Cover Crop');
+const PLANTABLE_CROPS = ALL_CROPS; // Cover Crops included — visible under the "Cover Crops" MegaMenuBar tab
 
 // Garden space flow: family size is always capped at 4 regardless of tier.
-// (The Family Feeder flow scales with upgrades; the property planner doesn't.)
+// (The Family Feed// ── Crop selection grid — compact, many columns (matches FamilyPlannerScreen) ────────────────
+function getCropGridColumns(viewportWidth) {
+    // Identical to VegetableGridScreen getBreakpoint() breakpoints
+    if (viewportWidth < 480)  return 3;
+    if (viewportWidth < 768)  return 4;
+    if (viewportWidth < 1024) return 6;
+    if (viewportWidth < 1280) return 8;
+    if (viewportWidth < 1600) return 10;
+    if (viewportWidth < 1920) return 11;
+    return 12;
+}
+
+// ── Plan results — fewer, richer cards (matches FamilyPlannerScreen) ────────────────────
+function getPlanColumns(viewportWidth) {
+    if (viewportWidth >= 2200) return 8;
+    if (viewportWidth >= 1800) return 6;
+    if (viewportWidth >= 1400) return 5;
+    if (viewportWidth >= 1100) return 4;
+    if (viewportWidth >= 768)  return 3;
+    if (viewportWidth >= 480)  return 2;
+    return 1;
+}
+
+// (The FamilyPlannerScreen scales with upgrades; the property planner doesn't.)
 const MAX_GARDEN_FAMILY = 4;
 
 // ─── Responsive columns (same as FamilyPlannerScreen) ────────────────────────
 function getColumns(width) {
-    if (width >= 1800) return 6;
-    if (width >= 1400) return 5;
-    if (width >= 1024) return 4;
-    if (width >= 600)  return 3;
-    return 2;
+    if (width < 480)  return 3;
+    if (width < 768)  return 4;
+    if (width < 1024) return 5;
+    return 5; // Default for larger screens, as this function is for a specific layout
 }
 
 const CROP_CATEGORIES = [
-    'All', 'Vegetables', 'Tomatoes', 'Peppers', 'Greens',
+    'All', 'Vegetables', 'Tomatoes', 'Peppers', 'Eggplant', 'Greens',
     'Brassica', 'Root & Tuber', 'Beans & Peas', 'Herbs',
     'Squash', 'Cucumbers', 'Melons', 'Flowers', 'Grains',
     'Fruits & Berries', 'Cover Crops', 'Specialty',
@@ -77,16 +103,17 @@ function filterCrops(cat, query) {
     const idHas = (patterns) => list.filter(c => patterns.some(p => c.id.includes(p)));
     switch (cat) {
         case 'Vegetables':      list = list.filter(c => VEG_CATS.has(c.category)); break;
-        case 'Tomatoes':        list = idHas(['tomato', 'tomatillo', 'ground_cherry']); break;
-        case 'Peppers':         list = idHas(['pepper']); break;
+        case 'Tomatoes':        list = list.filter(c => c.category === 'Nightshade' && (c.id.includes('tomato') || c.id.includes('tomatillo') || c.id.includes('ground_cherry'))); break;
+        case 'Peppers':         list = list.filter(c => c.category === 'Nightshade' && c.id.includes('pepper')); break;
+        case 'Eggplant':        list = list.filter(c => c.category === 'Nightshade' && c.id.includes('eggplant')); break;
         case 'Greens':          list = list.filter(c => c.category === 'Greens'); break;
         case 'Brassica':        list = list.filter(c => c.category === 'Brassica'); break;
         case 'Root & Tuber':    list = list.filter(c => c.category === 'Root' || c.category === 'Tuber'); break;
         case 'Beans & Peas':    list = list.filter(c => c.category === 'Legume'); break;
         case 'Herbs':           list = list.filter(c => c.category === 'Herb'); break;
-        case 'Squash':          list = idHas(['squash', 'pumpkin', 'zucchini']); break;
-        case 'Cucumbers':       list = idHas(['cucumber']); break;
-        case 'Melons':          list = idHas(['melon', 'watermelon', 'cantaloupe']); break;
+        case 'Squash':          list = list.filter(c => c.category === 'Cucurbit' && (c.id.includes('squash') || c.id.includes('pumpkin') || c.id.includes('zucchini'))); break;
+        case 'Cucumbers':       list = list.filter(c => c.category === 'Cucurbit' && c.id.includes('cucumber')); break;
+        case 'Melons':          list = list.filter(c => c.category === 'Cucurbit' && (c.id.includes('melon') || c.id.includes('watermelon') || c.id.includes('cantaloupe'))); break;
         case 'Flowers':         list = list.filter(c => c.category === 'Flower'); break;
         case 'Grains':          list = list.filter(c => c.category === 'Grain'); break;
         case 'Fruits & Berries':list = list.filter(c => c.category === 'Fruit'); break;
@@ -100,94 +127,165 @@ function filterCrops(cat, query) {
 }
 
 
-// ─── Compact CropCard (duplicated from FamilyPlannerScreen pattern) ────────
-function CropCard({ crop, selected, onPress }) {
-    return (
-        <TouchableOpacity
-            style={[styles.cropCard, selected && styles.cropCardSelected]}
-            onPress={() => onPress(crop.id)}
-            activeOpacity={0.8}
-        >
-            <Image
-                source={CROP_IMAGES[crop.id]}
-                style={[styles.cropCardImg, selected && styles.cropCardImgFaded]}
-                resizeMode="cover"
-            />
-            {selected && (
-                <View style={styles.cropCheckOverlay}>
-                    <Text style={styles.cropCheckMark}>✓</Text>
-                </View>
-            )}
-            <Text style={styles.cropCardName} numberOfLines={1}>{crop.name}</Text>
-        </TouchableOpacity>
-    );
-}
+// CropCard is now SharedCropCard — see src/components/SharedCropCard.js
+const CropCard = SharedCropCard;
 
-// ─── Mini report card (same data as FamilyPlannerScreen ReportCard) ────────
+
+// ─── Report card — matches FamilyPlannerScreen exactly ───────────────────────────────────
 function ReportCard({ item }) {
     if (!item.isSupported) return null;
+    const isFlower = item.isFlower;
+    const GAP = 8;
     return (
         <View style={[styles.reportCard, Shadows.card]}>
-            <View style={styles.reportHeader}>
-                <Text style={styles.reportEmoji}>{item.emoji ?? '🌿'}</Text>
+            {/* Header row */}
+            <View style={styles.reportCardHeader}>
+                {CROP_IMAGES[item.cropId] ? (
+                    <Image
+                        source={CROP_IMAGES[item.cropId]}
+                        style={{ width: 36, height: 36, borderRadius: 6 }}
+                        resizeMode="cover"
+                    />
+                ) : (
+                    <Text style={styles.reportEmoji}>{item.emoji ?? '🌿'}</Text>
+                )}
                 <View style={{ flex: 1 }}>
-                    <Text style={styles.reportName}>{item.cropName}</Text>
-                    {item.variety ? <Text style={styles.reportVariety}>{item.variety}</Text> : null}
+                    <Text style={styles.reportCropName}>{item.cropName}</Text>
+                    {formatVarietyLabel(item.variety) ? <Text style={styles.reportVariety}>{formatVarietyLabel(item.variety)}</Text> : null}
                 </View>
             </View>
 
+            {/* Key metrics */}
             <View style={styles.reportMetrics}>
-                {item.isFlower ? (
+                {isFlower ? (
                     <>
-                        <MiniPill icon="💐" label="Stems/wk" value={`${item.stemsPerWeek}`} />
-                        <MiniPill icon="📅" label="Season" value={`${item.weeksSeason} wks`} />
-                        <MiniPill icon="🌿" label="Plants" value={`${item.seedsToStart}`} />
+                        <MetricPill icon="💐" label="Stems/week" value={`${item.stemsPerWeek}`} />
+                        <MetricPill icon="📅" label="Season" value={`${item.weeksSeason} wks`} />
+                        <MetricPill icon="🌿" label="Plants to start" value={`${item.seedsToStart}`} />
                     </>
                 ) : (
                     <>
-                        <MiniPill icon="🎯" label="Goal" value={`${item.targetLbs} lbs`} />
-                        <MiniPill icon="📏" label="Row-ft" value={`${item.linearFeetNeeded} ft`} />
-                        <MiniPill icon="🌿" label={item.seedType === 'TP' ? 'Transplants' : 'Plants'} value={`${item.seedsToStart}`} />
+                        <MetricPill icon="🎯" label="Season goal" value={`${item.targetLbs} lbs`} />
+                        <MetricPill icon="🌿" label={item.seedType === 'TP' ? 'Transplants' : 'Plants'} value={`${item.plantsNeeded ?? item.seedsToStart}`} />
                     </>
                 )}
             </View>
 
+            {/* Divider */}
             <View style={styles.reportDivider} />
+
+            {/* Growing facts */}
             <View style={styles.reportFacts}>
-                {item.dtm      && <FactRow icon="⏱" label="Days to maturity"  value={`${item.dtm} days`} />}
-                {item.seedType && <FactRow icon="🌱" label="Starting method"   value={item.seedType === 'DS' ? 'Direct Sow' : 'Transplant'} />}
-                {/* Calendar dates — only when farmProfile was loaded */}
-                {item.indoorSeedDate  && <FactRow icon="📅" label="Start seeds indoors" value={item.indoorSeedDate} />}
-                {item.directSowDate   && <FactRow icon="📅" label="Direct sow date"     value={item.directSowDate} />}
-                {item.transplantDate  && <FactRow icon="📅" label="Transplant date"     value={item.transplantDate} />}
-                {/* Fallback if no profile: show relative weeks */}
-                {!item.indoorSeedDate && item.seedType === 'TP' && item.seedStartWeeks
-                               && <FactRow icon="📅" label="Start seeds"        value={`${item.seedStartWeeks} wks before last frost`} />}
-                {item.harvestMethod    && <FactRow icon="✂️" label="Harvest method"  value={item.harvestMethod} />}
-                {item.harvestFrequency && <FactRow icon="🔁" label="Frequency"       value={item.harvestFrequency} />}
-                {item.season   && <FactRow icon="🗓" label="Season"            value={item.season} />}
+                {item.dtm ? (
+                    <FactRow icon="⏱" label="Days to maturity" value={`${item.dtm} days`} />
+                ) : null}
+                {item.inGroundDays && item.inGroundDays > item.dtm ? (
+                    <FactRow icon="🗓" label="In-ground window" value={`${item.inGroundDays} days total`} />
+                ) : null}
+                {item.seedType ? (
+                    <FactRow icon="🌱" label="Starting method" value={item.seedType === 'DS' ? 'Direct Sow' : 'Transplant'} />
+                ) : null}
+                {/* Calendar dates — Ideal vs Today scenario */}
+                {item.indoorSeedDate ? (
+                    <>
+                        <FactRow
+                            icon="🗓"
+                            label="Start seeds indoors"
+                            value={
+                                item.todayIndoorDate && item.todayIndoorDate !== item.indoorSeedDate
+                                    ? `${item.indoorSeedDate}  ·  (${item.todayIndoorDate} if starting today)`
+                                    : item.indoorSeedDate
+                            }
+                            highlight
+                        />
+                        {item.transplantDate ? (
+                            <FactRow
+                                icon="🌤"
+                                label="Transplant date"
+                                value={
+                                    item.todayTransplantDate && item.todayTransplantDate !== item.transplantDate
+                                        ? `${item.transplantDate}  ·  (${item.todayTransplantDate} if starting today)`
+                                        : item.transplantDate
+                                }
+                                highlight={!item.isLateStart}
+                            />
+                        ) : null}
+                        {item.lateStartCaveat ? (
+                            <FactRow icon="⏳" label="Note" value={item.lateStartCaveat} />
+                        ) : null}
+                    </>
+                ) : item.seedType === 'TP' && item.seedStartWeeks ? (
+                    <FactRow icon="🗓" label="Start seeds indoors" value={`${item.seedStartWeeks} wks before last frost`} />
+                ) : null}
+                {item.directSowDate ? (
+                    <FactRow
+                        icon="🌱"
+                        label="Direct sow date"
+                        value={
+                            item.todayDirectSowDate && item.todayDirectSowDate !== item.directSowDate
+                                ? `Ideal: ${item.directSowDate}  ·  (${item.isLateStart ? 'past ideal — ' : ''}${item.todayDirectSowDate} if starting today)`
+                                : item.directSowDate
+                        }
+                        highlight={!item.isLateStart}
+                    />
+                ) : null}
+                {item.lateStartCaveat && !item.indoorSeedDate && item.directSowDate ? (
+                    <FactRow icon="⏳" label="Note" value={item.lateStartCaveat} />
+                ) : null}
+                {item.inRowSpacingIn ? (
+                    <FactRow icon="↔️" label="In-row spacing" value={`${item.inRowSpacingIn}"`} />
+                ) : null}
+                {item.harvestStyle ? (
+                    <FactRow icon="✂️" label="Harvest" value={item.harvestStyle} />
+                ) : item.harvestMethod ? (
+                    <FactRow icon="✂️" label="Harvest method" value={item.harvestMethod} />
+                ) : null}
+                {item.yieldLow != null && item.yieldHigh != null ? (
+                    <FactRow
+                        icon="📊"
+                        label="Expected yield"
+                        value={
+                            item.headCountLow != null
+                                ? `${item.yieldLow}–${item.yieldHigh} lbs · ${item.headCountLow}–${item.headCountHigh} heads (${item.headWeightLb} lb avg)`
+                                : `${item.yieldLow}–${item.yieldHigh} lbs`
+                        }
+                    />
+                ) : null}
+                {item.season ? (
+                    <FactRow icon="📅" label="Season" value={item.season} />
+                ) : null}
             </View>
-            {item.consumptionNotes && (
+
+            {/* Succession callout */}
+            {item.needsSuccession && item.successionNote ? (
+                <View style={styles.successionCallout}>
+                    <Text style={styles.successionIcon}>⚡</Text>
+                    <Text style={styles.successionText}>{item.successionNote}</Text>
+                </View>
+            ) : null}
+
+            {/* Consumption note */}
+            {item.consumptionNotes ? (
                 <Text style={styles.reportNote}>💡 {item.consumptionNotes}</Text>
-            )}
+            ) : null}
         </View>
     );
 }
-function MiniPill({ icon, label, value }) {
+function MetricPill({ icon, label, value }) {
     return (
-        <View style={styles.miniPill}>
-            <Text style={styles.miniIcon}>{icon}</Text>
-            <Text style={styles.miniValue}>{value}</Text>
-            <Text style={styles.miniLabel}>{label}</Text>
+        <View style={styles.metricPill}>
+            <Text style={styles.metricIcon}>{icon}</Text>
+            <Text style={styles.metricValue}>{value}</Text>
+            <Text style={styles.metricLabel}>{label}</Text>
         </View>
     );
 }
-function FactRow({ icon, label, value }) {
+function FactRow({ icon, label, value, highlight }) {
     return (
         <View style={styles.factRow}>
             <Text style={styles.factIcon}>{icon}</Text>
             <Text style={styles.factLabel}>{label}</Text>
-            <Text style={styles.factValue}>{value}</Text>
+            <Text style={[styles.factValue, highlight && styles.factValueHighlight]}>{value}</Text>
         </View>
     );
 }
@@ -207,11 +305,15 @@ function BedLayoutVisual({ spaceResult, containerWidth }) {
         nsPathwayCount = 0, ewPathwayCount = 0,
         mainPathWidthFt = 0, equidistant = false,
         colGroups, rowGroups,
+        orientation = 'NS',
     } = spaceResult;
 
     const ratio       = containerWidth / (spaceWidthFt || 1);
-    const scaledBedW  = bedWidthFt    * ratio;
-    const scaledBedH  = bedLengthFt   * ratio;
+    // When E/W is selected the bed's LONG axis runs horizontally:
+    //   scaledBedW = the horizontal extent of one bed in pixels
+    //   scaledBedH = the vertical extent of one bed in pixels
+    const scaledBedW  = (orientation === 'EW' ? bedLengthFt : bedWidthFt)  * ratio;
+    const scaledBedH  = (orientation === 'EW' ? bedWidthFt  : bedLengthFt) * ratio;
     const scaledPathW = pathwayWidthFt * ratio;   // small bed-to-bed path
     const scaledMainW = mainPathWidthFt * ratio;  // wide wheelbarrow path
     const padding     = Math.max(scaledPathW / 2, 4);
@@ -372,9 +474,14 @@ function StatTile({ icon, label, value, sub, wide }) {
 
 // ─── Main Screen ─────────────────────────────────────────────────────────────
 export default function GardenSpacePlannerScreen({ navigation }) {
+    const GAP = Spacing.sm; // 8px
     const { width } = useWindowDimensions();
-    const numColumns = getColumns(width);
-    const cardWidth = (width - Spacing.lg * 2 - Spacing.sm * (numColumns - 1)) / numColumns;
+    // Crop selection grid — compact (matches FamilyPlannerScreen)
+    const numColumns   = getCropGridColumns(width);
+    const cardWidth    = Math.floor((width - Spacing.lg * 2 - GAP * (numColumns - 1)) / numColumns);
+    // Plan results — fewer, richer cards
+    const planColumns  = getPlanColumns(width);
+    const planCardWidth = Math.floor((width - 48 - GAP * (planColumns - 1)) / planColumns);
 
     // ── Step state ────────────────────────────────────────────────────────────
     const [step, setStep] = useState(1);   // 1 Dimensions | 2 Results | 3 Crops
@@ -398,11 +505,12 @@ export default function GardenSpacePlannerScreen({ navigation }) {
     // ── Step 2: Calculated results ────────────────────────────────────────────
     const [spaceResult, setSpaceResult] = useState(null);
     const [soilResult,  setSoilResult]  = useState(null);
+    const [dimError,    setDimError]    = useState(null);  // inline validation error (web-safe)
 
     // ── Step 3: Crops ─────────────────────────────────────────────────────────
     const [familySize, setFamilySize]   = useState(2);
     const [selectedIds, setSelectedIds] = useState(new Set());
-    const [cropCategory, setCropCategory] = useState('All');
+    const [filterFn, setFilterFn]       = useState(() => () => true);  // from MegaMenuBar
     const [cropSearch, setCropSearch]   = useState('');
     const [planResult, setPlanResult]   = useState(null);
     const [showReport, setShowReport]   = useState(false);   // within step 3
@@ -422,6 +530,20 @@ export default function GardenSpacePlannerScreen({ navigation }) {
     // Priority: address lookup > manual zone > saved main-flow plan
     const [gardenFarmProfile, setGardenFarmProfile] = useState(null);
 
+    // ── Reset to Step 1 every time the screen gains focus ────────────────────
+    // React Navigation keeps screens mounted; without this, navigating away
+    // and back would re-show the old results/beds from the last session.
+    useFocusEffect(
+        useCallback(() => {
+            setStep(1);
+            setSpaceResult(null);
+            setSoilResult(null);
+            setPlanResult(null);
+            setShowReport(false);
+            setDimError(null);
+        }, [])
+    );
+
     useEffect(() => {
         // Seed from main farm plan if user has already set up a location there
         const saved = loadSavedPlan();
@@ -437,6 +559,38 @@ export default function GardenSpacePlannerScreen({ navigation }) {
         }
         // If neither is set, keep whatever was loaded from the saved plan
     }, [resolvedProfile, selectedZone]);
+
+    // ── Live preview result (Step 1 form) ────────────────────────────────────
+    // Computed from live form values so BedLayoutVisual updates without pressing Calculate.
+    const previewResult = useMemo(() => {
+        const l = parseFloat(lengthFt);
+        const w = parseFloat(widthFt);
+        if (!l || !w || l <= 0 || w <= 0) return null;
+        const spaceLengthFt = orientation === 'EW' ? w : l;
+        const spaceWidthFt  = orientation === 'EW' ? l : w;
+        try {
+            const r = calculateBedsInSpace({
+                spaceLengthFt,
+                spaceWidthFt,
+                bedLengthFt:     parseFloat(bedLengthFt) || 8,
+                bedWidthFt:      parseFloat(bedWidthFt)  || 4,
+                pathwayWidthFt:  parseFloat(pathwayFt)   || 2,
+                nsPathwayCount:  nsPathCount,
+                ewPathwayCount:  ewPathCount,
+                mainPathWidthFt: parseFloat(mainPathWidthFt) || 4,
+                equidistant,
+                isRaisedBed,
+                bedHeightIn:     parseFloat(bedHeightIn) || 12,
+            });
+            r.spaceLengthFt = spaceLengthFt;
+            r.spaceWidthFt  = spaceWidthFt;
+            r.orientation   = orientation;
+            return r;
+        } catch {
+            return null;
+        }
+    }, [lengthFt, widthFt, bedLengthFt, bedWidthFt, pathwayFt, orientation,
+        nsPathCount, ewPathCount, mainPathWidthFt, equidistant, isRaisedBed, bedHeightIn]);
 
     // ── Location lookup handler ───────────────────────────────────────────────
     const handleLocationLookup = async () => {
@@ -478,21 +632,27 @@ export default function GardenSpacePlannerScreen({ navigation }) {
     const slideAnim = useRef(new Animated.Value(0)).current;
     const limits = LIMITS[getActiveTier()] ?? LIMITS[TIER.FREE];
 
-    const filteredCrops = filterCrops(cropCategory, cropSearch);
+    const q = cropSearch.trim().toLowerCase();
+    const filteredCrops = PLANTABLE_CROPS
+        .filter(filterFn)
+        .filter(c => !q || c.name.toLowerCase().includes(q) || (c.variety ?? '').toLowerCase().includes(q));
 
     // ─── Navigation helpers ───────────────────────────────────────────────────
+    // NOTE: Animated.timing callbacks are unreliable on React Native Web.
+    // Navigation uses direct setStep() — animation is purely cosmetic on enter.
     const goForward = (toStep) => {
-        Animated.timing(slideAnim, { toValue: -width, duration: 200, useNativeDriver: true }).start(() => {
-            setStep(toStep);
-            slideAnim.setValue(width);
-            Animated.spring(slideAnim, { toValue: 0, tension: 50, friction: 9, useNativeDriver: true }).start();
-        });
+        slideAnim.setValue(width);          // start off-screen right
+        setStep(toStep);                    // guaranteed state update
+        Animated.spring(slideAnim, {        // spring in from right (visual only)
+            toValue: 0, tension: 50, friction: 9, useNativeDriver: false,
+        }).start();
     };
     const goBackward = (toStep) => {
-        Animated.timing(slideAnim, { toValue: width, duration: 200, useNativeDriver: true }).start(() => {
-            setStep(toStep);
-            slideAnim.setValue(0);
-        });
+        slideAnim.setValue(-width * 0.3);   // start slightly left
+        setStep(toStep);
+        Animated.spring(slideAnim, {
+            toValue: 0, tension: 50, friction: 9, useNativeDriver: false,
+        }).start();
     };
     const handleBack = () => {
         if (showReport) { setShowReport(false); return; }
@@ -502,15 +662,17 @@ export default function GardenSpacePlannerScreen({ navigation }) {
 
     // ─── Step 1 → Step 2: calculate & gate ───────────────────────────────────
     const handleCalculate = () => {
+        setDimError(null); // Clear any previous errors
         const l = parseFloat(lengthFt) || 0;
         const w = parseFloat(widthFt)  || 0;
         if (l <= 0 || w <= 0) {
-            Alert.alert('Missing Dimensions', 'Please enter both a length and a width for your space.');
+            setDimError('Please enter both a length and a width for your space.');
             return;
         }
         const sqFt = l * w;
         const gate = checkSpaceGate({ sqFt });
         if (!gate.allowed) {
+            setDimError(`Space exceeds the free-tier limit of ${limits.maxSqFtPlot.toLocaleString()} sq ft. Upgrade to plan larger spaces.`);
             setUpgradeBlockedBy('plotSize');
             setUpgradeVisible(true);
             return;
@@ -889,6 +1051,46 @@ export default function GardenSpacePlannerScreen({ navigation }) {
                             ))}
                         </ScrollView>
 
+                        {/* ── Quick summary (replaces live graphic preview) ─ */}
+                        {previewResult && previewResult.totalBeds > 0 && (
+                            <View style={styles.previewSummaryCard}>
+                                <View style={styles.previewSummaryRow}>
+                                    <View style={styles.previewSumStat}>
+                                        <Text style={styles.previewSumVal}>{previewResult.totalBeds}</Text>
+                                        <Text style={styles.previewSumLbl}>beds</Text>
+                                    </View>
+                                    <View style={styles.previewSumDivider} />
+                                    <View style={styles.previewSumStat}>
+                                        <Text style={styles.previewSumVal}>{previewResult.bedAreaSqFt?.toLocaleString?.() ?? '—'} ft²</Text>
+                                        <Text style={styles.previewSumLbl}>growing area</Text>
+                                    </View>
+                                    <View style={styles.previewSumDivider} />
+                                    <View style={styles.previewSumStat}>
+                                        <Text style={styles.previewSumVal}>{previewResult.efficiency}%</Text>
+                                        <Text style={styles.previewSumLbl}>efficiency</Text>
+                                    </View>
+                                </View>
+                                <Text style={styles.previewSumHint}>
+                                    {previewResult.bedsAcrossWidth} × {previewResult.bedsAlongLength} grid · hit Calculate to continue
+                                </Text>
+                            </View>
+                        )}
+                        {previewResult && previewResult.totalBeds === 0 && (
+                            <View style={[styles.previewSummaryCard, { borderColor: Colors.burntOrange }]}>
+                                <Text style={{ color: Colors.burntOrange, fontSize: Typography.sm, textAlign: 'center' }}>
+                                    ⚠ No beds fit at these dimensions — try narrower pathways or smaller beds
+                                </Text>
+                            </View>
+                        )}
+
+
+                        {/* Inline validation error */}
+                        {dimError && (
+                            <View style={styles.dimErrorBanner}>
+                                <Text style={styles.dimErrorText}>⚠️ {dimError}</Text>
+                            </View>
+                        )}
+
                         <TouchableOpacity
                             style={[styles.primaryBtn, Shadows.button, { marginTop: Spacing.lg }]}
                             onPress={handleCalculate}
@@ -908,21 +1110,6 @@ export default function GardenSpacePlannerScreen({ navigation }) {
                         showsVerticalScrollIndicator={false}
                         style={Platform.OS === 'web' ? { overflowY: 'auto' } : {}}
                     >
-                        {/* Bed layout visual */}
-                        <View style={styles.visualContainer}>
-                            <Text style={styles.visualTitle}>Your Space Layout</Text>
-                            <BedLayoutVisual
-                                spaceResult={spaceResult}
-                                containerWidth={width - Spacing.lg * 2}
-                            />
-                            {spaceResult.totalBeds === 0 && (
-                                <View style={styles.noBedsBanner}>
-                                    <Text style={styles.noBedsText}>
-                                        ⚠️ No beds fit with current settings. Try narrower pathways or smaller beds.
-                                    </Text>
-                                </View>
-                            )}
-                        </View>
 
                         {/* Stat tiles row 1 */}
                         <View style={styles.statsRow}>
@@ -1016,36 +1203,16 @@ export default function GardenSpacePlannerScreen({ navigation }) {
                             </View>
                         )}
 
-                        {/* Note about self-planning */}
-                        <View style={styles.plannerNote}>
-                            <Text style={styles.plannerNoteTitle}>🖊 Design Your Layout</Text>
-                            <Text style={styles.plannerNoteText}>
-                                Use the interactive Layout Designer to drag, rotate, and arrange
-                                your {spaceResult.totalBeds} beds visually, then assign crops to each one.
-                                Or skip straight to crop planning.
-                            </Text>
-                        </View>
 
                         {/* Actions */}
-                        <View style={styles.actionRow}>
-                            <TouchableOpacity style={styles.secondaryBtn} onPress={() => goBackward(1)}>
-                                <Text style={styles.secondaryBtnText}>← Adjust Space</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity
-                                style={[styles.primaryBtn, Shadows.button, { flex: 1, backgroundColor: '#2D4F1E' }]}
-                                onPress={() => navigation.navigate('VisualBedLayout', {
-                                    spaceJson: JSON.stringify(spaceResult),
-                                    orientation,
-                                })}
-                            >
-                                <Text style={styles.primaryBtnText}>🖊 Design Layout</Text>
-                            </TouchableOpacity>
-                        </View>
+                        <TouchableOpacity style={styles.secondaryBtn} onPress={() => goBackward(1)}>
+                            <Text style={styles.secondaryBtnText}>← Adjust Space</Text>
+                        </TouchableOpacity>
                         <TouchableOpacity
-                            style={[styles.secondaryBtn, { marginTop: 8 }]}
+                            style={[styles.primaryBtn, Shadows.button, { marginTop: Spacing.sm }]}
                             onPress={() => goForward(3)}
                         >
-                            <Text style={styles.secondaryBtnText}>Plan My Crops → (skip layout)</Text>
+                            <Text style={styles.primaryBtnText}>Plan My Crops →</Text>
                         </TouchableOpacity>
 
 
@@ -1106,23 +1273,12 @@ export default function GardenSpacePlannerScreen({ navigation }) {
                             </View>
                         )}
 
-                        {/* Category chips */}
-                        <ScrollView
-                            horizontal
-                            showsHorizontalScrollIndicator={false}
-                            style={{ flexGrow: 0, flexShrink: 0 }}
-                            contentContainerStyle={styles.chipsContent}
-                        >
-                            {CROP_CATEGORIES.map(cat => (
-                                <TouchableOpacity
-                                    key={cat}
-                                    style={[styles.chip, cropCategory === cat && styles.chipActive]}
-                                    onPress={() => setCropCategory(cat)}
-                                >
-                                    <Text style={[styles.chipText, cropCategory === cat && styles.chipTextActive]}>{cat}</Text>
-                                </TouchableOpacity>
-                            ))}
-                        </ScrollView>
+                        {/* MegaMenuBar — identical to FamilyPlannerScreen */}
+                        <MegaMenuBar
+                            onFilterChange={({ filterFn }) =>
+                                setFilterFn(() => filterFn)
+                            }
+                        />
 
                         {/* Search */}
                         <View style={styles.searchRow}>
@@ -1135,6 +1291,11 @@ export default function GardenSpacePlannerScreen({ navigation }) {
                                 placeholderTextColor={Colors.mutedText}
                                 clearButtonMode="while-editing"
                             />
+                            {cropSearch.length > 0 && (
+                                <TouchableOpacity onPress={() => setCropSearch('')} style={{ paddingHorizontal: 8 }}>
+                                    <Text style={{ color: Colors.mutedText, fontSize: 16 }}>✕</Text>
+                                </TouchableOpacity>
+                            )}
                         </View>
 
                         {/* Crop grid */}
@@ -1153,6 +1314,7 @@ export default function GardenSpacePlannerScreen({ navigation }) {
                                         crop={item}
                                         selected={selectedIds.has(item.id)}
                                         onPress={toggleCrop}
+                                        cardWidth={cardWidth}
                                     />
                                 </View>
                             )}
@@ -1198,21 +1360,53 @@ export default function GardenSpacePlannerScreen({ navigation }) {
                             </Text>
                         </View>
 
-                        <FlatList
-                            data={planResult.supported}
-                            keyExtractor={item => item.cropId}
-                            contentContainerStyle={styles.reportList}
-                            showsVerticalScrollIndicator={false}
-                            style={Platform.OS === 'web' ? { overflowY: 'scroll', flex: 1 } : { flex: 1 }}
-                            ListFooterComponent={() => (
-                                <View style={styles.goodLuck}>
-                                    <Text style={{ fontSize: 48, marginBottom: Spacing.sm }}>🥬</Text>
-                                    <Text style={styles.goodLuckTitle}>Good Luck Gardening!</Text>
-                                    <Text style={styles.goodLuckSub}>Happy planting this season.</Text>
-                                </View>
-                            )}
-                            renderItem={({ item }) => <ReportCard item={item} />}
-                        />
+                        {/* Report cards — responsive multi-column grid (matches FamilyPlannerScreen) */}
+                        {(() => {
+                            const cards = planResult.supported;
+                            const rows = [];
+                            for (let i = 0; i < cards.length; i += planColumns) {
+                                rows.push(cards.slice(i, i + planColumns));
+                            }
+                            return (
+                                <ScrollView
+                                    showsVerticalScrollIndicator={false}
+                                    contentContainerStyle={{ padding: Spacing.lg, paddingBottom: 180 }}
+                                    style={Platform.OS === 'web' ? { overflowY: 'auto', flex: 1 } : { flex: 1 }}
+                                >
+                                    {rows.map((rowItems, rowIdx) => (
+                                        <View
+                                            key={rowIdx}
+                                            style={{ flexDirection: 'row', marginBottom: 8 }}
+                                        >
+                                            {rowItems.map((item, colIdx) => (
+                                                <View
+                                                    key={item.cropId}
+                                                    style={{
+                                                        flex: 1,
+                                                        marginRight: colIdx < rowItems.length - 1 ? 8 : 0,
+                                                    }}
+                                                >
+                                                    <ReportCard item={item} />
+                                                </View>
+                                            ))}
+                                        </View>
+                                    ))}
+
+                                    {/* Estimates disclaimer */}
+                                    <View style={styles.compatNote}>
+                                        <Text style={styles.compatNoteText}>
+                                            📊 <Text style={{ fontWeight: '600' }}>Estimates, not guarantees.</Text> Quantities are based on average household consumption and typical backyard yields. Your results will vary based on sun exposure, soil quality, seed age, climate, and how your family eats.
+                                        </Text>
+                                    </View>
+
+                                    <View style={styles.goodLuck}>
+                                        <Text style={{ fontSize: 48, marginBottom: Spacing.sm }}>🥬</Text>
+                                        <Text style={styles.goodLuckTitle}>Good Luck Gardening!</Text>
+                                        <Text style={styles.goodLuckSub}>Happy planting this season.</Text>
+                                    </View>
+                                </ScrollView>
+                            );
+                        })()}
 
                         <View style={styles.footer}>
                             <View style={{ flexDirection: 'row', gap: Spacing.sm }}>
@@ -1374,7 +1568,90 @@ const styles = StyleSheet.create({
     },
     tierNoteText: { fontSize: Typography.xs, color: Colors.primaryGreen, lineHeight: 16 },
 
-    // ── Step 2 results ────────────────────────────────────────────────────────
+    // Inline validation error (web-safe — Alert.alert is no-op on web)
+    dimErrorBanner: {
+        backgroundColor: '#FFF0F0',
+        borderRadius: Radius.sm,
+        borderLeftWidth: 3,
+        borderLeftColor: '#D32F2F',
+        padding: Spacing.sm,
+        marginTop: Spacing.sm,
+    },
+    dimErrorText: { fontSize: Typography.sm, color: '#D32F2F', lineHeight: 18 },
+
+    previewContainer: {
+        marginTop: Spacing.lg,
+        borderRadius: Radius.md,
+        overflow: 'hidden',
+        borderWidth: 1.5,
+        borderColor: 'rgba(45,79,30,0.18)',
+        backgroundColor: Colors.white,
+    },
+    previewHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingHorizontal: Spacing.md,
+        paddingVertical: Spacing.sm,
+        backgroundColor: 'rgba(45,79,30,0.05)',
+        borderBottomWidth: 1,
+        borderBottomColor: 'rgba(45,79,30,0.1)',
+    },
+    previewTitle: {
+        fontSize: Typography.xs,
+        fontWeight: Typography.semiBold,
+        color: Colors.primaryGreen,
+        textTransform: 'uppercase',
+        letterSpacing: 0.8,
+    },
+    previewBadge: {
+        fontSize: Typography.xs,
+        color: Colors.mutedText,
+    },
+
+    // ── Compact live summary card (replaces graphic preview) ──────────────────
+    previewSummaryCard: {
+        marginTop: Spacing.md,
+        borderRadius: Radius.md,
+        borderWidth: 1.5,
+        borderColor: 'rgba(45,79,30,0.18)',
+        backgroundColor: Colors.white,
+        padding: Spacing.md,
+    },
+    previewSummaryRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-around',
+    },
+    previewSumStat: {
+        flex: 1,
+        alignItems: 'center',
+        gap: 2,
+    },
+    previewSumVal: {
+        fontSize: Typography.lg,
+        fontWeight: Typography.bold,
+        color: Colors.primaryGreen,
+    },
+    previewSumLbl: {
+        fontSize: Typography.xs,
+        color: Colors.mutedText,
+        textTransform: 'uppercase',
+        letterSpacing: 0.5,
+    },
+    previewSumDivider: {
+        width: 1,
+        height: 36,
+        backgroundColor: 'rgba(45,79,30,0.12)',
+    },
+    previewSumHint: {
+        marginTop: Spacing.sm,
+        fontSize: Typography.xs,
+        color: Colors.mutedText,
+        textAlign: 'center',
+    },
+
+
     resultsScroll: { padding: Spacing.lg, gap: Spacing.lg },
 
     visualContainer: { gap: Spacing.sm },
@@ -1524,6 +1801,17 @@ const styles = StyleSheet.create({
     cropCheckMark:    { fontSize: 24, color: Colors.primaryGreen, fontWeight: Typography.bold },
     cropCardName:     { fontSize: 11, fontWeight: Typography.semiBold, color: Colors.primaryGreen, textAlign: 'center', paddingHorizontal: 4, paddingTop: 4 },
 
+    // Badge row (DTM / season / type) — mirrors FamilyPlannerScreen exactly
+    cropBadgeRow: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 2, paddingHorizontal: 2, paddingBottom: 4 },
+    dtmPill:      { backgroundColor: 'rgba(45,79,30,0.10)', borderRadius: 8, paddingHorizontal: 5, paddingVertical: 1 },
+    dtmPillText:  { fontSize: 9, fontWeight: '700', color: Colors.primaryGreen },
+    seasonPill:      { borderRadius: 8, paddingHorizontal: 5, paddingVertical: 1 },
+    seasonPillCool:  { backgroundColor: 'rgba(100,160,255,0.15)' },
+    seasonPillWarm:  { backgroundColor: 'rgba(255,160,40,0.15)' },
+    seasonPillText:  { fontSize: 9, fontWeight: '600', color: Colors.darkText },
+    typePill:      { backgroundColor: 'rgba(130,60,200,0.10)', borderRadius: 8, paddingHorizontal: 5, paddingVertical: 1 },
+    typePillText:  { fontSize: 9, fontWeight: '700', color: 'rgba(100,40,180,0.85)' },
+
     // ── Step 3 report ─────────────────────────────────────────────────────────
     summaryBar: {
         flexDirection: 'row', backgroundColor: Colors.primaryGreen,
@@ -1544,24 +1832,28 @@ const styles = StyleSheet.create({
 
     reportList: { padding: Spacing.lg, paddingBottom: 120, gap: Spacing.md },
 
+    // ── Report card — mirrors FamilyPlannerScreen exactly ────────────────────
     reportCard: {
         backgroundColor: Colors.white, borderRadius: Radius.lg,
         overflow: 'hidden', borderWidth: 1, borderColor: 'rgba(45,79,30,0.1)',
     },
-    reportHeader:  { flexDirection: 'row', alignItems: 'center', gap: Spacing.md, backgroundColor: Colors.primaryGreen, padding: Spacing.md },
-    reportEmoji:   { fontSize: 32 },
-    reportName:    { fontSize: Typography.md, fontWeight: Typography.bold, color: Colors.cream },
-    reportVariety: { fontSize: Typography.xs, color: Colors.warmTan, marginTop: 1 },
+    reportCardHeader: {
+        flexDirection: 'row', alignItems: 'center',
+        gap: Spacing.md, backgroundColor: Colors.primaryGreen, padding: Spacing.md,
+    },
+    reportEmoji:    { fontSize: 32 },
+    reportCropName: { fontSize: Typography.md, fontWeight: Typography.bold, color: Colors.cream },
+    reportVariety:  { fontSize: Typography.xs, color: Colors.warmTan, marginTop: 1 },
 
     reportMetrics: {
         flexDirection: 'row', justifyContent: 'space-around',
         paddingVertical: Spacing.md, paddingHorizontal: Spacing.sm,
         backgroundColor: 'rgba(45,79,30,0.04)',
     },
-    miniPill:   { alignItems: 'center', flex: 1 },
-    miniIcon:   { fontSize: 18, marginBottom: 2 },
-    miniValue:  { fontSize: Typography.lg, fontWeight: Typography.bold, color: Colors.primaryGreen },
-    miniLabel:  { fontSize: 9, color: Colors.mutedText, textTransform: 'uppercase', letterSpacing: 0.5, textAlign: 'center' },
+    metricPill:  { alignItems: 'center', flex: 1 },
+    metricIcon:  { fontSize: 18, marginBottom: 2 },
+    metricValue: { fontSize: Typography.lg, fontWeight: Typography.bold, color: Colors.primaryGreen },
+    metricLabel: { fontSize: 9, color: Colors.mutedText, textTransform: 'uppercase', letterSpacing: 0.5, textAlign: 'center' },
 
     reportDivider: { height: 1, backgroundColor: 'rgba(45,79,30,0.08)', marginHorizontal: Spacing.md },
     reportFacts:   { padding: Spacing.md, gap: 6 },
@@ -1569,7 +1861,16 @@ const styles = StyleSheet.create({
     factIcon:  { width: 20, textAlign: 'center', fontSize: 13 },
     factLabel: { fontSize: Typography.xs, color: Colors.mutedText, flex: 1, fontWeight: Typography.medium },
     factValue: { fontSize: Typography.xs, color: Colors.darkText, fontWeight: Typography.semiBold, textAlign: 'right' },
+    factValueHighlight: { color: Colors.primaryGreen, fontWeight: Typography.bold },
     reportNote: { fontSize: Typography.xs, color: Colors.mutedText, fontStyle: 'italic', lineHeight: 15, paddingHorizontal: Spacing.md, paddingBottom: Spacing.md },
+    successionCallout: {
+        flexDirection: 'row', alignItems: 'flex-start', gap: 6,
+        backgroundColor: 'rgba(180,120,0,0.08)', borderRadius: Radius.sm,
+        marginHorizontal: Spacing.md, marginBottom: Spacing.sm,
+        paddingHorizontal: 10, paddingVertical: 7,
+    },
+    successionIcon: { fontSize: 13, lineHeight: 18 },
+    successionText: { flex: 1, fontSize: Typography.xs, color: '#7a5800', lineHeight: 16 },
 
     goodLuck: { alignItems: 'center', paddingVertical: Spacing.xl, gap: Spacing.sm },
     goodLuckTitle: { fontSize: Typography.xl, fontWeight: Typography.bold, color: Colors.primaryGreen },

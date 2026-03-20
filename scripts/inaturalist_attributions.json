@@ -1,0 +1,86 @@
+[
+  {
+    "crop_id": "pepper_shishito",
+    "license": "cc-by-nc",
+    "attribution": "(c) platoro, some rights reserved (CC BY-NC)",
+    "url": "https://inaturalist-open-data.s3.amazonaws.com/photos/412366314/medium.jpeg"
+  },
+  {
+    "crop_id": "pepper_padron",
+    "license": "cc-by-nc",
+    "attribution": "(c) platoro, some rights reserved (CC BY-NC)",
+    "url": "https://inaturalist-open-data.s3.amazonaws.com/photos/412366314/medium.jpeg"
+  },
+  {
+    "crop_id": "melon_crenshaw",
+    "license": "cc-by-nc",
+    "attribution": "(c) MP Zhou, some rights reserved (CC BY-NC)",
+    "url": "https://inaturalist-open-data.s3.amazonaws.com/photos/222440535/medium.jpg"
+  },
+  {
+    "crop_id": "dandelion_greens",
+    "license": "cc-by-nc",
+    "attribution": "(c) jonathan_mack, some rights reserved (CC BY-NC)",
+    "url": "https://inaturalist-open-data.s3.amazonaws.com/photos/41201675/medium.jpeg"
+  },
+  {
+    "crop_id": "kalettes",
+    "license": "cc-by-nc",
+    "attribution": "(c) Peter Zika, some rights reserved (CC BY-NC)",
+    "url": "https://inaturalist-open-data.s3.amazonaws.com/photos/113428695/medium.jpeg"
+  },
+  {
+    "crop_id": "delicata_squash",
+    "license": "cc-by-nc",
+    "attribution": "(c) grinnin, some rights reserved (CC BY-NC)",
+    "url": "https://inaturalist-open-data.s3.amazonaws.com/photos/312484037/medium.jpg"
+  },
+  {
+    "crop_id": "taro_standard",
+    "license": "cc-by-nc",
+    "attribution": "(c) Kristen E., some rights reserved (CC BY-NC)",
+    "url": "https://inaturalist-open-data.s3.amazonaws.com/photos/34162494/medium.jpg"
+  },
+  {
+    "crop_id": "tomato_roma",
+    "license": "cc-by",
+    "attribution": "(c) \u0413\u0435\u043e\u0440\u0433\u0438\u0439 \u0412\u0438\u043d\u043e\u0433\u0440\u0430\u0434\u043e\u0432 (Georgy Vinogradov), some rights reserved (CC BY)",
+    "url": "https://inaturalist-open-data.s3.amazonaws.com/photos/103246800/medium.jpg"
+  },
+  {
+    "crop_id": "lisianthus_echo",
+    "license": "cc-by-nc",
+    "attribution": "(c) Matthew Friant, some rights reserved (CC BY-NC)",
+    "url": "https://inaturalist-open-data.s3.amazonaws.com/photos/300452950/medium.jpg"
+  },
+  {
+    "crop_id": "quinoa_brightest",
+    "license": "cc-by-nc",
+    "attribution": "(c) Fabien Anthelme, some rights reserved (CC BY-NC)",
+    "url": "https://inaturalist-open-data.s3.amazonaws.com/photos/64121040/medium.jpeg"
+  },
+  {
+    "crop_id": "foxglove_standard",
+    "license": "cc-by-nc",
+    "attribution": "(c) telemark, some rights reserved (CC BY-NC)",
+    "url": "https://inaturalist-open-data.s3.amazonaws.com/photos/41451298/medium.jpg"
+  },
+  {
+    "crop_id": "celery_par_cel",
+    "license": null,
+    "attribution": "(c) Nathan, all rights reserved",
+    "url": "https://static.inaturalist.org/photos/17154025/medium.jpeg"
+  },
+  {
+    "crop_id": "scorzonera_standard",
+    "license": "cc-by-nc",
+    "attribution": "(c) Sergey Mayorov, some rights reserved (CC BY-NC)",
+    "url": "https://inaturalist-open-data.s3.amazonaws.com/photos/31480756/medium.jpg"
+  },
+  {
+    "crop_id": "pepper_cayenne",
+    "license": "cc-by-nc",
+    "attribution": "(c) platoro, some rights reserved (CC BY-NC)",
+    "url": "https://inaturalist-open-data.s3.amazonaws.com/photos/412366314/medium.jpeg"
+  }
+]

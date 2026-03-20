@@ -81,7 +81,8 @@ export default function BedDesignerSetupScreen({ navigation }) {
                                 style={s.dimInput}
                                 value={lengthFt}
                                 onChangeText={setLengthFt}
-                                keyboardType="decimal-pad"
+                                keyboardType={Platform.OS === 'web' ? 'default' : 'decimal-pad'}
+                                inputMode="decimal"
                                 selectTextOnFocus
                                 placeholder="e.g. 40"
                                 placeholderTextColor={Colors.mutedText}
@@ -94,7 +95,8 @@ export default function BedDesignerSetupScreen({ navigation }) {
                                 style={s.dimInput}
                                 value={widthFt}
                                 onChangeText={setWidthFt}
-                                keyboardType="decimal-pad"
+                                keyboardType={Platform.OS === 'web' ? 'default' : 'decimal-pad'}
+                                inputMode="decimal"
                                 selectTextOnFocus
                                 placeholder="e.g. 30"
                                 placeholderTextColor={Colors.mutedText}

@@ -4,7 +4,7 @@
  * Full-screen pricing comparison: Free · Basic · Premium
  * with a Monthly / Season Pass billing toggle.
  *
- * Season Pass: one-time $39.99 payment for 12 months of Premium access.
+ * Season Pass: one-time $49.99 payment for 12 months of Premium access.
  * Designed for seasonal gardeners who only need 6 months/year and don't
  * want a recurring monthly subscription.
  *
@@ -21,13 +21,15 @@ import {
 import { Colors, Typography, Spacing, Radius, Shadows } from '../theme';
 
 // ─── Stripe Payment Links ─────────────────────────────────────────────────────
-const STRIPE_BASIC_URL       = 'https://buy.stripe.com/test_cNi8wPbzp0kV3Mc1uz0sU02';
-const STRIPE_PREMIUM_URL     = 'https://buy.stripe.com/test_00w6oH0ULd7H96wc9d0sU03';
-const STRIPE_SEASON_PASS_URL = 'https://buy.stripe.com/test_8x23cvfPF9VvciI8X10sU01';
+const STRIPE_BASIC_URL       = 'https://buy.stripe.com/test_9B66oH5b18Rr3Mcgpt0sU04';
+const STRIPE_PREMIUM_URL     = 'https://buy.stripe.com/test_fZucN50ULebLeqQ8X10sU05';
+const STRIPE_SEASON_PASS_URL = 'https://buy.stripe.com/test_cNi4gzfPF1oZ4Qg2yD0sU06';
 
-// Monthly savings: 12 × $6.49 = $77.88 → round to $77.94 for messaging
-const MONTHLY_EQUIV = (39.99 / 12).toFixed(2); // ~$3.33/mo
-const MONTHLY_SAVINGS = ((12.99 * 6) - 39.99).toFixed(2); // vs 6 months premium
+// Pricing constants — single source of truth for display
+const SEASON_PASS_PRICE = 49.99;
+const PREMIUM_MONTHLY   = 9.99;
+const MONTHLY_EQUIV     = (SEASON_PASS_PRICE / 12).toFixed(2); // ~$4.17/mo
+const MONTHLY_SAVINGS   = ((PREMIUM_MONTHLY * 12) - SEASON_PASS_PRICE).toFixed(2); // Save vs 12 months monthly
 
 // ─── Feature rows ──────────────────────────────────────────────────────────────
 const FEATURES = [
@@ -102,7 +104,7 @@ function SavingsCallout() {
             <Text style={styles.savingsIcon}>💡</Text>
             <Text style={styles.savingsText}>
                 <Text style={styles.savingsBold}>Save ${MONTHLY_SAVINGS}</Text>
-                {' '}vs. 6 months of Premium · No auto-renew · Full year access
+                {' '}vs. 12 months of Premium · No auto-renew · Full year access
             </Text>
         </View>
     );
@@ -139,8 +141,8 @@ function TierCard({ tier, delay, billingMode }) {
 
     if (isSeasonMode) {
         if (isPremium) {
-            displayPrice = '$39.99';
-            displayPriceSub = `one-time · full year · ($${MONTHLY_EQUIV}/mo)`;
+            displayPrice = `$${SEASON_PASS_PRICE.toFixed(2)}`;
+            displayPriceSub = `one-time · full year · (~$${MONTHLY_EQUIV}/mo)`;
             displayCta = 'Get Season Pass →';
             displayOnPress = () => Linking.openURL(STRIPE_SEASON_PASS_URL);
             displayDisabled = false;
@@ -229,7 +231,7 @@ function MobileTierCard({ tier, billingMode }) {
 
     if (isSeasonMode) {
         if (isPremium) {
-            displayPrice = '$39.99';
+            displayPrice = `$${SEASON_PASS_PRICE.toFixed(2)}`;
             displayPriceSub = 'one-time';
             displayCta = 'Get Season Pass →';
             displayOnPress = () => Linking.openURL(STRIPE_SEASON_PASS_URL);
@@ -262,7 +264,7 @@ function MobileTierCard({ tier, billingMode }) {
                 }
                 {isPremium && isSeasonMode && (
                     <Text style={styles.mobileSeasonNote}>
-                        💡 Save ${MONTHLY_SAVINGS} vs. 6 months · No auto-renew
+                        💡 Save ${MONTHLY_SAVINGS} vs. 12 months monthly · No auto-renew
                     </Text>
                 )}
             </View>
@@ -331,7 +333,7 @@ const TIERS = [
     {
         key: 'basic',
         name: 'Basic',
-        price: '$4.99',
+        price: '$3.99',
         priceSub: 'per month',
         tagline: 'Perfect for serious home gardeners.',
         highlight: false,
@@ -342,7 +344,7 @@ const TIERS = [
     {
         key: 'premium',
         name: 'Premium',
-        price: '$12.99',
+        price: '$9.99',
         priceSub: 'per month',
         tagline: 'Everything for market farmers.',
         highlight: true,

@@ -8,16 +8,20 @@
  *   • Quick journal entry from any bed
  *   • Edit block / add beds buttons
  */
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import {
     View, Text, StyleSheet, ScrollView, TouchableOpacity,
     Modal, TextInput, Platform, Alert, Animated,
+    FlatList, ActivityIndicator,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { Colors, Typography, Spacing, Radius, Shadows } from '../theme';
 import { loadBlockBeds, saveBlockBeds, saveJournalEntry, loadJournalEntries } from '../services/persistence';
 import { blockSummaryLine } from '../services/farmUtils';
 import cropData from '../data/crops.json';
+import { getSuccessionCandidatesRanked } from '../services/successionEngine';
+import { addDays } from '../services/climateService';
+import CROP_IMAGES from '../data/cropImages';
 
 const BLOCK_DETAIL_SCROLL_ID = 'block-detail-scrollview';
 
@@ -39,43 +43,111 @@ function cropMeta(cropId) {
     return cropData.crops.find(c => c.id === cropId);
 }
 
+// Shelter extension constants
+const SHELTER_EXTENSION = {
+    none:       { days: 0,  label: '🌿 Open',       ext: '' },
+    rowCover:   { days: 14, label: '☔️ Row Cover',  ext: '+14d' },
+    greenhouse: { days: 42, label: '🏡 Greenhouse', ext: '+42d' },
+};
+
+function buildShelterProfile(farmProfile, shelterType) {
+    if (!farmProfile) return farmProfile;
+    const ext = SHELTER_EXTENSION[shelterType]?.days ?? 0;
+    if (ext === 0) return farmProfile;
+    return {
+        ...farmProfile,
+        frost_free_days: (farmProfile.frost_free_days ?? 180) + ext * 2,
+        last_frost_date: farmProfile.last_frost_date
+            ? addDays(farmProfile.last_frost_date, -ext) : farmProfile.last_frost_date,
+        first_frost_date: farmProfile.first_frost_date
+            ? addDays(farmProfile.first_frost_date, ext) : farmProfile.first_frost_date,
+    };
+}
+
+function fmtShortDate(iso) {
+    if (!iso) return null;
+    const d = new Date(iso + 'T12:00:00');
+    return (d.getMonth() + 1) + '/' + String(d.getDate()).padStart(2, '0');
+}
+
 // ─── Bed Row ─────────────────────────────────────────────────────────────────
-const BedRow = ({ block, bedNum, successions, onPress, onLongPress }) => {
+function cropColor(cropId) {
+    if (!cropId) return BED_PALETTE[0];
+    let hash = 0; const s = String(cropId);
+    for (let i = 0; i < s.length; i++) hash = (hash * 31 + s.charCodeAt(i)) & 0xffff;
+    return BED_PALETTE[hash % BED_PALETTE.length];
+}
+const BedRow = ({ block, bedNum, successions, shelterType, farmProfile, onPress, onLongPress }) => {
     const bc = bedColor(bedNum);
     const hasCrops = successions && successions.length > 0;
-    const primaryCrop = successions?.[0];
+
+    const firstIn = hasCrops ? successions.reduce((m, s) => !s.start_date ? m : (!m || s.start_date < m ? s.start_date : m), null) : null;
+    const lastOut = hasCrops ? successions.reduce((m, s) => !s.end_date   ? m : (!m || s.end_date   > m ? s.end_date   : m), null) : null;
+    const frostDate = farmProfile?.first_frost_date ?? null;
+    const daysRem = (lastOut && frostDate) ? Math.max(0, Math.round((new Date(frostDate) - new Date(lastOut)) / 86400000)) : null;
+    const remClr = daysRem === null ? null : daysRem >= 45 ? '#2E7D32' : daysRem >= 15 ? '#E65100' : '#C62828';
+    const remBg  = daysRem === null ? null : daysRem >= 45 ? '#E8F5E9' : daysRem >= 15 ? '#FFF3E0' : '#FFEBEE';
+    const groups = [];
+    const used = new Set();
+    if (hasCrops) {
+        successions.forEach((s, i) => {
+            if (used.has(i)) return;
+            const g = [s]; used.add(i);
+            successions.forEach((s2, j) => {
+                if (i === j || used.has(j) || !s.start_date || !s2.start_date) return;
+                if (Math.abs(new Date(s.start_date) - new Date(s2.start_date)) / 86400000 <= 7) { g.push(s2); used.add(j); }
+            });
+            groups.push(g);
+        });
+    }
 
     return (
         <TouchableOpacity
             style={[styles.bedRow, { borderLeftColor: bc.text, borderLeftWidth: 3 }]}
             onPress={() => onPress(bedNum)}
-            onLongPress={() => onLongPress(bedNum)}
+            onLongPress={() => onLongPress?.(bedNum)}
             delayLongPress={600}
             activeOpacity={0.78}
         >
-            {/* Bed number */}
+            {/* Bed number + shelter badge */}
             <View style={[styles.bedNumBadge, { backgroundColor: bc.bg }]}>
                 <Text style={[styles.bedNumText, { color: bc.text }]}>{bedNum}</Text>
+                {shelterType && shelterType !== 'none' && (
+                    <Text style={styles.shelterBadge}>
+                        {shelterType === 'greenhouse' ? '🏡' : '☔️'}
+                    </Text>
+                )}
             </View>
 
-            {/* Crops or empty */}
+            {/* Coverage bars or empty state */}
             <View style={styles.bedRowContent}>
                 {hasCrops ? (
                     <>
-                        <View style={styles.bedChipsRow}>
-                            {successions.map((s, i) => {
-                                const meta = cropMeta(s.crop_id);
-                                return (
-                                    <View key={i} style={styles.miniChip}>
-                                        <Text style={styles.miniChipText} numberOfLines={1}>
-                                            {meta?.emoji ?? '🌱'} {s.crop_name ?? s.name}
-                                        </Text>
-                                    </View>
-                                );
-                            })}
-                        </View>
+                        {groups.map((group, gi) => (
+                            <View key={gi} style={styles.coverageStackGroup}>
+                                {group[0].start_date && (
+                                    <Text style={styles.stackDateLabel}>
+                                        {fmtShortDate(group[0].start_date)}{group[0].end_date ? ' – ' + fmtShortDate(group[0].end_date) : ''}
+                                    </Text>
+                                )}
+                                {group.map((s, si) => {
+                                    const frac = s.coverage ?? s.coverage_fraction ?? 1;
+                                    const cc = cropColor(s.crop_id);
+                                    const meta = cropMeta(s.crop_id);
+                                    return (
+                                        <View key={si} style={styles.coverageBarRow}>
+                                            <View style={[styles.coverageBarFill, { width: Math.round(frac * 100) + '%', backgroundColor: cc.bg }]}>
+                                                <Text style={[styles.coverageBarText, { color: cc.text }]} numberOfLines={1}>
+                                                    {meta?.emoji ?? '🌱'} {s.crop_name ?? s.name}{frac < 0.99 ? ' · ' + Math.round(frac * 100) + '%' : ''}
+                                                </Text>
+                                            </View>
+                                        </View>
+                                    );
+                                })}
+                            </View>
+                        ))}
                         <Text style={styles.bedSubtext}>
-                            {successions.length} succession{successions.length > 1 ? 's' : ''} · {block.bedLengthFt}ft
+                            {successions.length} crop{successions.length > 1 ? 's' : ''} · {block.bedLengthFt}ft · tap to manage
                         </Text>
                     </>
                 ) : (
@@ -83,10 +155,26 @@ const BedRow = ({ block, bedNum, successions, onPress, onLongPress }) => {
                 )}
             </View>
 
+            {/* IN / OUT / remaining strip */}
+            {hasCrops && (firstIn || lastOut) && (
+                <View style={styles.seasonStrip}>
+                    {firstIn && <Text style={styles.seasonItem}><Text style={styles.seasonLabel}>IN </Text>{fmtShortDate(firstIn)}</Text>}
+                    {lastOut && <Text style={styles.seasonItem}><Text style={styles.seasonLabel}> OUT </Text>{fmtShortDate(lastOut)}</Text>}
+                    {daysRem !== null && (
+                        <View style={[styles.seasonRemaining, { backgroundColor: remBg }]}>
+                            <Text style={[styles.seasonRemainingText, { color: remClr }]}>
+                                {daysRem > 0 ? '🟢 ' + daysRem + 'd' : '🔴 Full'}
+                            </Text>
+                        </View>
+                    )}
+                </View>
+            )}
+
             <Text style={styles.chevron}>›</Text>
         </TouchableOpacity>
     );
 };
+
 
 // ─── Crop Detail Modal ─────────────────────────────────────────────────────────
 // Shows crop info AND past field notes for this bed.
@@ -257,9 +345,42 @@ const modStyles = StyleSheet.create({
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 export default function BlockDetailScreen({ navigation, route }) {
     const { block, farmProfile } = route?.params ?? {};
-    const [side, setSide] = useState('W'); // 'E' | 'W' — which side of the block to view
-    const [bedSuccessions, setBedSuccessions] = useState({});
-    const [modalBed, setModalBed] = useState(null); // null = closed
+    const [side, setSide] = useState('W');
+    const [bedData, setBedData] = useState({}); // { [bedNum]: { successions, shelterType } }
+    const [modalBed, setModalBed] = useState(null);
+    const [pickerBed, setPickerBed] = useState(null);
+
+    const getBedSuccessions = (bedNum) => bedData[bedNum]?.successions ?? [];
+    const getBedShelter     = (bedNum) => bedData[bedNum]?.shelterType ?? 'none';
+
+    const handleAddCrop = (bedNum, cropEntry) => {
+        setBedData(prev => {
+            const existing = prev[bedNum] ?? { successions: [], shelterType: 'none' };
+            const updated = { ...prev, [bedNum]: { ...existing, successions: [...existing.successions, cropEntry] } };
+            saveBlockBeds(block.id, updated);
+            return updated;
+        });
+    };
+
+    const handleRemoveCrop = (bedNum, idx) => {
+        setBedData(prev => {
+            const existing = prev[bedNum] ?? { successions: [], shelterType: 'none' };
+            const succs = [...existing.successions]; succs.splice(idx, 1);
+            const updated = { ...prev, [bedNum]: { ...existing, successions: succs } };
+            saveBlockBeds(block.id, updated);
+            return updated;
+        });
+    };
+
+    const handleSetShelter = (bedNum, shelterType) => {
+        setBedData(prev => {
+            const existing = prev[bedNum] ?? { successions: [], shelterType: 'none' };
+            const updated = { ...prev, [bedNum]: { ...existing, shelterType } };
+            saveBlockBeds(block.id, updated);
+            return updated;
+        });
+    };
+
 
     // Web scroll fix: inject CSS to force max-height + overflow-y on the bed list ScrollView
     useFocusEffect(useCallback(() => {
@@ -286,7 +407,7 @@ export default function BlockDetailScreen({ navigation, route }) {
     }, []));
 
     useFocusEffect(useCallback(() => {
-        setBedSuccessions(loadBlockBeds(block?.id ?? ''));
+        setBedData(loadBlockBeds(block?.id ?? ''));
     }, [block?.id]));
 
     const bedCount = block?.bedCount ?? 0;
@@ -365,8 +486,14 @@ export default function BlockDetailScreen({ navigation, route }) {
                         key={bedNum}
                         block={block}
                         bedNum={bedNum}
-                        successions={bedSuccessions[bedNum] ?? []}
-                        onPress={num => setModalBed(num)}
+                        successions={getBedSuccessions(bedNum)}
+                        shelterType={getBedShelter(bedNum)}
+                        farmProfile={farmProfile}
+                        onPress={num => {
+                            const succs = getBedSuccessions(num);
+                            if (succs.length === 0) setPickerBed(num);
+                            else setModalBed(num);
+                        }}
                         onLongPress={handleLongPress}
                     />
                 ))}
@@ -381,10 +508,37 @@ export default function BlockDetailScreen({ navigation, route }) {
                 blockId={block.id}
                 bedNum={modalBed}
                 bedLengthFt={block.bedLengthFt}
-                successions={modalBed !== null ? (bedSuccessions[modalBed] ?? []) : []}
+                successions={modalBed !== null ? getBedSuccessions(modalBed) : []}
+                shelterType={modalBed !== null ? getBedShelter(modalBed) : 'none'}
                 onClose={() => setModalBed(null)}
-                onSaveNote={() => setModalBed(null)}
+                onSaveNote={() => {}}
+                onAddCrop={() => {
+                    const bedNum = modalBed;
+                    setModalBed(null);
+                    setTimeout(() => setPickerBed(bedNum), 300);
+                }}
+                onRemoveCrop={(idx) => { handleRemoveCrop(modalBed, idx); }}
+                onSetShelter={(s) => { if (modalBed !== null) handleSetShelter(modalBed, s); }}
             />
+
+            {/* Crop Picker Modal */}
+            {pickerBed !== null && (
+                <CropDetailModal
+                    visible={true}
+                    blockId={block.id}
+                    bedNum={pickerBed}
+                    bedLengthFt={block.bedLengthFt}
+                    successions={[]}
+                    shelterType={getBedShelter(pickerBed)}
+                    onClose={() => setPickerBed(null)}
+                    onSaveNote={() => {}}
+                    onAddCrop={() => {}}
+                    onRemoveCrop={() => {}}
+                    onSetShelter={(s) => handleSetShelter(pickerBed, s)}
+                    isPickerMode={true}
+                    onPickCrop={(cropEntry) => { handleAddCrop(pickerBed, cropEntry); setPickerBed(null); }}
+                />
+            )}
         </View>
     );
 }
@@ -416,6 +570,17 @@ const styles = StyleSheet.create({
     sideBtnText: { fontSize: Typography.xs, fontWeight: '700', color: Colors.primaryGreen },
     sideBtnTextActive: { color: Colors.cream },
 
+    coverageStackGroup: { gap: 2, marginBottom: 4 },
+    stackDateLabel: { fontSize: 8, fontWeight: '700', color: Colors.mutedText, marginBottom: 1 },
+    coverageBarRow: { height: 20, backgroundColor: 'rgba(45,79,30,0.06)', borderRadius: 4, overflow: 'hidden', width: '100%', marginBottom: 2 },
+    coverageBarFill: { height: '100%', borderRadius: 4, minWidth: 40, paddingHorizontal: 5, justifyContent: 'center' },
+    coverageBarText: { fontSize: 9, fontWeight: '800', lineHeight: 20 },
+    shelterBadge: { fontSize: 9, marginTop: 2 },
+    seasonStrip: { alignItems: 'flex-end', gap: 2 },
+    seasonItem: { fontSize: 9, color: Colors.mutedText },
+    seasonLabel: { fontWeight: '800', color: Colors.primaryGreen },
+    seasonRemaining: { borderRadius: 8, paddingHorizontal: 5, paddingVertical: 2 },
+    seasonRemainingText: { fontSize: 9, fontWeight: '800' },
     bedRow: {
         backgroundColor: Colors.cardBg ?? '#FAFAF7', borderRadius: Radius.md,
         padding: Spacing.md, flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,

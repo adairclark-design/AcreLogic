@@ -24,12 +24,16 @@ import {
     ActivityIndicator,
 } from 'react-native';
 import { Colors, Typography, Spacing, Radius, Shadows } from '../theme';
-import { checkFamilyGate, LIMITS, TIER, getActiveTier } from '../services/tierLimits';
+import { checkFamilyGate, LIMITS, TIER, getActiveTier, HARD_FAMILY_CAP } from '../services/tierLimits';
 import { calculateGardenPlan } from '../services/homeGardenCalculator';
 import { fetchFarmProfile } from '../services/climateService';
 import UpgradeModal from '../components/UpgradeModal';
 import CROP_IMAGES from '../data/cropImages';
 import { exportFamilyPlan } from '../services/planExporter';
+import MegaMenuBar from '../components/MegaMenuBar';
+import SharedCropCard from '../components/SharedCropCard';
+import ActionCalendar from '../components/ActionCalendar';
+import { formatCropDisplayName, formatVarietyLabel } from '../utils/cropDisplay';
 
 // ─── Full PDF monthly cap ────────────────────────────────────────────────────
 const FULL_PDF_MONTHLY_LIMIT = 10;
@@ -63,61 +67,23 @@ import CROPS_DATA from '../data/crops.json';
 const CROPS = CROPS_DATA.crops ?? [];
 
 // Filter out cover crops — not relevant to family planting
-const PLANTABLE_CROPS = CROPS.filter(c => c.category !== 'Cover Crop');
+const PLANTABLE_CROPS = CROPS; // Cover Crops included — visible under the "Cover Crops" MegaMenuBar tab
 
-// ─── Responsive Grid Breakpoints ──────────────────────────────────────────────
-function getColumns(width) {
-    if (width >= 2000) return 9;
-    if (width >= 1600) return 8;
-    if (width >= 1280) return 7;
-    if (width >= 1024) return 6;
-    if (width >= 720)  return 4;
-    if (width >= 480)  return 3;
-    return 2;
-}
+// ─── CropCard (compact grid card — mirrors Market Farm layout) ───────────────
+// CropCard is now SharedCropCard — see src/components/SharedCropCard.js
+const CropCard = SharedCropCard;
 
-const CATEGORIES = ['All', 'Vegetables', 'Herbs', 'Flowers', 'Specialty'];
-const VEGETABLE_CATS = new Set(['Greens', 'Brassica', 'Root', 'Allium', 'Legume', 'Nightshade', 'Cucurbit']);
 
-function filterByCategory(cat, query) {
-    let list = PLANTABLE_CROPS;
-    if (cat === 'Vegetables') list = list.filter(c => VEGETABLE_CATS.has(c.category));
-    else if (cat === 'Herbs')    list = list.filter(c => c.category === 'Herb');
-    else if (cat === 'Flowers')  list = list.filter(c => c.category === 'Flower');
-    else if (cat === 'Specialty') list = list.filter(c => c.category === 'Specialty');
-    if (query.trim()) list = list.filter(c => c.name.toLowerCase().includes(query.toLowerCase()));
-    return list;
-}
-
-// ─── CropCard (compact grid card) ────────────────────────────────────────────
-function CropCard({ crop, selected, onPress }) {
-    return (
-        <TouchableOpacity
-            style={[styles.cropCard, selected && styles.cropCardSelected]}
-            onPress={() => onPress(crop.id)}
-            activeOpacity={0.8}
-        >
-            <Image
-                source={CROP_IMAGES[crop.id]}
-                style={[styles.cropCardImg, selected && styles.cropCardImgFaded]}
-                resizeMode="cover"
-            />
-            {selected && (
-                <View style={styles.cropCheckOverlay}>
-                    <Text style={styles.cropCheckMark}>✓</Text>
-                </View>
-            )}
-            <Text style={styles.cropCardName} numberOfLines={1}>{crop.name}</Text>
-        </TouchableOpacity>
-    );
-}
-
-// ─── Location Bar (optional) ─────────────────────────────────────────────────
-function LocationBar({ gardenProfile, onProfileFetched }) {
+// ─── Compact Settings Bar (location + family size in one row) ────────────────
+function SettingsBar({ gardenProfile, onProfileFetched, familySize, onAdjustFamily, onSetFamily, limits, selectedCount }) {
+    const [modalVisible, setModalVisible] = useState(false);
     const [address, setAddress] = useState('');
     const [loading, setLoading] = useState(false);
     const [error, setError]     = useState(null);
-    const [expanded, setExpanded] = useState(!gardenProfile);
+    // Local draft for the numeric text input so user can type freely before committing
+    const [familyDraft, setFamilyDraft] = useState(String(familySize));
+    // Keep draft in sync when parent changes size (e.g. via +/- buttons)
+    React.useEffect(() => { setFamilyDraft(String(familySize)); }, [familySize]);
 
     const handleAnalyze = async () => {
         if (address.trim().length < 3) return;
@@ -133,59 +99,107 @@ function LocationBar({ gardenProfile, onProfileFetched }) {
                 usdaZone:        raw.usda_zone,
                 _raw: raw,
             });
-            setExpanded(false);
+            setModalVisible(false);
+            setAddress('');
         } catch {
-            setError('Could not fetch climate data. Try a different zip or address.');
+            setError('Could not fetch climate data. Try a different zip.');
         } finally {
             setLoading(false);
         }
     };
 
-    if (gardenProfile && !expanded) {
-        return (
-            <TouchableOpacity style={styles.locationChip} onPress={() => setExpanded(true)}>
-                <Text style={styles.locationChipIcon}>📍</Text>
-                <Text style={styles.locationChipText} numberOfLines={1}>
-                    {gardenProfile.address ?? 'Location set'} · {gardenProfile.frostFreeDays} frost-free days · Zone {gardenProfile.usdaZone}
-                </Text>
-                <Text style={styles.locationChipEdit}>Edit</Text>
-            </TouchableOpacity>
-        );
-    }
-
     return (
-        <View style={styles.locationBar}>
-            <Text style={styles.locationBarTitle}>📍 Where is your garden? <Text style={styles.locationBarOptional}>(optional)</Text></Text>
-            <Text style={styles.locationBarHint}>Enter your zip or address to get exact planting and seed-start dates.</Text>
-            <View style={styles.locationInputRow}>
-                <TextInput
-                    style={styles.locationInput}
-                    value={address}
-                    onChangeText={setAddress}
-                    placeholder="e.g. 97201 or Portland, OR"
-                    placeholderTextColor={Colors.mutedText}
-                    onSubmitEditing={handleAnalyze}
-                    returnKeyType="search"
-                    autoCapitalize="words"
-                />
+        <>
+            {/* ── Compact single-row bar ── */}
+            <View style={styles.settingsBar}>
+                {/* Location pill */}
                 <TouchableOpacity
-                    style={[styles.locationBtn, (address.length < 3 || loading) && styles.locationBtnDisabled]}
-                    onPress={handleAnalyze}
-                    disabled={address.length < 3 || loading}
+                    style={styles.settingsLocationPill}
+                    onPress={() => setModalVisible(true)}
                 >
-                    {loading
-                        ? <ActivityIndicator size="small" color={Colors.cream} />
-                        : <Text style={styles.locationBtnText}>Look up →</Text>
-                    }
+                    <Text style={styles.settingsIcon}>📍</Text>
+                    <Text style={styles.settingsLocationText} numberOfLines={1}>
+                        {gardenProfile ? (gardenProfile.address ?? 'Location set') : 'Add location'}
+                    </Text>
                 </TouchableOpacity>
+
+                <View style={styles.settingsDivider} />
+
+                {/* Family size stepper — +/- buttons plus direct type-in */}
+                <View style={styles.settingsFamilyRow}>
+                    <Text style={styles.settingsFamilyLabel}>👨‍👩‍👧</Text>
+                    <TouchableOpacity style={styles.settingsStepBtn} onPress={() => onAdjustFamily(-1)}>
+                        <Text style={styles.settingsStepText}>−</Text>
+                    </TouchableOpacity>
+                    <TextInput
+                        style={styles.settingsStepInput}
+                        value={familyDraft}
+                        onChangeText={txt => setFamilyDraft(txt.replace(/[^0-9]/g, ''))}
+                        onBlur={() => {
+                            const n = parseInt(familyDraft, 10);
+                            const clamped = Number.isFinite(n) && n >= 1 ? n : familySize;
+                            setFamilyDraft(String(clamped));
+                            if (clamped !== familySize) onSetFamily(clamped);
+                        }}
+                        keyboardType="number-pad"
+                        maxLength={3}
+                        selectTextOnFocus
+                        textAlign="center"
+                    />
+                    <TouchableOpacity style={styles.settingsStepBtn} onPress={() => onAdjustFamily(+1)}>
+                        <Text style={styles.settingsStepText}>+</Text>
+                    </TouchableOpacity>
+                </View>
+
+
+                <View style={styles.settingsDivider} />
+
+                {/* Crop count */}
+                <Text style={styles.settingsCropCount}>
+                    {selectedCount}/{limits.maxCropsSelected} crops
+                </Text>
             </View>
-            {error && <Text style={styles.locationError}>{error}</Text>}
-            {gardenProfile && (
-                <TouchableOpacity onPress={() => setExpanded(false)}>
-                    <Text style={styles.locationSkip}>Skip</Text>
-                </TouchableOpacity>
+
+            {/* ── Location Modal ── */}
+            {modalVisible && (
+                <View style={styles.locationModalScrim}>
+                    <View style={styles.locationModal}>
+                        <Text style={styles.locationModalTitle}>📍 Where is your garden?</Text>
+                        <Text style={styles.locationModalHint}>Enter zip or address for exact planting dates</Text>
+                        <View style={styles.locationInputRow}>
+                            <TextInput
+                                style={styles.locationInput}
+                                value={address}
+                                onChangeText={setAddress}
+                                placeholder="e.g. 97201 or Portland, OR"
+                                placeholderTextColor={Colors.mutedText}
+                                onSubmitEditing={handleAnalyze}
+                                returnKeyType="search"
+                                autoCapitalize="words"
+                                autoFocus
+                            />
+                            <TouchableOpacity
+                                style={[styles.locationBtn, (address.length < 3 || loading) && styles.locationBtnDisabled]}
+                                onPress={handleAnalyze}
+                                disabled={address.length < 3 || loading}
+                            >
+                                {loading
+                                    ? <ActivityIndicator size="small" color={Colors.cream} />
+                                    : <Text style={styles.locationBtnText}>Look up →</Text>
+                                }
+                            </TouchableOpacity>
+                        </View>
+                        {error && <Text style={styles.locationError}>{error}</Text>}
+                        <TouchableOpacity
+                            style={styles.locationModalCancel}
+                            onPress={() => { setModalVisible(false); setError(null); }}
+                        >
+                            <Text style={styles.locationModalCancelText}>Cancel</Text>
+                        </TouchableOpacity>
+                    </View>
+                </View>
             )}
-        </View>
+        </>
     );
 }
 
@@ -211,7 +225,7 @@ function ReportCard({ item, cardWidth }) {
                 {CROP_IMAGES[item.cropId] ? (
                     <Image
                         source={CROP_IMAGES[item.cropId]}
-                        style={{ width: 48, height: 48, borderRadius: 8 }}
+                        style={{ width: 36, height: 36, borderRadius: 6 }}
                         resizeMode="cover"
                     />
                 ) : (
@@ -219,7 +233,7 @@ function ReportCard({ item, cardWidth }) {
                 )}
                 <View style={{ flex: 1 }}>
                     <Text style={styles.reportCropName}>{item.cropName}</Text>
-                    {item.variety ? <Text style={styles.reportVariety}>{item.variety}</Text> : null}
+                    {formatVarietyLabel(item.variety) ? <Text style={styles.reportVariety}>{formatVarietyLabel(item.variety)}</Text> : null}
                 </View>
             </View>
 
@@ -235,7 +249,6 @@ function ReportCard({ item, cardWidth }) {
                 ) : (
                     <>
                         <MetricPill icon="🎯" label="Season goal" value={`${item.targetLbs} lbs`} />
-                        <MetricPill icon="📏" label="Row feet" value={`${item.linearFeetNeeded} ft`} />
                         <MetricPill icon="🌿" label={item.seedType === 'TP' ? 'Transplants' : 'Plants'} value={`${item.seedsToStart}`} />
                     </>
                 )}
@@ -255,38 +268,76 @@ function ReportCard({ item, cardWidth }) {
                 {item.seedType ? (
                     <FactRow icon="🌱" label="Starting method" value={item.seedType === 'DS' ? 'Direct Sow' : 'Transplant'} />
                 ) : null}
-                {/* Calendar dates (only if gardenProfile was set) */}
+                {/* Calendar dates — Ideal vs Today scenario */}
                 {item.indoorSeedDate ? (
-                    <FactRow icon="🗓" label="Start seeds indoors" value={item.indoorSeedDate} highlight />
+                    <>
+                        <FactRow
+                            icon="🗓"
+                            label="Start seeds indoors"
+                            value={
+                                item.todayIndoorDate && item.todayIndoorDate !== item.indoorSeedDate
+                                    ? `${item.indoorSeedDate}  ·  (${item.todayIndoorDate} if starting today)`
+                                    : item.indoorSeedDate
+                            }
+                            highlight
+                        />
+                        {item.transplantDate ? (
+                            <FactRow
+                                icon="🌤"
+                                label="Transplant date"
+                                value={
+                                    item.todayTransplantDate && item.todayTransplantDate !== item.transplantDate
+                                        ? `${item.transplantDate}  ·  (${item.todayTransplantDate} if starting today)`
+                                        : item.transplantDate
+                                }
+                                highlight={!item.isLateStart}
+                             />
+                        ) : null}
+                        {item.lateStartCaveat ? (
+                            <FactRow icon="⏳" label="Note" value={item.lateStartCaveat} />
+                        ) : null}
+                    </>
                 ) : item.seedType === 'TP' && item.seedStartWeeks ? (
                     <FactRow icon="🗓" label="Start seeds indoors" value={`${item.seedStartWeeks} wks before last frost`} />
                 ) : null}
-                {item.transplantDate ? (
-                    <FactRow icon="🌤" label="Transplant date" value={item.transplantDate} highlight />
-                ) : null}
                 {item.directSowDate ? (
-                    <FactRow icon="🌱" label="Direct sow date" value={item.directSowDate} highlight />
+                    <FactRow
+                        icon="🌱"
+                        label="Direct sow date"
+                        value={
+                            item.todayDirectSowDate && item.todayDirectSowDate !== item.directSowDate
+                                ? `Ideal: ${item.directSowDate}  ·  (today is ${item.isLateStart ? 'past ideal — ' : ''}${item.todayDirectSowDate})`
+                                : item.directSowDate
+                        }
+                        highlight={!item.isLateStart}
+                    />
+                ) : null}
+                {item.lateStartCaveat && !item.indoorSeedDate && item.directSowDate ? (
+                    <FactRow icon="⏳" label="Note" value={item.lateStartCaveat} />
                 ) : null}
                 {/* Spacing */}
                 {item.inRowSpacingIn ? (
                     <FactRow icon="↔️" label="In-row spacing" value={`${item.inRowSpacingIn}"`} />
                 ) : null}
-                {item.rowSpacingIn ? (
-                    <FactRow icon="↕️" label="Row spacing (30’ bed)" value={`${item.rowSpacingIn}"`} />
-                ) : null}
-                {item.rowsPer30inBed ? (
-                    <FactRow icon="🛀" label="Rows per 30″ bed" value={`${item.rowsPer30inBed}`} />
-                ) : null}
-                {/* Harvest info */}
+                  {/* Harvest info */}
                 {item.harvestStyle ? (
                     <FactRow icon="✂️" label="Harvest" value={item.harvestStyle} />
                 ) : item.harvestMethod ? (
                     <FactRow icon="✂️" label="Harvest method" value={item.harvestMethod} />
                 ) : null}
-                {/* Yield range */}
+                {/* Yield range — includes head count for heading crops */}
                 {item.yieldLow != null && item.yieldHigh != null ? (
-                    <FactRow icon="📊" label="Expected yield" value={`${item.yieldLow}–${item.yieldHigh} lbs`} />
+                    <FactRow
+                        icon="📊"
+                        label="Expected yield"
+                        value={
+                            item.headCountLow != null
+                                ? `${item.yieldLow}–${item.yieldHigh} lbs · ${item.headCountLow}–${item.headCountHigh} heads (${item.headWeightLb} lb avg)`
+                                : `${item.yieldLow}–${item.yieldHigh} lbs`
+                        }
+                    />
                 ) : null}
+
                 {item.season ? (
                     <FactRow icon="🗓" label="Season" value={item.season} />
                 ) : null}
@@ -328,6 +379,18 @@ function FactRow({ icon, label, value, highlight }) {
     );
 }
 
+// ─── Crop grid column count (Step 1 — compact, matches Market Farm) ──────────
+function getCropGridColumns(viewportWidth) {
+    // Identical to VegetableGridScreen getBreakpoint() breakpoints
+    if (viewportWidth < 480)  return 3;
+    if (viewportWidth < 768)  return 4;
+    if (viewportWidth < 1024) return 6;
+    if (viewportWidth < 1280) return 8;
+    if (viewportWidth < 1600) return 10;
+    if (viewportWidth < 1920) return 11;
+    return 12;
+}
+
 // ─── Plan results column count (Step 2 — fewer, richer cards) ────────────────
 function getPlanColumns(viewportWidth) {
     if (viewportWidth >= 2200) return 8;
@@ -335,28 +398,49 @@ function getPlanColumns(viewportWidth) {
     if (viewportWidth >= 1400) return 5;
     if (viewportWidth >= 1100) return 4;
     if (viewportWidth >= 768)  return 3;
-    if (viewportWidth >= 540)  return 2;
+    if (viewportWidth >= 480)  return 2;
     return 1;
 }
 
 // ─── Main Screen ─────────────────────────────────────────────────────────────
 export default function FamilyPlannerScreen({ navigation }) {
-    const GAP = 8; // Spacing.sm
+    const GAP = Spacing.sm; // 8px
     const { width } = useWindowDimensions();
+    // Step 1 crop grid — compact (matches Market Farm)
+    const cropNumColumns = getCropGridColumns(width);
+    const cropCardWidth  = Math.floor((width - Spacing.lg * 2 - GAP * (cropNumColumns - 1)) / cropNumColumns);
+    // Step 2 plan results — fewer, richer cards
     const numColumns = getPlanColumns(width);
-    // Account for outer padding (2 × Spacing.lg = 48) and inter-card gaps
-    const cardWidth = Math.floor((width - 48 - GAP * (numColumns - 1)) / numColumns);
+    const cardWidth  = Math.floor((width - 48 - GAP * (numColumns - 1)) / numColumns);
+
+    // ── Persistence keys ───────────────────────────────────────────────────
+    const STORAGE_KEY_FAMILY = 'acrelogic_family_planner_familySize';
+    const STORAGE_KEY_CROPS  = 'acrelogic_family_planner_selectedIds';
 
     // ── State ──────────────────────────────────────────────────────────────
-    const [step, setStep]                   = useState(1);
-    const [familySize, setFamilySize]       = useState(2);
-    const [selectedIds, setSelectedIds]     = useState(new Set());
-    const [category, setCategory]           = useState('All');
+    const [step, setStep]               = useState(1);
+    // familySize: restored from localStorage so it survives back-navigation
+    const [familySize, setFamilySize]   = useState(() => {
+        try {
+            const saved = typeof localStorage !== 'undefined' && localStorage.getItem(STORAGE_KEY_FAMILY);
+            const n = saved ? parseInt(saved, 10) : 2;
+            return Number.isFinite(n) && n >= 1 ? n : 2;
+        } catch { return 2; }
+    });
+    // selectedIds: restored from localStorage so crop picks survive back-navigation
+    const [selectedIds, setSelectedIds] = useState(() => {
+        try {
+            const saved = typeof localStorage !== 'undefined' && localStorage.getItem(STORAGE_KEY_CROPS);
+            return saved ? new Set(JSON.parse(saved)) : new Set();
+        } catch { return new Set(); }
+    });
+    const [filterFn, setFilterFn]           = useState(() => () => true);  // from MegaMenuBar
     const [searchQuery, setSearchQuery]     = useState('');
     const [upgradeModalVisible, setUpgradeModalVisible] = useState(false);
     const [upgradeBlockedBy, setUpgradeBlockedBy]       = useState(null);
     const [gardenProfile, setGardenProfile] = useState(null); // location data
     const [planResult, setPlanResult]       = useState(null);
+    const [viewMode, setViewMode]           = useState('cards'); // 'cards' | 'calendar'
     const [pdfRemaining, setPdfRemaining] = useState(() => {
         if (Platform.OS !== 'web') return FULL_PDF_MONTHLY_LIMIT;
         const u = getPdfUsage();
@@ -367,6 +451,23 @@ export default function FamilyPlannerScreen({ navigation }) {
     const gridRef  = useRef(null);  // grid container for web DOM ref
     const slideAnim = useRef(new Animated.Value(0)).current;
 
+    // ── Persist selections on every change ────────────────────────────────
+    useEffect(() => {
+        try {
+            if (typeof localStorage !== 'undefined') {
+                localStorage.setItem(STORAGE_KEY_FAMILY, String(familySize));
+            }
+        } catch {}
+    }, [familySize]);
+
+    useEffect(() => {
+        try {
+            if (typeof localStorage !== 'undefined') {
+                localStorage.setItem(STORAGE_KEY_CROPS, JSON.stringify([...selectedIds]));
+            }
+        } catch {}
+    }, [selectedIds]);
+
     // (Stripe ?paid=1 flow removed — Full PDF is now a subscriber benefit)
 
     // ── Post-payment tier refresh ──────────────────────────────────────────
@@ -376,6 +477,7 @@ export default function FamilyPlannerScreen({ navigation }) {
     useEffect(() => {
         setActiveTierLocal(getActiveTier());
     }, []);
+
 
     // ── CSS Grid via injected <style> tag ─────────────────────────────────────
     // RN Web's style pipeline (inline styles AND DOM ref) gets transformed by
@@ -393,7 +495,7 @@ export default function FamilyPlannerScreen({ navigation }) {
         el.textContent = [
             `.acrelogic-crop-grid {`,
             `  display: grid !important;`,
-            `  grid-template-columns: repeat(${numColumns}, 1fr) !important;`,
+            `  grid-template-columns: repeat(${cropNumColumns}, 1fr) !important;`,
             `  gap: 8px !important;`,
             `  width: 100% !important;`,
             `}`,
@@ -402,24 +504,50 @@ export default function FamilyPlannerScreen({ navigation }) {
             const existing = document.getElementById(STYLE_ID);
             if (existing) existing.remove();
         };
-    }, [numColumns]);
+    }, [cropNumColumns]);
 
 
     const limits = LIMITS[activeTier] ?? LIMITS[TIER.FREE];
 
-    const filteredCrops = filterByCategory(category, searchQuery);
+    const filteredCrops = PLANTABLE_CROPS
+        .filter(filterFn)
+        .filter(c => !searchQuery.trim() || c.name.toLowerCase().includes(searchQuery.toLowerCase()) || (c.variety ?? '').toLowerCase().includes(searchQuery.toLowerCase()));
 
     // ── Family size stepper ────────────────────────────────────────────────
     const adjustFamily = (delta) => {
         const next = Math.max(1, familySize + delta);
         const gate = checkFamilyGate({ familySize: next, cropCount: selectedIds.size });
-        if (!gate.allowed && gate.blockedBy === 'familySize') {
-            setUpgradeBlockedBy('familySize');
-            setUpgradeModalVisible(true);
+        if (!gate.allowed) {
+            if (gate.blockedBy === 'csaSize') {
+                // Hard ceiling — 60+ people is a CSA, redirect to Market Farm
+                setUpgradeBlockedBy('csaSize');
+                setUpgradeModalVisible(true);
+            } else if (gate.blockedBy === 'familySize') {
+                setUpgradeBlockedBy('familySize');
+                setUpgradeModalVisible(true);
+            }
             return;
         }
         setFamilySize(next);
     };
+
+    // Direct type-in version — same gate logic but takes an absolute value (not delta)
+    const setFamily = (n) => {
+        const next = Math.max(1, n);
+        const gate = checkFamilyGate({ familySize: next, cropCount: selectedIds.size });
+        if (!gate.allowed) {
+            if (gate.blockedBy === 'csaSize') {
+                setUpgradeBlockedBy('csaSize');
+                setUpgradeModalVisible(true);
+            } else if (gate.blockedBy === 'familySize') {
+                setUpgradeBlockedBy('familySize');
+                setUpgradeModalVisible(true);
+            }
+            return;
+        }
+        setFamilySize(next);
+    };
+
 
     // ── Crop toggle with gate ──────────────────────────────────────────────
     const toggleCrop = (id) => {
@@ -535,76 +663,40 @@ export default function FamilyPlannerScreen({ navigation }) {
                 {/* ════════ STEP 1 ════════ */}
                 {step === 1 && (
                     <View style={{ flex: 1 }}>
-                        {/* Location bar */}
-                        <LocationBar
+                        {/* Compact settings bar: location + family size + crop count */}
+                        <SettingsBar
                             gardenProfile={gardenProfile}
                             onProfileFetched={setGardenProfile}
+                            familySize={familySize}
+                            onAdjustFamily={adjustFamily}
+                            onSetFamily={setFamily}
+                            limits={limits}
+                            selectedCount={selectedIds.size}
                         />
 
-                        {/* Family size row */}
-                        <View style={styles.familyRow}>
-                            <View style={styles.familyLabel}>
-                                <Text style={styles.familyTitle}>Family Size</Text>
-                                <Text style={styles.familyHint}>
-                                    We'll size planting quantities to feed everyone.
-                                </Text>
-                            </View>
-                            <View style={styles.stepper}>
-                                <TouchableOpacity style={styles.stepperBtn} onPress={() => adjustFamily(-1)}>
-                                    <Text style={styles.stepperBtnText}>−</Text>
-                                </TouchableOpacity>
-                                <Text style={styles.stepperValue}>
-                                    {familySize >= limits.maxFamilyMembers ? `${limits.maxFamilyMembers}+` : familySize}
-                                </Text>
-                                <TouchableOpacity style={styles.stepperBtn} onPress={() => adjustFamily(+1)}>
-                                    <Text style={styles.stepperBtnText}>+</Text>
-                                </TouchableOpacity>
-                            </View>
-                        </View>
+                        {/* Mega category menu */}
+                        <MegaMenuBar
+                            onFilterChange={({ filterFn }) =>
+                                setFilterFn(() => filterFn)
+                            }
+                        />
 
-                        {/* Free-tier info bar */}
-                        {getActiveTier() === TIER.FREE && (
-                            <View style={styles.tierBar}>
-                                <Text style={styles.tierBarText}>
-                                    🌱 Free plan · up to {limits.maxFamilyMembers} people · {limits.maxCropsSelected} crops
-                                </Text>
-                                <Text style={styles.tierBarSelected}>
-                                    {selectedIds.size}/{limits.maxCropsSelected} crops
-                                </Text>
-                            </View>
-                        )}
-
-                        {/* Category chips */}
-                        <ScrollView
-                            horizontal
-                            showsHorizontalScrollIndicator={false}
-                            style={styles.chipsRow}
-                            contentContainerStyle={styles.chipsContent}
-                        >
-                            {CATEGORIES.map(cat => (
-                                <TouchableOpacity
-                                    key={cat}
-                                    style={[styles.chip, category === cat && styles.chipActive]}
-                                    onPress={() => setCategory(cat)}
-                                >
-                                    <Text style={[styles.chipText, category === cat && styles.chipTextActive]}>
-                                        {cat}
-                                    </Text>
-                                </TouchableOpacity>
-                            ))}
-                        </ScrollView>
-
-                        {/* Search */}
+                        {/* Search bar \u2014 always visible below mega menu */}
                         <View style={styles.searchRow}>
                             <Text style={styles.searchIcon}>🔍</Text>
                             <TextInput
                                 style={styles.searchInput}
                                 value={searchQuery}
                                 onChangeText={setSearchQuery}
-                                placeholder="Search crops..."
+                                placeholder="Search crops\u2026"
                                 placeholderTextColor={Colors.mutedText}
                                 clearButtonMode="while-editing"
                             />
+                            {searchQuery.length > 0 && (
+                                <TouchableOpacity onPress={() => setSearchQuery('')} style={{ paddingHorizontal: 8 }}>
+                                    <Text style={{ color: Colors.mutedText, fontSize: 16 }}>✕</Text>
+                                </TouchableOpacity>
+                            )}
                         </View>
 
                         {/* Crop grid */}
@@ -612,18 +704,19 @@ export default function FamilyPlannerScreen({ navigation }) {
                             ref={listRef}
                             data={filteredCrops}
                             keyExtractor={item => item.id}
-                            numColumns={numColumns}
-                            key={numColumns}
+                            numColumns={cropNumColumns}
+                            key={cropNumColumns}
                             contentContainerStyle={[styles.grid, { paddingBottom: 120 }]}
-                            columnWrapperStyle={numColumns > 1 ? { gap: Spacing.sm, marginBottom: Spacing.sm } : undefined}
+                            columnWrapperStyle={cropNumColumns > 1 ? { gap: Spacing.sm, marginBottom: Spacing.sm } : undefined}
                             showsVerticalScrollIndicator={false}
                             style={Platform.OS === 'web' ? { overflowY: 'scroll', flex: 1 } : { flex: 1 }}
                             renderItem={({ item }) => (
-                                <View style={{ width: cardWidth }}>
+                                <View style={{ width: cropCardWidth }}>
                                     <CropCard
                                         crop={item}
                                         selected={selectedIds.has(item.id)}
                                         onPress={toggleCrop}
+                                        cardWidth={cropCardWidth}
                                     />
                                 </View>
                             )}
@@ -646,7 +739,23 @@ export default function FamilyPlannerScreen({ navigation }) {
                                         : `See My Plan for ${selectedIds.size} Crop${selectedIds.size !== 1 ? 's' : ''} →`}
                                 </Text>
                             </TouchableOpacity>
+                            {selectedIds.size > 0 && (
+                                <TouchableOpacity
+                                    style={styles.clearAllBtn}
+                                    onPress={() => {
+                                        setSelectedIds(new Set());
+                                        try {
+                                            if (typeof localStorage !== 'undefined')
+                                                localStorage.removeItem(STORAGE_KEY_CROPS);
+                                        } catch {}
+                                    }}
+                                    activeOpacity={0.7}
+                                >
+                                    <Text style={styles.clearAllText}>Clear all {selectedIds.size} selections</Text>
+                                </TouchableOpacity>
+                            )}
                         </View>
+
                     </View>
                 )}
 
@@ -671,6 +780,26 @@ export default function FamilyPlannerScreen({ navigation }) {
                             </View>
                         )}
 
+                        {/* ── View mode tab bar ── */}
+                        <View style={styles.viewTabBar}>
+                            <TouchableOpacity
+                                style={[styles.viewTab, viewMode === 'cards' && styles.viewTabActive]}
+                                onPress={() => setViewMode('cards')}
+                            >
+                                <Text style={[styles.viewTabText, viewMode === 'cards' && styles.viewTabTextActive]}>
+                                    📋  Crop Cards
+                                </Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                style={[styles.viewTab, viewMode === 'calendar' && styles.viewTabActive]}
+                                onPress={() => setViewMode('calendar')}
+                            >
+                                <Text style={[styles.viewTabText, viewMode === 'calendar' && styles.viewTabTextActive]}>
+                                    📅  Action Calendar
+                                </Text>
+                            </TouchableOpacity>
+                        </View>
+
                         {/* Unsupported crops warning */}
                         {planResult.unsupportedCrops.length > 0 && (
                             <View style={styles.warnBar}>
@@ -685,7 +814,14 @@ export default function FamilyPlannerScreen({ navigation }) {
                             Chunk cards into rows of numColumns, render each
                             row as flexDirection:'row'. Each cell is flex:1
                             so columns split width evenly — works everywhere. */}
-                        {(() => {
+                        {/* Report cards OR Action Calendar based on view mode */}
+                        {viewMode === 'calendar' ? (
+                            <ActionCalendar
+                                crops={planResult.supported}
+                                gardenProfile={gardenProfile?._raw ?? null}
+                            />
+                        ) : (
+                        (() => {
                             const cards = planResult.supported;
                             const rows = [];
                             for (let i = 0; i < cards.length; i += numColumns) {
@@ -715,6 +851,13 @@ export default function FamilyPlannerScreen({ navigation }) {
                                             ))}
                                         </View>
                                     ))}
+                                    {/* Estimates disclaimer */}
+                                    <View style={styles.disclaimer}>
+                                        <Text style={styles.disclaimerText}>
+                                            📊 <Text style={{ fontWeight: '600' }}>Estimates, not guarantees.</Text> Quantities are based on average household consumption and typical backyard yields. Your results will vary based on sun exposure, soil quality, seed age, climate, and how your family eats. Some crops marked [est.] use values from similar varieties. Treat these numbers as a helpful starting point — not a precise prescription.
+                                        </Text>
+                                    </View>
+
                                     <View style={styles.goodLuck}>
                                         <Text style={styles.goodLuckEmoji}>🥬</Text>
                                         <Text style={styles.goodLuckTitle}>Good Luck Gardening!</Text>
@@ -722,7 +865,8 @@ export default function FamilyPlannerScreen({ navigation }) {
                                     </View>
                                 </ScrollView>
                             );
-                        })()}
+                        })()
+                        )}
 
 
                         {/* Report footer — edit + dual export */}
@@ -781,9 +925,15 @@ export default function FamilyPlannerScreen({ navigation }) {
                 onDismiss={() => setUpgradeModalVisible(false)}
                 onUpgrade={() => {
                     setUpgradeModalVisible(false);
-                    navigation.navigate('Pricing');
+                    if (upgradeBlockedBy === 'csaSize') {
+                        // Send them to Market Farm mode
+                        navigation.navigate('ModeSelect');
+                    } else {
+                        navigation.navigate('Pricing');
+                    }
                 }}
             />
+
         </View>
     );
 }
@@ -833,98 +983,99 @@ const styles = StyleSheet.create({
     // ── Body ──────────────────────────────────────────────────────────────────
     body: { flex: 1 },
 
-    // ── Location Bar ──────────────────────────────────────────────────────────
-    locationBar: {
-        backgroundColor: Colors.white,
-        paddingHorizontal: Spacing.lg,
-        paddingVertical: Spacing.md,
-        borderBottomWidth: 1,
-        borderBottomColor: 'rgba(45,79,30,0.1)',
-        gap: 8,
-    },
-    locationBarTitle: {
-        fontSize: Typography.sm, fontWeight: Typography.semiBold, color: Colors.primaryGreen,
-    },
-    locationBarOptional: {
-        fontWeight: Typography.regular, color: Colors.mutedText,
-    },
-    locationBarHint: { fontSize: Typography.xs, color: Colors.mutedText },
-    locationInputRow: {
-        flexDirection: 'row', gap: Spacing.sm, alignItems: 'center',
-    },
-    locationInput: {
-        flex: 1,
-        borderWidth: 1.5, borderColor: 'rgba(45,79,30,0.2)',
-        borderRadius: Radius.sm, paddingHorizontal: Spacing.sm, paddingVertical: 9,
-        fontSize: Typography.sm, color: Colors.darkText,
-        backgroundColor: Colors.backgroundGrey,
-    },
-    locationBtn: {
-        backgroundColor: Colors.primaryGreen,
-        paddingHorizontal: Spacing.md, paddingVertical: 10,
-        borderRadius: Radius.sm, minWidth: 90, alignItems: 'center',
-    },
-    locationBtnDisabled: { opacity: 0.45 },
-    locationBtnText: { color: Colors.cream, fontWeight: Typography.bold, fontSize: Typography.xs },
-    locationSkip: {
-        fontSize: Typography.xs, color: Colors.mutedText, textAlign: 'right',
-        textDecorationLine: 'underline', marginTop: 2,
-    },
-    locationError: { fontSize: Typography.xs, color: Colors.burntOrange, marginTop: 2 },
-
-    // ── Location chip (collapsed) ─────────────────────────────────────────────
-    locationChip: {
-        flexDirection: 'row', alignItems: 'center', gap: 6,
-        backgroundColor: 'rgba(45,79,30,0.07)',
-        paddingHorizontal: Spacing.lg, paddingVertical: 10,
-        borderBottomWidth: 1, borderBottomColor: 'rgba(45,79,30,0.1)',
-    },
-    locationChipIcon: { fontSize: 13 },
-    locationChipText: { flex: 1, fontSize: Typography.xs, color: Colors.primaryGreen, fontWeight: Typography.medium },
-    locationChipEdit: { fontSize: Typography.xs, color: Colors.burntOrange, fontWeight: Typography.semiBold },
-
-    // ── Family stepper ────────────────────────────────────────────────────────
-    familyRow: {
+    // ── Compact Settings Bar ──────────────────────────────────────────────────
+    settingsBar: {
         flexDirection: 'row',
         alignItems: 'center',
-        paddingHorizontal: Spacing.lg,
-        paddingVertical: Spacing.md,
         backgroundColor: Colors.white,
+        paddingHorizontal: Spacing.lg,
+        paddingVertical: 8,
         borderBottomWidth: 1,
         borderBottomColor: 'rgba(45,79,30,0.1)',
-        gap: Spacing.sm,
+        gap: 10,
     },
-    familyLabel: { flex: 1 },
-    familyTitle: { fontSize: Typography.md, fontWeight: Typography.bold, color: Colors.primaryGreen },
-    familyHint: { fontSize: Typography.xs, color: Colors.mutedText, marginTop: 2 },
-    stepper: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
-    stepperBtn: {
-        width: 36, height: 36, borderRadius: 18,
+    settingsLocationPill: {
+        flex: 1, flexDirection: 'row', alignItems: 'center', gap: 4,
+        minWidth: 0,
+    },
+    settingsIcon: { fontSize: 13 },
+    settingsLocationText: {
+        flex: 1, fontSize: 11, color: Colors.primaryGreen,
+        fontWeight: Typography.medium,
+    },
+    settingsDivider: {
+        width: 1, height: 20, backgroundColor: 'rgba(45,79,30,0.15)',
+    },
+    settingsFamilyRow: {
+        flexDirection: 'row', alignItems: 'center', gap: 6,
+    },
+    settingsFamilyLabel: { fontSize: 14 },
+    settingsStepBtn: {
+        width: 26, height: 26, borderRadius: 13,
         backgroundColor: Colors.primaryGreen,
         alignItems: 'center', justifyContent: 'center',
     },
-    stepperBtnText: { color: Colors.cream, fontSize: 20, lineHeight: 22, fontWeight: Typography.bold },
-    stepperValue: {
-        fontSize: Typography.xl, fontWeight: Typography.bold,
-        color: Colors.primaryGreen, minWidth: 44, textAlign: 'center',
+    settingsStepText: {
+        color: Colors.cream, fontSize: 16, lineHeight: 18, fontWeight: Typography.bold,
+    },
+    settingsStepValue: {
+        fontSize: 15, fontWeight: Typography.bold,
+        color: Colors.primaryGreen, minWidth: 22, textAlign: 'center',
+    },
+    settingsStepInput: {
+        fontSize: 15, fontWeight: Typography.bold,
+        color: Colors.primaryGreen,
+        minWidth: 32, maxWidth: 44,
+        textAlign: 'center',
+        borderBottomWidth: 1.5,
+        borderBottomColor: Colors.primaryGreen,
+        paddingHorizontal: 2, paddingVertical: 1,
+        ...Platform.select({ web: { outline: 'none' } }),
     },
 
-    // ── Tier bar ──────────────────────────────────────────────────────────────
-    tierBar: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
+    settingsCropCount: {
+        fontSize: 11, color: Colors.mutedText, fontWeight: Typography.medium,
+        whiteSpace: 'nowrap',
+    },
+
+    // ── Location Modal ────────────────────────────────────────────────────────
+    locationModalScrim: {
+        position: 'absolute',
+        top: 0, left: 0, right: 0, bottom: 0,
+        backgroundColor: 'rgba(0,0,0,0.45)',
         alignItems: 'center',
-        backgroundColor: 'rgba(45,79,30,0.07)',
-        paddingHorizontal: Spacing.lg,
-        paddingVertical: Spacing.xs,
-        borderBottomWidth: 1,
-        borderBottomColor: 'rgba(45,79,30,0.08)',
+        justifyContent: 'center',
+        zIndex: 100,
     },
-    tierBarText: { fontSize: Typography.xs, color: Colors.primaryGreen, fontWeight: Typography.medium },
-    tierBarSelected: { fontSize: Typography.xs, color: Colors.mutedText },
+    locationModal: {
+        backgroundColor: Colors.white,
+        borderRadius: Radius.lg,
+        padding: Spacing.xl,
+        width: '90%',
+        maxWidth: 480,
+        gap: 10,
+        shadowColor: '#000',
+        shadowOpacity: 0.2,
+        shadowRadius: 20,
+        elevation: 10,
+    },
+    locationModalTitle: {
+        fontSize: Typography.md, fontWeight: Typography.bold, color: Colors.primaryGreen,
+    },
+    locationModalHint: { fontSize: Typography.xs, color: Colors.mutedText },
+    locationModalCancel: { alignItems: 'center', paddingVertical: 8 },
+    locationModalCancelText: { color: Colors.mutedText, fontSize: Typography.sm },
 
-    // ── Category chips ────────────────────────────────────────────────────────
-    chipsRow: { flexGrow: 0, flexShrink: 0 },
+    // ── Filter + Search row ───────────────────────────────────────────────────
+    filterSearchRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        flexShrink: 0,
+    },
+    filterSearchIcon: {
+        paddingHorizontal: Spacing.md,
+        paddingVertical: Spacing.sm,
+    },
     chipsContent: { paddingHorizontal: Spacing.lg, paddingVertical: Spacing.sm, gap: Spacing.sm },
     chip: {
         paddingVertical: 6, paddingHorizontal: 14,
@@ -968,7 +1119,7 @@ const styles = StyleSheet.create({
         borderColor: Colors.primaryGreen,
         borderWidth: 2.5,
     },
-    cropCardImg: { width: '100%', height: 70 },           // reduced from 90
+    cropCardImg: { width: '100%' },   // height is now dynamic (cardWidth * 0.85)
     cropCardImgFaded: { opacity: 0.35 },
     cropCheckOverlay: {
         ...StyleSheet.absoluteFillObject,
@@ -984,6 +1135,27 @@ const styles = StyleSheet.create({
         color: Colors.primaryGreen, textAlign: 'center',
         paddingHorizontal: 3, paddingTop: 3,
     },
+
+    // ── Quick-scan data badges ─────────────────────────────────────────────────
+    cropBadgeRow: {
+        flexDirection: 'row', flexWrap: 'wrap',
+        justifyContent: 'center', alignItems: 'center',
+        gap: 3, paddingHorizontal: 4, paddingBottom: 5, minHeight: 18,
+    },
+    dtmPill: {
+        backgroundColor: 'rgba(45,79,30,0.10)', borderRadius: 4,
+        paddingVertical: 1, paddingHorizontal: 5,
+    },
+    dtmPillText: { fontSize: 8, fontWeight: '800', color: Colors.primaryGreen },
+    seasonPill: { borderRadius: 4, paddingVertical: 1, paddingHorizontal: 4 },
+    seasonPillCool: { backgroundColor: '#dff0fa' },
+    seasonPillWarm: { backgroundColor: '#fff0e0' },
+    seasonPillText: { fontSize: 8, fontWeight: '700', color: Colors.darkText },
+    typePill: {
+        backgroundColor: 'rgba(45,79,30,0.06)', borderRadius: 4,
+        paddingVertical: 1, paddingHorizontal: 4,
+    },
+    typePillText: { fontSize: 8, fontWeight: '700', color: Colors.mutedText },
 
     // ── Footer (shared) ───────────────────────────────────────────────────────
     footer: {
@@ -1006,6 +1178,9 @@ const styles = StyleSheet.create({
         color: Colors.cream, fontSize: Typography.md,
         fontWeight: Typography.bold, letterSpacing: 1,
     },
+    clearAllBtn: { alignItems: 'center', paddingVertical: 8 },
+    clearAllText: { fontSize: 12, color: Colors.mutedText, textDecorationLine: 'underline' },
+
     editBtn: {
         borderWidth: 1.5, borderColor: Colors.primaryGreen,
         paddingVertical: 15, borderRadius: Radius.md, alignItems: 'center',
@@ -1082,6 +1257,39 @@ const styles = StyleSheet.create({
     },
     warnText: { fontSize: Typography.xs, color: Colors.burntOrange },
 
+    // ── View mode tab bar ─────────────────────────────────────────────────────
+    viewTabBar: {
+        flexDirection: 'row',
+        paddingHorizontal: Spacing.lg,
+        paddingTop: 10,
+        paddingBottom: 4,
+        gap: 8,
+        borderBottomWidth: 1,
+        borderBottomColor: 'rgba(45,79,30,0.1)',
+        backgroundColor: Colors.cream ?? '#FAFAF7',
+    },
+    viewTab: {
+        flex: 1,
+        paddingVertical: 8,
+        alignItems: 'center',
+        borderRadius: Radius.md,
+        borderWidth: 1.5,
+        borderColor: 'rgba(45,79,30,0.2)',
+        backgroundColor: 'transparent',
+    },
+    viewTabActive: {
+        backgroundColor: Colors.primaryGreen,
+        borderColor: Colors.primaryGreen,
+    },
+    viewTabText: {
+        fontSize: Typography.sm,
+        fontWeight: Typography.semiBold,
+        color: Colors.primaryGreen,
+    },
+    viewTabTextActive: {
+        color: '#fff',
+    },
+
     // ── Report cards ──────────────────────────────────────────────────────────
     reportGrid: {
         padding: Spacing.lg,
@@ -1104,9 +1312,10 @@ const styles = StyleSheet.create({
     reportCardHeader: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: Spacing.md,
+        gap: Spacing.sm,
         backgroundColor: Colors.primaryGreen,
-        padding: Spacing.md,
+        paddingVertical: Spacing.sm,
+        paddingHorizontal: Spacing.md,
     },
     reportEmoji: { fontSize: 32 },
     reportCropName: {
@@ -1117,28 +1326,34 @@ const styles = StyleSheet.create({
     reportMetrics: {
         flexDirection: 'row',
         justifyContent: 'space-around',
-        paddingVertical: Spacing.md,
+        paddingVertical: 8,
         paddingHorizontal: Spacing.sm,
         backgroundColor: 'rgba(45,79,30,0.04)',
     },
-    metricPill: { alignItems: 'center', flex: 1 },
-    metricIcon: { fontSize: 18, marginBottom: 2 },
-    metricValue: { fontSize: Typography.lg, fontWeight: Typography.bold, color: Colors.primaryGreen },
-    metricLabel: { fontSize: 9, color: Colors.mutedText, textTransform: 'uppercase', letterSpacing: 0.5, textAlign: 'center' },
+    metricPill: {
+        alignItems: 'center',
+        flex: 1,
+        flexDirection: 'row',
+        justifyContent: 'center',
+        gap: 5,
+    },
+    metricIcon: { fontSize: 14 },
+    metricValue: { fontSize: Typography.sm, fontWeight: Typography.bold, color: Colors.primaryGreen },
+    metricLabel: { fontSize: 8, color: Colors.mutedText, textTransform: 'uppercase', letterSpacing: 0.4, textAlign: 'center' },
 
     reportDivider: { height: 1, backgroundColor: 'rgba(45,79,30,0.08)', marginHorizontal: Spacing.md },
 
-    reportFacts: { padding: Spacing.md, gap: 6 },
-    factRow: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.sm },
-    factIcon: { width: 20, textAlign: 'center', fontSize: 13, paddingTop: 1 },
-    factLabel: { fontSize: Typography.xs, color: Colors.mutedText, flex: 1, fontWeight: Typography.medium },
-    factValue: { fontSize: Typography.xs, color: Colors.darkText, fontWeight: Typography.semiBold, textAlign: 'right', flexShrink: 1, maxWidth: '55%' },
+    reportFacts: { paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm, gap: 3 },
+    factRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 5 },
+    factIcon: { width: 16, textAlign: 'center', fontSize: 11, paddingTop: 1 },
+    factLabel: { fontSize: 10, color: Colors.mutedText, flex: 1, fontWeight: Typography.medium },
+    factValue: { fontSize: 10, color: Colors.darkText, fontWeight: Typography.semiBold, textAlign: 'right', flexShrink: 1, maxWidth: '55%' },
     factValueHighlight: { color: Colors.primaryGreen },
 
     reportNote: {
-        fontSize: Typography.xs, color: Colors.mutedText,
-        fontStyle: 'italic', lineHeight: 15,
-        paddingHorizontal: Spacing.md, paddingBottom: Spacing.md,
+        fontSize: 9, color: Colors.mutedText,
+        fontStyle: 'italic', lineHeight: 13,
+        paddingHorizontal: Spacing.md, paddingBottom: Spacing.sm,
     },
 
     successionCallout: {
@@ -1163,4 +1378,18 @@ const styles = StyleSheet.create({
         fontSize: Typography.xl, fontWeight: Typography.bold, color: Colors.primaryGreen,
     },
     goodLuckSub: { fontSize: Typography.sm, color: Colors.mutedText },
+
+    disclaimer: {
+        marginBottom: Spacing.lg,
+        padding: Spacing.md,
+        backgroundColor: 'rgba(45,79,30,0.05)',
+        borderRadius: Spacing.sm,
+        borderLeftWidth: 3,
+        borderLeftColor: Colors.primaryGreen,
+    },
+    disclaimerText: {
+        fontSize: Typography.xs,
+        color: Colors.mutedText,
+        lineHeight: 18,
+    },
 });

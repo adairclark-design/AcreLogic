@@ -140,7 +140,10 @@ export default function LocationScreen({ navigation }) {
 
     return (
         <KeyboardAvoidingView
-            style={{ flex: 1 }}
+            style={[
+                { flex: 1, width: '100%' },
+                Platform.OS === 'web' && { minHeight: '100dvh' },
+            ]}
             behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         >
             <ImageBackground
@@ -232,7 +235,11 @@ export default function LocationScreen({ navigation }) {
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-    bg: { flex: 1 },
+    bg: {
+        flex: 1,
+        width: '100%',
+        ...Platform.select({ web: { minHeight: '100dvh' } }),
+    },
     scrollContent: {
         flexGrow: 1,
         paddingBottom: 40,

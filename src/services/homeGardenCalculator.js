@@ -103,14 +103,44 @@ export function calculatePlantsNeeded(crop, familySize, gardenProfile = null) {
         : Math.ceil(linearFeetNeeded / DEFAULTS.BED_LENGTH_FT);
 
     // Generate a human-readable range for expected yield
-    const yieldLow = Math.round(targetLbs * 0.8);
+    const yieldLow  = Math.round(targetLbs * 0.8);
     const yieldHigh = Math.round(targetLbs * 1.2);
 
     // ── Harvest style: precise language for each harvest pattern ──
     const CUT_AND_COME_AGAIN_CATEGORIES = new Set(['Greens', 'Herb']);
-    // Heading crops (broccoli, cabbage, cauliflower) produce one head then side shoots
-    const HEADING_CROPS = new Set(['broccoli_belstar','cauliflower_snowball','cabbage_storage',
-        'napa_cabbage','romanesco','brussels_sprouts','kohlrabi_kolibri']);
+
+    // Head weight map: avg lbs per marketable head, used to compute head counts in the UI
+    const HEAD_WEIGHTS = {
+        // Brassicas
+        'broccoli_belstar':         2.5,
+        'cauliflower_snowball':      2.0,
+        'cabbage_storage':          3.5,
+        'napa_cabbage':             3.0,
+        'romanesco':                2.5,
+        'brussels_sprouts':         0.05,  // per sprout (~50 sprouts per lb)
+        'kohlrabi_kolibri':         0.5,
+        'cabbage_red':              3.0,
+        'cabbage_savoy':            3.0,
+        'cabbage_early_jersey':     2.5,
+        // Others
+        'fennel_bronze':            0.5,
+        'celery_utah':              1.5,
+        'celeriac_monarch':         1.0,
+        'endive_escarole':          0.75,
+        'radicchio':                0.5,
+        'artichoke_primary':        0.5,   // per globe
+        'globe_artichoke_imperial': 0.5,
+        'globe_artichoke_violetto': 0.4,
+    };
+
+    // Heading crops (broccoli, cabbage, cauliflower etc.) — derived from HEAD_WEIGHTS
+    const HEADING_CROPS = new Set(Object.keys(HEAD_WEIGHTS));
+
+    // Head count: for heading crops, compute how many heads that yield represents
+    const headWeightLb  = HEAD_WEIGHTS[crop.id] ?? null;
+    const headCountLow  = headWeightLb != null ? Math.round(yieldLow  / headWeightLb) : null;
+    const headCountHigh = headWeightLb != null ? Math.round(yieldHigh / headWeightLb) : null;
+
     // Indeterminate fruiting crops — pick repeatedly all season
     const INDETERMINATE_CROPS = new Set(['tomato_heirloom_beefsteak','cherry_tomato_sungold',
         'pepper_sweet','pepper_jalapeño','hot_pepper_habanero','eggplant_ichiban',
@@ -142,27 +172,79 @@ export function calculatePlantsNeeded(crop, familySize, gardenProfile = null) {
         : null;
 
     // ── Calendar dates (only when gardenProfile is available) ──
-    let indoorSeedDate = null;
-    let directSowDate  = null;
-    let transplantDate = null;
+    let indoorSeedDate      = null;
+    let directSowDate       = null;
+    let transplantDate      = null;
+    let todayIndoorDate     = null;   // "if you started today" indoor seed date
+    let todayTransplantDate = null;   // "if you started today" transplant date
+    let todayDirectSowDate  = null;   // "if direct-sow, start date is today"
+    let isLateStart         = false;  // true when today-scenario is later than ideal
+    let lateStartCaveat     = null;   // short advisory message
+    // Raw ISO date strings for ActionCalendar sorting (null if no gardenProfile)
+    let indoorSeedDateRaw   = null;
+    let directSowDateRaw    = null;
+    let transplantDateRaw   = null;
+    let harvestStartDateRaw = null;   // sowDate/transplantDate + DTM days
+    let harvestEndDateRaw   = null;   // harvestStart + harvestWindowDays
     const lastFrost    = gardenProfile?.last_frost_date ?? null;
     const frostFreeDays = gardenProfile?.frost_free_days ?? null;
+    const todayStr = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
 
     if (lastFrost) {
         if (crop.seed_type === 'TP') {
             // Transplant crop: start seeds indoors X weeks before last frost
-            if (crop.seed_start_weeks_before_transplant) {
-                indoorSeedDate = formatDateDisplay(
-                    getSeedStartDate(lastFrost, crop.seed_start_weeks_before_transplant)
-                );
+            const weeksBeforeTP = crop.seed_start_weeks_before_transplant;
+            if (weeksBeforeTP) {
+                const rawIndoor = getSeedStartDate(lastFrost, weeksBeforeTP);
+                indoorSeedDate    = formatDateDisplay(rawIndoor);
+                indoorSeedDateRaw = typeof rawIndoor === 'string' ? rawIndoor : rawIndoor.toISOString().split('T')[0];
+                // "Today" scenario: if starting seeds today, transplant = today + (weeksBeforeTP × 7 days)
+                todayIndoorDate = formatDateDisplay(addDays(todayStr, 0));
+                const todayTPDate = addDays(todayStr, weeksBeforeTP * 7);
+                todayTransplantDate = formatDateDisplay(todayTPDate);
+                // Is today's scenario later than ideal?
+                const idealTPDate = addDays(lastFrost, crop.season === 'warm' ? 14 : 0);
+                isLateStart = todayTPDate > idealTPDate;
             }
             // Transplant date = last frost date (or +2 weeks for heat-lovers)
             const warmCrop = crop.season === 'warm';
-            transplantDate = formatDateDisplay(warmCrop ? addDays(lastFrost, 14) : lastFrost);
+            const rawTP = warmCrop ? addDays(lastFrost, 14) : lastFrost;
+            transplantDate    = formatDateDisplay(rawTP);
+            transplantDateRaw = typeof rawTP === 'string' ? rawTP : rawTP;
+            // Harvest window starts DTM days after transplant
+            if (crop.dtm) {
+                harvestStartDateRaw = addDays(transplantDateRaw, crop.dtm);
+                if (crop.harvest_window_days) {
+                    harvestEndDateRaw = addDays(harvestStartDateRaw, crop.harvest_window_days);
+                }
+            }
         } else {
             // Direct sow crop
             const warmCrop = crop.season === 'warm';
-            directSowDate = formatDateDisplay(warmCrop ? addDays(lastFrost, 0) : addDays(lastFrost, -28));
+            const rawDS = warmCrop ? addDays(lastFrost, 0) : addDays(lastFrost, -28);
+            directSowDate    = formatDateDisplay(rawDS);
+            directSowDateRaw = typeof rawDS === 'string' ? rawDS : rawDS;
+            // "Today" scenario for direct sow: sow today
+            todayDirectSowDate = formatDateDisplay(addDays(todayStr, 0));
+            const idealDS = warmCrop ? new Date(lastFrost) : addDays(lastFrost, -28);
+            isLateStart = new Date(todayStr) > new Date(idealDS);
+            // Harvest window starts DTM days after direct sow
+            if (crop.dtm) {
+                harvestStartDateRaw = addDays(directSowDateRaw, crop.dtm);
+                if (crop.harvest_window_days) {
+                    harvestEndDateRaw = addDays(harvestStartDateRaw, crop.harvest_window_days);
+                }
+            }
+        }
+    }
+
+    // Late-start caveat — triggered if today's dates are past the ideal window
+    if (isLateStart) {
+        const isTimePressed = crop.min_frost_free_days >= 90 || crop.season === 'warm' || crop.dtm >= 80;
+        if (isTimePressed) {
+            lateStartCaveat = 'Starting later may reduce yield or prevent full ripening — still worth trying.';
+        } else {
+            lateStartCaveat = 'Starting later than ideal is fine for this crop — expect a shifted harvest.';
         }
     }
 
@@ -205,11 +287,27 @@ export function calculatePlantsNeeded(crop, familySize, gardenProfile = null) {
         indoorSeedDate,
         directSowDate,
         transplantDate,
+        // "If you started today" scenario dates
+        todayIndoorDate,
+        todayTransplantDate,
+        todayDirectSowDate,
+        isLateStart,
+        lateStartCaveat,
+        // Raw ISO date strings for ActionCalendar sorting/grouping
+        indoorSeedDateRaw,
+        directSowDateRaw,
+        transplantDateRaw,
+        harvestStartDateRaw,
+        harvestEndDateRaw,
 
         // Yield expectation range
         yieldLow,
         yieldHigh,
         yieldUnit: consumption.unit_label,
+        // Head count (non-null for heading crops like broccoli, cabbage, cauliflower)
+        headCountLow,
+        headCountHigh,
+        headWeightLb,
         consumptionNotes: consumption.notes,
 
         // Report string
@@ -433,6 +531,7 @@ export function calculateBedsInSpace({
     // Areas
     const totalSpaceSqFt  = spaceLengthFt * spaceWidthFt;
     const bedAreaSqFt     = totalBeds * bedLengthFt * bedWidthFt;
+    const pathwayAreaSqFt = totalSpaceSqFt - bedAreaSqFt;   // ← was missing, caused ReferenceError
     const efficiency      = totalSpaceSqFt > 0
         ? +(bedAreaSqFt / totalSpaceSqFt * 100).toFixed(1) : 0;
 
@@ -450,6 +549,14 @@ export function calculateBedsInSpace({
         bedWidthFt,
         pathwayWidthFt,
         wheelbarrowPathFt,
+
+        // Access path metadata (needed by BedLayoutVisual)
+        nsPathwayCount: _nsCount,
+        ewPathwayCount: _ewCount,
+        mainPathWidthFt: _mainWidth,
+        equidistant,
+        colGroups,
+        rowGroups,
 
         totalSpaceSqFt,
         bedAreaSqFt,

@@ -426,13 +426,32 @@ export function updateBlockGridPosition(blockId, col, row) {
 }
 
 // ─── Per-block bed succession storage ─────────────────────────────────────────
+// New shape (v2): { [bedNum]: { successions: [...], shelterType: 'none'|'rowCover'|'greenhouse' } }
+// Old shape (v1): { [bedNum]: [...successions] }  ← auto-migrated on load
 export function loadBlockBeds(blockId) {
     try {
         const raw = localStorage.getItem(`acrelogic_block_beds_${blockId}`);
-        return raw ? JSON.parse(raw) : {};
+        if (!raw) return {};
+        const stored = JSON.parse(raw);
+        const migrated = {};
+        for (const [bedNum, value] of Object.entries(stored)) {
+            if (Array.isArray(value)) {
+                migrated[bedNum] = { successions: value, shelterType: 'none' };
+            } else if (value && typeof value === 'object') {
+                migrated[bedNum] = {
+                    successions: value.successions ?? [],
+                    shelterType: value.shelterType ?? 'none',
+                };
+            }
+        }
+        return migrated;
     } catch { return {}; }
 }
 
-export function saveBlockBeds(blockId, bedSuccessions) {
-    localStorage.setItem(`acrelogic_block_beds_${blockId}`, JSON.stringify(bedSuccessions));
+export function saveBlockBeds(blockId, bedData) {
+    try {
+        localStorage.setItem(`acrelogic_block_beds_${blockId}`, JSON.stringify(bedData));
+    } catch (e) {
+        console.warn('[Persistence] saveBlockBeds failed:', e);
+    }
 }

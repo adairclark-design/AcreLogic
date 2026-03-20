@@ -214,12 +214,7 @@ export default function FarmDesignerScreen({ navigation, route }) {
                 >
                     <Text style={styles.addBtnText}>🛰 Satellite</Text>
                 </TouchableOpacity>
-                <TouchableOpacity
-                    style={[styles.addBtn, { marginRight: 4 }]}
-                    onPress={() => navigation.navigate('FarmCanvas', { farmProfile })}
-                >
-                    <Text style={styles.addBtnText}>🗺 Canvas</Text>
-                </TouchableOpacity>
+
                 <TouchableOpacity
                     style={styles.addBtn}
                     onPress={() => navigation.navigate('BlockSetupWizard', { farmProfile })}

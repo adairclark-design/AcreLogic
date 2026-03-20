@@ -353,7 +353,7 @@ async function scoreCrop(crop, previousCrop, successions, farmProfile, nextStart
  * @param {object} farmProfile
  * @returns {Array} Array of succession assignments (slot 2, 3, 4…)
  */
-export async function autoGenerateSuccessions(primaryAssignment, farmProfile, farmCropCount = {}) {
+export async function autoGenerateSuccessions(primaryAssignment, farmProfile, farmCropCount = {}, maxRepeat = 9) {
     const successions = [primaryAssignment];
     const maxSlots = 4; // Maximum successions per bed
 
@@ -377,15 +377,19 @@ export async function autoGenerateSuccessions(primaryAssignment, farmProfile, fa
 
         if (remainingDays <= 10) break;
 
-        const candidates = await getSuccessionCandidatesRanked(
+        const rawCandidates = await getSuccessionCandidatesRanked(
             { successions },
             farmProfile,
             {
-                maxResults: 8,
+                maxResults: 24, // fetch more so hard-filter still leaves good options
                 includeCovers: remainingDays <= 45,
                 farmCropCount: localCount, // pass farm-wide counts so slot picks avoid repeats
             }
         );
+
+        // Hard-cap: respect maxRepeat — same rule applied by autoFillRemainingBeds at the bed level
+        // This prevents Pure Diversity from placing the same crop in successive slots
+        const candidates = rawCandidates.filter(c => (localCount[c.crop.id] ?? 0) < maxRepeat);
 
         if (candidates.length === 0) break;
 
@@ -426,9 +430,31 @@ export async function autoGenerateSuccessions(primaryAssignment, farmProfile, fa
  * @param {object} farmProfile
  * @returns {object} { [bedNumber]: suggestedSuccessions }
  */
-export async function autoFillRemainingBeds(filledBeds, emptyBedNumbers, farmProfile, strategyId) {
+export async function autoFillRemainingBeds(filledBeds, emptyBedNumbers, farmProfile, strategyId, filters = {}) {
     // Resolve strategy
     const strategy = AUTOFILL_STRATEGIES.find(s => s.id === strategyId) ?? DEFAULT_STRATEGY;
+
+    // ── Category / DTM filter (from UI toggles) ────────────────────────────────
+    // Maps toggle keys → which crop categories/dtm ranges to EXCLUDE when toggle is OFF.
+    const VEGETABLE_CATEGORIES = new Set(['Brassica', 'Allium', 'Cucurbit', 'Greens', 'Legume', 'Nightshade', 'Root', 'Tuber', 'Herb', 'Grain']);
+    const FLOWER_CATEGORIES    = new Set(['Flower']);
+    const SPECIALTY_CATEGORIES = new Set(['Specialty']);
+    const BERRY_CATEGORIES     = new Set(['Fruit']);
+    const SHORT_DTM_MAX = 60; // ≤ 60 days = "short"
+
+    function cropPassesFilters(crop) {
+        const cat = crop.category ?? '';
+        const dtm = crop.dtm ?? 0;
+        // Cover crops always excluded from this filter (they have feed_class cover_crop)
+        if (crop.feed_class === 'cover_crop') return true;
+        if (filters.flowers   === false && FLOWER_CATEGORIES.has(cat))    return false;
+        if (filters.specialty === false && SPECIALTY_CATEGORIES.has(cat)) return false;
+        if (filters.berries   === false && BERRY_CATEGORIES.has(cat))     return false;
+        if (filters.vegetables === false && VEGETABLE_CATEGORIES.has(cat)) return false;
+        if (filters.shortDtm  === false && dtm > 0 && dtm <= SHORT_DTM_MAX) return false;
+        if (filters.longDtm   === false && dtm > SHORT_DTM_MAX)             return false;
+        return true;
+    }
 
     // Tally ALL crops AND families already on the farm (every succession slot, not just primary)
     const farmCropCount = {};
@@ -452,7 +478,7 @@ export async function autoFillRemainingBeds(filledBeds, emptyBedNumbers, farmPro
             { successions: [] },
             farmProfile,
             {
-                maxResults: 16,
+                maxResults: 32, // fetch more so filter still leaves good options
                 includeCovers: false,
                 strategy: strategy.id,
                 farmUsedCategories,
@@ -460,8 +486,10 @@ export async function autoFillRemainingBeds(filledBeds, emptyBedNumbers, farmPro
             }
         );
 
-        // Filter out over-represented crops (hard cap by strategy.maxRepeat)
-        const filtered = candidates.filter(c => (farmCropCount[c.crop.id] ?? 0) < maxRepeat);
+        // Apply user category/DTM filters, then hard-cap by maxRepeat
+        const filtered = candidates
+            .filter(c => cropPassesFilters(c.crop))
+            .filter(c => (farmCropCount[c.crop.id] ?? 0) < maxRepeat);
         const best = filtered[0];
 
         if (!best) {
@@ -485,8 +513,8 @@ export async function autoFillRemainingBeds(filledBeds, emptyBedNumbers, farmPro
             is_auto_generated: true,
         };
 
-        // Generate successive slots — pass current farmCropCount so they also avoid repeating
-        const autoSuccessions = await autoGenerateSuccessions(primaryAssignment, farmProfile, { ...farmCropCount });
+        // Generate successive slots — pass current farmCropCount and maxRepeat so they also avoid repeating
+        const autoSuccessions = await autoGenerateSuccessions(primaryAssignment, farmProfile, { ...farmCropCount }, maxRepeat);
 
         // Update farmCropCount for every crop placed in successive slots
         for (const s of autoSuccessions) {
