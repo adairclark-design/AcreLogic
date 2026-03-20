@@ -1070,33 +1070,84 @@ export default function BedWorkspaceScreen({ navigation, route }) {
 
 
     const handleAutoFill = useCallback(async (strategyId, filters) => {
-        // Only auto-fill beds that have NO manually-placed crops.
-        // A bed is "manually filled" if it contains any succession with is_auto_generated !== true.
-        // This prevents Auto-Fill from overwriting the user's intentional picks.
+        // Split beds into three buckets:
+        //  (A) empty          → full auto-fill (pick primary + generate chain)
+        //  (B) partial/manual → append auto-successions after the last existing crop
+        //  (C) fully-planned  → skip entirely (don't overwrite user's complete plan)
         const hasManualCrops = (n) => (bedSuccessions[n] ?? []).some(s => !s.is_auto_generated);
-        const bedsToFill = Array.from({ length: NUM_BEDS }, (_, i) => i + 1)
-            .filter(n => !hasManualCrops(n));
 
-        if (bedsToFill.length === 0) return;
+        const emptyBedsToFill = Array.from({ length: NUM_BEDS }, (_, i) => i + 1)
+            .filter(n => (bedSuccessions[n] ?? []).length === 0);
 
-        // Snapshot current state so user can revert if they don't like the result
+        const partialBedsToComplete = Array.from({ length: NUM_BEDS }, (_, i) => i + 1)
+            .filter(n => hasManualCrops(n)); // has manual crops → complete the rest
+
+        if (emptyBedsToFill.length === 0 && partialBedsToComplete.length === 0) return;
+
+        // Snapshot so user can revert
         setPreAutoFillSnapshot({ ...bedSuccessions });
 
-        const profile = farmProfile ?? { frost_free_days: 170, last_frost_date: `${new Date().getFullYear()}-04-15`, first_frost_date: `${new Date().getFullYear()}-10-15`, lat: 45.5 };
+        const profile = farmProfile ?? {
+            frost_free_days: 170,
+            last_frost_date:  `${new Date().getFullYear()}-04-15`,
+            first_frost_date: `${new Date().getFullYear()}-10-15`,
+            lat: 45.5,
+        };
 
         const { autoFillRemainingBeds } = await import('../services/successionEngine');
-        // "filledBeds" = all beds NOT in bedsToFill (includes manually-filled beds and
-        // beds with 3+ auto-generated crops). These seed farm-wide diversity counting.
-        const filledBeds = Array.from({ length: NUM_BEDS }, (_, i) => i + 1)
-            .filter(n => !bedsToFill.includes(n))
+
+        // Beds that already have a full plan (not empty, not partial)
+        const alreadyFullBeds = Array.from({ length: NUM_BEDS }, (_, i) => i + 1)
+            .filter(n => !emptyBedsToFill.includes(n) && !partialBedsToComplete.includes(n))
             .map(n => ({ bed_number: n, successions: bedSuccessions[n] ?? [] }));
 
-        const autoFilled = await autoFillRemainingBeds(filledBeds, bedsToFill, profile, strategyId, filters ?? autoFillFilters);
+        // ── Step 1: auto-fill empty beds (existing logic) ────────────────────
+        const autoFilled = await autoFillRemainingBeds(
+            alreadyFullBeds, emptyBedsToFill, profile, strategyId, filters ?? autoFillFilters
+        );
 
         const updatedSuccessions = { ...bedSuccessions };
         for (const [bedNum, succs] of Object.entries(autoFilled)) {
             updatedSuccessions[bedNum] = succs;
         }
+
+        // ── Step 2: complete partial/manual beds ─────────────────────────────
+        // Build farm-wide crop count from everything placed so far (including step 1)
+        const farmCropCount = {};
+        for (const [, succs] of Object.entries(updatedSuccessions)) {
+            for (const s of succs ?? []) {
+                if (s.crop_id) farmCropCount[s.crop_id] = (farmCropCount[s.crop_id] ?? 0) + 1;
+            }
+        }
+
+        const strat = AUTOFILL_STRATEGIES.find(s => s.id === strategyId) ?? AUTOFILL_STRATEGIES[2];
+        const maxRepeat = strat.maxRepeat ?? 3;
+
+        for (const bedNum of partialBedsToComplete) {
+            const existingSuccs = bedSuccessions[bedNum] ?? [];
+            const lastSucc = existingSuccs[existingSuccs.length - 1];
+            if (!lastSucc?.end_date) continue;
+
+            // Check if there's meaningful season window remaining
+            const daysLeft = Math.round(
+                (new Date(profile.first_frost_date) - new Date(lastSucc.end_date)) / 86400000
+            );
+            if (daysLeft <= 10) continue; // effectively full — skip
+
+            // Generate successions that follow the last crop in this bed
+            const addedSuccessions = await autoGenerateSuccessions(
+                lastSucc, profile, { ...farmCropCount }, maxRepeat
+            );
+
+            if (addedSuccessions.length > 0) {
+                updatedSuccessions[bedNum] = [...existingSuccs, ...addedSuccessions];
+                // Update farm count so subsequent partial beds avoid the same crops
+                for (const s of addedSuccessions) {
+                    if (s.crop_id) farmCropCount[s.crop_id] = (farmCropCount[s.crop_id] ?? 0) + 1;
+                }
+            }
+        }
+
         setBedSuccessions(updatedSuccessions);
         setShowStrategyPicker(false);
     }, [bedSuccessions, farmProfile, autoFillFilters]);
