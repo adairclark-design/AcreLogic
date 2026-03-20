@@ -1035,6 +1035,8 @@ function BedLayoutCanvas({ beds, selectedIds, onBedDrop, onBedClick, width, heig
         function onDown(e) {
             const pos = toCanvas(e);
             clickStart = { x: pos.x, y: pos.y, t: Date.now() };
+            // Steal focus from sidebar inputs so keyboard Delete/arrow shortcuts work
+            canvasRef.current?.focus();
             const st = stateRef.current;
             const hit = hitTest(pos.x, pos.y);
             if (hit) {
@@ -1142,7 +1144,8 @@ function BedLayoutCanvas({ beds, selectedIds, onBedDrop, onBedClick, width, heig
             ref={canvasRef}
             width={width}
             height={height}
-            style={{ display: 'block', cursor: 'default' }}
+            tabIndex={0}
+            style={{ display: 'block', cursor: 'default', outline: 'none' }}
         />
     );
 }
