@@ -17,7 +17,7 @@ import {
 import { Colors, Typography, Spacing, Radius, Shadows } from '../theme';
 import { getSuccessionCandidatesRanked, autoGenerateSuccessions, AUTOFILL_STRATEGIES } from '../services/successionEngine';
 import { saveBedAssignment, getBedSuccessions, getCropById } from '../services/database';
-import { saveBedSuccessions, saveSeasonSnapshot, getPriorYearBedCrops, loadRotationHistory, loadSavedPlan } from '../services/persistence';
+import { saveBedSuccessions, saveSeasonSnapshot, getPriorYearBedCrops, loadRotationHistory, loadSavedPlan, saveFarmProfile } from '../services/persistence';
 import { checkBedCompanions, checkBlockNeighborWarnings } from '../services/companionService';
 import cropData from '../data/crops.json';
 import CompanionAlertBanner from '../components/CompanionAlertBanner';
@@ -772,14 +772,30 @@ export default function BedWorkspaceScreen({ navigation, route }) {
     const [noteBed, setNoteBed] = useState(null); // bed number being noted (null = modal closed)
     // Restore from localStorage if passed via Continue flow (HeroScreen restore)
     const [bedSuccessions, setBedSuccessions] = useState(() => {
-        // Prefer fully-hydrated params (passed by navigation)
+        // Priority 1: explicit bedSuccessions in route params (passed by HeroScreen restore)
         const fromParams = route?.params?.bedSuccessions;
         if (fromParams && Object.keys(fromParams).length > 0) return fromParams;
-        // Fall back to localStorage — covers the Crops ↔ BedWorkspace back-and-forth
-        // where the navigator pushes a fresh screen without re-supplying the data.
-        // bedSuccessions are auto-saved on every change, so this is always up to date.
+
+        // Priority 2: localStorage — but only if this is the SAME farm/location.
+        // Different frost dates = different zip/location = new session → start fresh.
         const saved = loadSavedPlan();
-        return saved?.bedSuccessions ?? {};
+        if (!saved?.bedSuccessions || Object.keys(saved.bedSuccessions).length === 0) return {};
+
+        const currentProfile = route?.params?.farmProfile;
+        const savedProfile   = saved?.farmProfile;
+
+        if (currentProfile && savedProfile) {
+            // Frost dates are the most reliable farm identifier (derived from location)
+            const sameLastFrost  = currentProfile.last_frost_date  === savedProfile.last_frost_date;
+            const sameFirstFrost = currentProfile.first_frost_date === savedProfile.first_frost_date;
+            if (!sameLastFrost || !sameFirstFrost) {
+                // New farm location — clear stale bed data
+                return {};
+            }
+        }
+
+        // Same farm → restore beds (covers Crops ↔ BedWorkspace navigation)
+        return saved.bedSuccessions;
     });
     // ── Per-bed shelter type (Phase 2) ────────────────────────────────────────
     // 'none' | 'rowCover' | 'greenhouse'  — persisted in state, saved alongside successions
@@ -827,11 +843,13 @@ export default function BedWorkspaceScreen({ navigation, route }) {
     const seasonStart = farmProfile?.last_frost_date ?? null;
     const seasonEnd = farmProfile?.first_frost_date ?? null;
 
-    // Auto-save bedSuccessions to localStorage on every change (web only)
-    // Also update the season snapshot so crop rotation history is always current.
+    // Auto-save bedSuccessions + farmProfile to localStorage on every change (web only)
+    // farmProfile is saved alongside so future sessions can detect a location change
+    // and avoid restoring stale bed data from a different farm.
     useEffect(() => {
         saveBedSuccessions(bedSuccessions);
         saveSeasonSnapshot(bedSuccessions);
+        if (farmProfile) saveFarmProfile(farmProfile);
         setRotationHistory(loadRotationHistory()); // re-read so bed cards update
     }, [bedSuccessions]);
 
