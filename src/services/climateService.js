@@ -54,13 +54,12 @@ export function getProfileFromZone(zone) {
 // ── Replace with your deployed Worker URL after `wrangler deploy` ────────────
 const WORKER_BASE_URL = 'https://acrelogic-climate-worker.adair-clark.workers.dev';
 
-// Local fallback data for Oregon (used in dev / offline mode)
 const PORTLAND_OR_FALLBACK = {
     lat: 45.5231,
     lon: -122.6765,
-    frost_free_days: 170,
-    last_frost_date: `${new Date().getFullYear()}-04-15`,
-    first_frost_date: `${new Date().getFullYear()}-10-15`,
+    frost_free_days: 210,          // Willamette Valley average (zone 8b) — ~Apr 2 to Oct 30
+    last_frost_date: `${new Date().getFullYear()}-04-02`,
+    first_frost_date: `${new Date().getFullYear()}-10-30`,
     usda_zone: '8b',
     soil_type: 'Silty Loam',
     elevation_ft: 50,
@@ -95,34 +94,35 @@ export async function fetchFarmProfile(address) {
         }
     } catch (_) { }
 
-    // Fetch from Worker
+    // Fetch from Worker — in its own try/catch so storage failures can't discard good data
+    let normalized = null;
     try {
         const url = `${WORKER_BASE_URL}/farm-profile?address=${encodeURIComponent(address)}`;
-        const res = await fetch(url, { timeout: 12000 });
-
+        const res = await fetch(url);   // Note: timeout option is not supported by fetch API
         if (!res.ok) throw new Error(`Worker returned ${res.status}`);
         const profile = await res.json();
-
-        // Normalize and validate
-        const normalized = normalizeFarmProfile(profile, address);
-
-        // Cache to AsyncStorage
-        await AsyncStorage.setItem(cacheKey, JSON.stringify(normalized));
-
-        return normalized;
+        normalized = normalizeFarmProfile(profile, address);
     } catch (err) {
         console.warn('[ClimateService] Worker fetch failed:', err.message);
-
-        // Try to return stale cache if any
-        try {
-            const cached = await AsyncStorage.getItem(cacheKey);
-            if (cached) return { ...JSON.parse(cached), _stale: true };
-        } catch (_) { }
-
-        // Last resort: Portland, OR fallback (with warning)
-        console.warn('[ClimateService] Returning static fallback data');
-        return PORTLAND_OR_FALLBACK;
     }
+
+    // If we got a good result, cache it separately so storage failure never discards it
+    if (normalized) {
+        try {
+            await AsyncStorage.setItem(cacheKey, JSON.stringify(normalized));
+        } catch (_) { }
+        return normalized;
+    }
+
+    // Try stale cache as a fallback before returning the region default
+    try {
+        const cached = await AsyncStorage.getItem(cacheKey);
+        if (cached) return { ...JSON.parse(cached), _stale: true };
+    } catch (_) { }
+
+    // Last resort: Portland, OR / Willamette Valley region defaults
+    console.warn('[ClimateService] Returning static fallback data');
+    return PORTLAND_OR_FALLBACK;
 }
 
 /**
