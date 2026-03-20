@@ -772,29 +772,33 @@ export default function BedWorkspaceScreen({ navigation, route }) {
     const [noteBed, setNoteBed] = useState(null); // bed number being noted (null = modal closed)
     // Restore from localStorage if passed via Continue flow (HeroScreen restore)
     const [bedSuccessions, setBedSuccessions] = useState(() => {
-        // Priority 1: explicit bedSuccessions in route params (passed by HeroScreen restore)
+        // Priority 1: explicit bedSuccessions in route params.
+        // This covers both HeroScreen restore AND same-session Crops↔BedWorkspace navigation
+        // (bedSuccessions is now threaded through VegetableGrid round-trip).
         const fromParams = route?.params?.bedSuccessions;
         if (fromParams && Object.keys(fromParams).length > 0) return fromParams;
 
-        // Priority 2: localStorage — but only if this is the SAME farm/location.
-        // Different frost dates = different zip/location = new session → start fresh.
+        // Priority 2: localStorage — only when we can CONFIRM it's the same farm.
+        // We require a saved farmProfile to compare against. If it's absent (pre-fix
+        // sessions or first-ever visit), we can't verify the farm identity → start fresh.
         const saved = loadSavedPlan();
         if (!saved?.bedSuccessions || Object.keys(saved.bedSuccessions).length === 0) return {};
 
         const currentProfile = route?.params?.farmProfile;
         const savedProfile   = saved?.farmProfile;
 
-        if (currentProfile && savedProfile) {
-            // Frost dates are the most reliable farm identifier (derived from location)
+        // Without a savedProfile we cannot confirm same-farm → always start fresh.
+        // (savedProfile is written on first bed change, so absent = previous session never filled beds)
+        if (!savedProfile) return {};
+
+        // With both profiles available, compare frost dates (derived from zip/location)
+        if (currentProfile) {
             const sameLastFrost  = currentProfile.last_frost_date  === savedProfile.last_frost_date;
             const sameFirstFrost = currentProfile.first_frost_date === savedProfile.first_frost_date;
-            if (!sameLastFrost || !sameFirstFrost) {
-                // New farm location — clear stale bed data
-                return {};
-            }
+            if (!sameLastFrost || !sameFirstFrost) return {}; // new farm → clear
         }
 
-        // Same farm → restore beds (covers Crops ↔ BedWorkspace navigation)
+        // Same farm confirmed → restore beds
         return saved.bedSuccessions;
     });
     // ── Per-bed shelter type (Phase 2) ────────────────────────────────────────
@@ -1273,7 +1277,11 @@ export default function BedWorkspaceScreen({ navigation, route }) {
                     </TouchableOpacity>
                     <TouchableOpacity
                         style={styles.viewToggleBtn}
-                        onPress={() => navigation.navigate('VegetableGrid', { farmProfile, planId, selectedCropIds, fromWorkspace: true })}
+                        onPress={() => navigation.navigate('VegetableGrid', {
+                            farmProfile, planId, selectedCropIds,
+                            bedSuccessions, // thread through so Plan Crops returns with same beds
+                            fromWorkspace: true,
+                        })}
                     >
                         <Text style={styles.viewToggleBtnText}>✏️ Crops</Text>
                     </TouchableOpacity>

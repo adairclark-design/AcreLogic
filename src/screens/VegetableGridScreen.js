@@ -7,7 +7,6 @@ import {
     TouchableOpacity,
     useWindowDimensions,
     Animated,
-    ScrollView,
     FlatList,
     Modal,
     Platform,
@@ -17,26 +16,31 @@ import {
 import { Colors, Typography, Spacing, Radius, Shadows } from '../theme';
 import cropDbRaw from '../data/crops.json';
 import CROP_IMAGES from '../data/cropImages';
+import MegaMenuBar from '../components/MegaMenuBar';
+import { formatCropDisplayName } from '../utils/cropDisplay';
 
 // ─── Responsive breakpoints ───────────────────────────────────────────────────
 function getBreakpoint(width) {
-    if (width < 600) {
-        return { numColumns: 3, imageHeight: 100, nameFontSize: 12 };
+    if (width < 480) {
+        return { numColumns: 3, imageHeight: 80, nameFontSize: 10 };
+    } else if (width < 768) {
+        return { numColumns: 4, imageHeight: 72, nameFontSize: 10 };
     } else if (width < 1024) {
-        return { numColumns: 4, imageHeight: 110, nameFontSize: 12 };
-    } else if (width < 1400) {
-        return { numColumns: 5, imageHeight: 110, nameFontSize: 13 };
-    } else if (width < 1800) {
-        return { numColumns: 6, imageHeight: 100, nameFontSize: 12 };
+        return { numColumns: 6, imageHeight: 68, nameFontSize: 10 };
+    } else if (width < 1280) {
+        return { numColumns: 8, imageHeight: 60, nameFontSize: 9 };
+    } else if (width < 1600) {
+        return { numColumns: 10, imageHeight: 54, nameFontSize: 9 };
+    } else if (width < 1920) {
+        return { numColumns: 11, imageHeight: 50, nameFontSize: 9 };
     } else {
-        return { numColumns: 7, imageHeight: 90, nameFontSize: 12 };
+        return { numColumns: 12, imageHeight: 48, nameFontSize: 9 };
     }
 }
 
 // ─── Crop Data — sourced from crops.json ─────────────────────────────────────
-// Exclude Cover Crops from the selection screen (they're auto-managed by the planner)
+// All crops including cover crops — visible under the "Cover Crops" MegaMenuBar tab
 const CROPS = cropDbRaw.crops
-    .filter(c => c.category !== 'Cover Crop')
     .map(c => ({
         id: c.id,
         name: c.name,
@@ -51,41 +55,6 @@ const CROPS = cropDbRaw.crops
         feedClass: c.feed_class,
     }))
     .sort((a, b) => a.name.localeCompare(b.name));
-
-const CATEGORIES = [
-    'All',
-    'Vegetables',
-    'Fruits & Melons',
-    'Tomatoes',
-    'Peppers',
-    'Greens',
-    'Brassica',
-    'Root & Tuber',
-    'Allium',
-    'Beans & Peas',
-    'Herbs',
-    'Squash',
-    'Cucumbers',
-    'Melons',
-    'Flowers',
-    'Grains',
-    'Cover Crops',
-    'Specialty',
-    'Nightshade',
-    'Fruits & Berries',
-];
-
-// Super-category mappings
-const VEGETABLE_CATEGORIES   = new Set(['Greens', 'Brassica', 'Root', 'Tuber', 'Allium', 'Legume']);
-const FRUIT_MELON_CATEGORIES = new Set(['Cucurbit', 'Nightshade', 'Fruit']);
-const GRAIN_CATEGORIES       = new Set(['Grain']);
-const COVER_CROP_CATEGORIES  = new Set(['Cover Crop']);
-const SQUASH_IDS_PATTERN     = ['squash', 'pumpkin', 'zucchini'];
-const CUCUMBER_IDS_PATTERN   = ['cucumber'];
-const MELON_IDS_PATTERN      = ['melon', 'watermelon', 'cantaloupe'];
-const TOMATO_IDS_PATTERN     = ['tomato', 'tomatillo', 'ground_cherry'];
-const PEPPER_IDS_PATTERN     = ['pepper'];
-
 
 // ─── Frequency tracking (localStorage) ───────────────────────────────────────
 const FREQ_KEY = 'acrelogic_crop_frequency';
@@ -156,13 +125,36 @@ const CropCard = ({ crop, selected, onPress, onLongPress, cardWidth }) => {
                     </View>
                 }
 
-                {/* Crop name only — no badge/meta */}
                 <Text
                     style={[styles.cropName, selected && styles.cropNameChosen]}
-                    numberOfLines={1}
+                    numberOfLines={2}
                 >
-                    {crop.name}
+                    {formatCropDisplayName(crop.name, crop.variety)}
                 </Text>
+
+                {/* ── Quick-scan data badges ───────────────────────────────── */}
+                <View style={styles.cropBadgeRow}>
+                    {crop.dtm !== '—' && (
+                        <View style={styles.dtmPill}>
+                            <Text style={styles.dtmPillText}>{crop.dtm}</Text>
+                        </View>
+                    )}
+                    {crop.season === 'cool' && (
+                        <View style={[styles.seasonPill, styles.seasonPillCool]}>
+                            <Text style={styles.seasonPillText}>❄️ Cool</Text>
+                        </View>
+                    )}
+                    {crop.season === 'warm' && (
+                        <View style={[styles.seasonPill, styles.seasonPillWarm]}>
+                            <Text style={styles.seasonPillText}>☀️ Warm</Text>
+                        </View>
+                    )}
+                    {crop.type && (
+                        <View style={styles.typePill}>
+                            <Text style={styles.typePillText}>{crop.type}</Text>
+                        </View>
+                    )}
+                </View>
 
                 {/* Selected overlay */}
                 {selected && (
@@ -183,8 +175,8 @@ export default function VegetableGridScreen({ navigation, route }) {
     // Restore previously selected crops when returning from workspace (back nav)
     const restoredIds = route?.params?.selectedCropIds ?? [];
     const [selectedCrops, setSelectedCrops] = useState(() => new Set(restoredIds));
-    const [activeCategory, setActiveCategory] = useState('All');
-    const [contextMenuCrop, setContextMenuCrop] = useState(null); // crop shown in remove menu
+    const [filterFn, setFilterFn]           = useState(() => () => true);  // driven by MegaMenuBar
+    const [contextMenuCrop, setContextMenuCrop] = useState(null);
     const [searchQuery, setSearchQuery] = useState('');
 
     const flatListRef = useRef(null);
@@ -220,37 +212,12 @@ export default function VegetableGridScreen({ navigation, route }) {
         setContextMenuCrop(null);
     };
 
-    const baseFiltered = (() => {
-        const idMatch = (patterns) => CROPS.filter(c => patterns.some(p => c.id.includes(p)));
-        switch (activeCategory) {
-            case 'All':           return CROPS;
-            case 'Vegetables':    return CROPS.filter(c => VEGETABLE_CATEGORIES.has(c.category));
-            case 'Fruits & Melons': return CROPS.filter(c => FRUIT_MELON_CATEGORIES.has(c.category));
-            case 'Tomatoes':      return idMatch(TOMATO_IDS_PATTERN);
-            case 'Peppers':       return idMatch(PEPPER_IDS_PATTERN);
-            case 'Greens':        return CROPS.filter(c => c.category === 'Greens');
-            case 'Brassica':      return CROPS.filter(c => c.category === 'Brassica');
-            case 'Root & Tuber':  return CROPS.filter(c => c.category === 'Root' || c.category === 'Tuber');
-            case 'Allium':        return CROPS.filter(c => c.category === 'Allium');
-            case 'Beans & Peas':  return CROPS.filter(c => c.category === 'Legume');
-            case 'Herbs':         return CROPS.filter(c => c.category === 'Herb');
-            case 'Squash':        return idMatch(SQUASH_IDS_PATTERN);
-            case 'Cucumbers':     return idMatch(CUCUMBER_IDS_PATTERN);
-            case 'Melons':        return idMatch(MELON_IDS_PATTERN);
-            case 'Flowers':       return CROPS.filter(c => c.category === 'Flower');
-            case 'Grains':        return CROPS.filter(c => GRAIN_CATEGORIES.has(c.category));
-            case 'Cover Crops':   return CROPS.filter(c => COVER_CROP_CATEGORIES.has(c.category));
-            case 'Specialty':     return CROPS.filter(c => c.category === 'Specialty');
-            case 'Nightshade':    return CROPS.filter(c => c.category === 'Nightshade');
-            case 'Fruits & Berries': return CROPS.filter(c => c.category === 'Fruit');
-            default:              return CROPS.filter(c => c.category === activeCategory);
-        }
-    })().filter(c => !searchQuery.trim() || c.name.toLowerCase().includes(searchQuery.trim().toLowerCase()) || (c.variety ?? '').toLowerCase().includes(searchQuery.trim().toLowerCase()));
-
-
-    // Stable frequency-sorted list — never reorders when you tap, so the grid
-    // doesn't jump. Checkmark overlay shows what's selected in-place.
-    const filteredCrops = baseFiltered
+    const filteredCrops = CROPS
+        .filter(filterFn)
+        .filter(c => !searchQuery.trim() ||
+            c.name.toLowerCase().includes(searchQuery.trim().toLowerCase()) ||
+            (c.variety ?? '').toLowerCase().includes(searchQuery.trim().toLowerCase())
+        )
         .sort((a, b) => (cropFrequency[b.id] ?? 0) - (cropFrequency[a.id] ?? 0) || a.name.localeCompare(b.name));
 
     const cardWidth = (width - Spacing.lg * 2 - Spacing.sm * (numColumns - 1)) / numColumns;
@@ -278,25 +245,10 @@ export default function VegetableGridScreen({ navigation, route }) {
                 Tap crops to add them to your planning queue. Seeds will populate your beds.
             </Text>
 
-            {/* Category Filters */}
-            <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                style={styles.filtersRow}
-                contentContainerStyle={styles.filtersContent}
-            >
-                {CATEGORIES.map((cat) => (
-                    <TouchableOpacity
-                        key={cat}
-                        style={[styles.filterChip, activeCategory === cat && styles.filterChipActive]}
-                        onPress={() => setActiveCategory(cat)}
-                    >
-                        <Text style={[styles.filterChipText, activeCategory === cat && styles.filterChipTextActive]}>
-                            {cat}
-                        </Text>
-                    </TouchableOpacity>
-                ))}
-            </ScrollView>
+            {/* MegaMenuBar — same as Feed My Family */}
+            <MegaMenuBar
+                onFilterChange={({ filterFn }) => setFilterFn(() => filterFn)}
+            />
 
             {/* Search bar */}
             <View style={styles.searchRow}>
@@ -309,6 +261,11 @@ export default function VegetableGridScreen({ navigation, route }) {
                     onChangeText={setSearchQuery}
                     clearButtonMode="while-editing"
                 />
+                {searchQuery.length > 0 && (
+                    <TouchableOpacity onPress={() => setSearchQuery('')} style={{ paddingHorizontal: 8 }}>
+                        <Text style={{ color: Colors.mutedText, fontSize: 16 }}>✕</Text>
+                    </TouchableOpacity>
+                )}
             </View>
 
             {/* Grid */}
@@ -322,6 +279,10 @@ export default function VegetableGridScreen({ navigation, route }) {
                 columnWrapperStyle={numColumns > 1 ? styles.gridRow : undefined}
                 showsVerticalScrollIndicator={false}
                 style={Platform.OS === 'web' ? { overflowY: 'scroll', flex: 1 } : { flex: 1 }}
+                initialNumToRender={24}
+                maxToRenderPerBatch={24}
+                windowSize={5}
+                removeClippedSubviews={Platform.OS !== 'web'}
                 renderItem={({ item }) => (
                     <View style={{ width: cardWidth }}>
                         <CropCard
@@ -347,10 +308,14 @@ export default function VegetableGridScreen({ navigation, route }) {
                         if (selectedCrops.size === 0) return;
                         bumpFrequency(Array.from(selectedCrops));
                         setCropFrequency(loadFrequency());
+                        // Thread bedSuccessions back if they came from BedWorkspace (same session).
+                        // This ensures returning from the Crops tab doesn't wipe planned beds.
+                        const previousBedSuccessions = route?.params?.bedSuccessions;
                         navigation.navigate('BedWorkspace', {
                             farmProfile,
                             planId,
                             selectedCropIds: Array.from(selectedCrops),
+                            ...(previousBedSuccessions ? { bedSuccessions: previousBedSuccessions } : {}),
                         });
                     }}
                     disabled={selectedCrops.size === 0}
@@ -568,6 +533,52 @@ const styles = StyleSheet.create({
     cropMetaDot: { fontSize: 11, color: Colors.mutedText },
     cropSpacingRow: { marginTop: 2 },
     cropSpacing: { fontSize: 11, color: Colors.softLavender, fontWeight: Typography.medium },
+
+    // ── Quick-scan crop badges ─────────────────────────────────────────────
+    cropBadgeRow: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        justifyContent: 'center',
+        alignItems: 'center',
+        gap: 3,
+        paddingHorizontal: 4,
+        paddingBottom: 5,
+        minHeight: 18,
+    },
+    dtmPill: {
+        backgroundColor: 'rgba(45,79,30,0.10)',
+        borderRadius: 4,
+        paddingVertical: 1,
+        paddingHorizontal: 5,
+    },
+    dtmPillText: {
+        fontSize: 8,
+        fontWeight: '800',
+        color: Colors.primaryGreen,
+    },
+    seasonPill: {
+        borderRadius: 4,
+        paddingVertical: 1,
+        paddingHorizontal: 4,
+    },
+    seasonPillCool: { backgroundColor: '#dff0fa' },
+    seasonPillWarm: { backgroundColor: '#fff0e0' },
+    seasonPillText: {
+        fontSize: 8,
+        fontWeight: '700',
+        color: Colors.darkText,
+    },
+    typePill: {
+        backgroundColor: 'rgba(45,79,30,0.06)',
+        borderRadius: 4,
+        paddingVertical: 1,
+        paddingHorizontal: 4,
+    },
+    typePillText: {
+        fontSize: 8,
+        fontWeight: '700',
+        color: Colors.mutedText,
+    },
 
     // ── Context menu modal ──────────────────────────────────────────────
     contextScrim: {
