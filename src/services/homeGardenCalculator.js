@@ -106,9 +106,17 @@ const GERMINATION_RATE_OVERRIDES = {
     snap_peas_cascadia:        0.82,
 };
 
-/** Return the germination rate for a given crop (crop-specific first, then category). */
+/** Return the germination rate for a given crop.
+ *
+ * Priority (most specific wins):
+ *   1. crop.germination_rate_pct  — per-crop value stored in crops.json (single source of truth)
+ *   2. GERMINATION_RATE_OVERRIDES — code-level fallback for any crop missing the data field
+ *   3. GERMINATION_RATES          — category-level USDA/Cornell averages
+ *   4. DEFAULTS.LOSS_BUFFER       — absolute legacy fallback
+ */
 function germinationRate(crop) {
-    return GERMINATION_RATE_OVERRIDES[crop.id]
+    return crop.germination_rate_pct
+        ?? GERMINATION_RATE_OVERRIDES[crop.id]
         ?? GERMINATION_RATES[crop.category]
         ?? DEFAULTS.LOSS_BUFFER;
 }
