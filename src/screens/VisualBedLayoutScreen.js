@@ -948,6 +948,37 @@ function BedLayoutCanvas({ beds, selectedIds, onBedDrop, onBedClick, width, heig
         }
 
 
+        // ── Empty-state hint — drawn at the centre of the zone ──────────────────
+        // Drawing in world+zoom space so text stays pinned to zone centre
+        // regardless of zone size or zoom level.
+        if (bs.length === 0 && si) {
+            const cx = si.wPx / 2;
+            const cy = si.hPx / 2;
+            const s  = 1 / zoom;          // 1 screen-pixel in world units
+
+            ctx.save();
+            ctx.textAlign    = 'center';
+            ctx.textBaseline = 'middle';
+
+            // Icon
+            ctx.font      = `${48 * s}px sans-serif`;
+            ctx.fillStyle = '#2D4F1E';
+            ctx.fillText('🗺️', cx, cy - 52 * s);
+
+            // Title
+            ctx.font      = `bold ${22 * s}px sans-serif`;
+            ctx.fillStyle = '#2D4F1E';
+            ctx.fillText('Start Designing', cx, cy + 4 * s);
+
+            // Body (two short lines so it fits any zone width)
+            ctx.font      = `${13 * s}px sans-serif`;
+            ctx.fillStyle = 'rgba(45,79,30,0.5)';
+            ctx.fillText('Drag a bed to reposition it.', cx, cy + 36 * s);
+            ctx.fillText('Tap to select, then use the sidebar to rotate or delete.', cx, cy + 54 * s);
+
+            ctx.restore();
+        }
+
         // North compass rose (top-right, screen-space)
         drawCompass(ctx, width - 50, 50, zoom);
         // Scale ruler (bottom-left, screen-space)
@@ -1942,18 +1973,7 @@ export default function VisualBedLayoutScreen({ navigation, route }) {
                 </View>
             )}
 
-            {/* Tip when canvas is empty */}
-            {beds.length === 0 && (
-                <View style={styles.emptyOverlay} pointerEvents="none">
-                    <Text style={styles.emptyIcon}>🗺️</Text>
-                    <Text style={styles.emptyTitle}>Start Designing</Text>
-                    <Text style={styles.emptyBody}>
-                        {Platform.OS === 'web'
-                            ? 'Drag a bed to reposition it. Tap to select, then use the sidebar to rotate or delete.'
-                            : 'Use the ＋ Add Bed panel on the left to place your first bed, then drag it into position.'}
-                    </Text>
-                </View>
-            )}
+
 
             {/* Modals */}
             <CellGridOverlay
