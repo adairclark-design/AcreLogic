@@ -16,14 +16,16 @@ import { View, Text, ScrollView, StyleSheet } from 'react-native';
 import { Colors, Typography, Spacing, Radius, Shadows } from '../theme';
 
 // ─── Retail price reference (USDA avg retail, $/lb) ─────────────────────────
+// Category baselines — used when no crop-specific override is present.
+// Sources: USDA AMS Market News, national average retail 2023-2025.
 const RETAIL_PRICE_PER_LB = {
     'Greens':     3.00,
     'Brassica':   2.50,
     'Root':       1.50,
     'Tuber':      1.00,
-    'Allium':     1.25,
+    'Allium':     1.75,   // updated: garlic & shallots skew higher than plain onion
     'Legume':     3.00,
-    'Herb':      10.00,
+    'Herb':       8.00,   // category median — overrides below handle wide spread
     'Nightshade': 2.75,
     'Cucurbit':   1.50,
     'Specialty':  3.00,
@@ -33,9 +35,90 @@ const RETAIL_PRICE_PER_LB = {
     'Flower':     null,   // priced per stem, not weight
 };
 
+// ─── Crop-specific retail price overrides ─────────────────────────────────────
+// Applied when a crop's real retail price diverges significantly from its
+// category average. All values are national USDA AMS avg retail $/lb.
+const CROP_RETAIL_OVERRIDES = {
+    // ── Herbs: widest spread of any category ──────────────────────────────────
+    cilantro_santo:        4.00,  // abundant, sold by bunch at grocery scale
+    cilantro_slow_bolt:    4.00,
+    parsley_flat_leaf:     6.00,
+    parsley_root:          5.00,
+    dill_fernleaf:         8.00,
+    basil_genovese:       10.00,
+    basil_thai:            8.00,
+    basil_purple:          8.00,
+    basil_lemon:           8.00,
+    mint_spearmint:        8.00,
+    mint_peppermint:       8.00,
+    mint_apple:            7.00,
+    chives_standard:       9.00,
+    tarragon_french:      18.00,  // specialty, rarely sold in volume
+    thyme_english:        16.00,
+    lemon_thyme:          14.00,
+    oregano_greek:        14.00,
+    marjoram_standard:    14.00,
+    sage_garden:          18.00,
+    rosemary_tuscan_blue: 14.00,
+    winter_savory:        14.00,
+    summer_savory:        12.00,
+    chamomile_german:     12.00,  // fresh weight; dried commands much more
+    lemon_balm:            8.00,
+    lovage_standard:      10.00,
+    borage_standard:       8.00,
+    stevia_standard:      12.00,
+    korean_mint:           8.00,
+    lemon_verbena:        14.00,
+    fenugreek_standard:    5.00,
+    caraway_standard:      6.00,
+    epazote_standard:      5.00,
+    vietnamese_coriander:  7.00,
+    culantro:              6.00,
+    echinacea_purpurea:   10.00,
+    ashwagandha_standard:  8.00,
+    // ── Root outliers (much higher than $1.50 category avg) ───────────────────
+    ginger_rhizome:        6.00,  // fresh ginger retail avg
+    turmeric_standard:     7.00,  // fresh turmeric root retail avg
+    // ── Allium: garlic & shallots command premium over plain onion ────────────
+    garlic_music:          8.00,  // fresh garlic, store avg
+    shallots_ambition:     5.00,
+    cipollini_onion:       3.00,
+    // ── Nightshade: cherry tomatoes and sweet peppers fetch more ──────────────
+    cherry_tomato_sungold: 5.00,  // cherry/grape tomatoes retail premium
+    tomato_yellow_pear:    5.00,
+    tomato_black_cherry:   5.00,
+    tomato_large_red_cherry: 4.50,
+    tomato_juliet:         4.50,
+    pepper_shishito:       5.00,
+    pepper_padron:         5.00,
+    pepper_mini_sweet:     4.00,
+    // ── Specialty crops ───────────────────────────────────────────────────────
+    asparagus_millennium:  5.00,  // USDA avg fresh asparagus ~$4.50–$5.50/lb
+    asparagus_purple:      5.50,
+    asparagus_mary_washington: 5.00,
+    artichoke_imperial:    4.00,  // per-head retail premium
+    artichoke_violetto:    4.00,
+    lemongrass_standard:   5.00,
+    // ── Fruits & Berries ──────────────────────────────────────────────────────
+    strawberry_seascape:   5.00,
+    strawberry_alpine:     7.00,
+    raspberry_everbearing: 8.00,
+    blackberry_thornless:  6.00,
+    currant_red:           6.00,
+    currant_black:         6.00,
+    elderberry_standard:   8.00,
+    honeyberry_standard:   7.00,
+    aronia_chokeberry:     5.00,
+    goji_berry:            8.00,
+};
+
 const DEFAULT_RETAIL = 2.00;
 
-function priceFor(category) {
+// Look up retail price: crop-specific override first, then category baseline.
+function priceFor(category, cropId) {
+    if (cropId && CROP_RETAIL_OVERRIDES[cropId] != null) {
+        return CROP_RETAIL_OVERRIDES[cropId];
+    }
     const p = RETAIL_PRICE_PER_LB[category];
     return (p == null) ? null : p;
 }
@@ -48,7 +131,7 @@ function fmtRange(lo, hi) { return `${lo}–${hi} lbs`; }
 function BarRow({ crop, maxYield, barColor }) {
     const pct = maxYield > 0 ? (crop.yieldHigh ?? 0) / maxYield : 0;
     const barW = `${Math.max(4, Math.round(pct * 100))}%`;
-    const price = priceFor(crop.category);
+    const price = priceFor(crop.category, crop.cropId);
     const valueLow  = price != null ? Math.round((crop.yieldLow  ?? 0) * price) : null;
     const valueHigh = price != null ? Math.round((crop.yieldHigh ?? 0) * price) : null;
 
@@ -74,7 +157,7 @@ function BarRow({ crop, maxYield, barColor }) {
 // ─── Breakdown table row ──────────────────────────────────────────────────────
 
 function TableRow({ crop, isAlt }) {
-    const price = priceFor(crop.category);
+    const price = priceFor(crop.category, crop.cropId);
     const valueLow  = price != null ? Math.round((crop.yieldLow  ?? 0) * price) : null;
     const valueHigh = price != null ? Math.round((crop.yieldHigh ?? 0) * price) : null;
 
@@ -122,13 +205,13 @@ export default function YieldForecast({ crops }) {
     const totalHigh = produceCrops.reduce((s, c) => s + (c.yieldHigh ?? 0), 0);
     const totalTarget = produceCrops.reduce((s, c) => s + (c.targetLbs ?? 0), 0);
 
-    // Retail value totals
+    // Retail value totals — use crop-specific overrides where available
     const valueLow  = produceCrops.reduce((s, c) => {
-        const p = priceFor(c.category);
+        const p = priceFor(c.category, c.cropId);
         return s + (p != null ? (c.yieldLow ?? 0) * p : 0);
     }, 0);
     const valueHigh = produceCrops.reduce((s, c) => {
-        const p = priceFor(c.category);
+        const p = priceFor(c.category, c.cropId);
         return s + (p != null ? (c.yieldHigh ?? 0) * p : 0);
     }, 0);
 
@@ -154,20 +237,27 @@ export default function YieldForecast({ crops }) {
             <View style={styles.hero}>
                 <View style={styles.heroStat}>
                     <Text style={styles.heroValue}>{totalLow}–{totalHigh}</Text>
-                    <Text style={styles.heroLabel}>lbs of food</Text>
+                    <Text style={styles.heroLabel}>seasonal goal (lbs)</Text>
                 </View>
                 <View style={styles.heroDivider} />
                 <View style={styles.heroStat}>
                     <Text style={styles.heroValue}>{fmt(valueLow)}–{fmt(valueHigh)}</Text>
-                    <Text style={styles.heroLabel}>retail market value</Text>
+                    <Text style={styles.heroLabel}>estimated retail value</Text>
                 </View>
+            </View>
+
+            {/* ── Hero subtext — clarifies what the numbers mean ── */}
+            <View style={styles.heroNote}>
+                <Text style={styles.heroNoteText}>
+                    Planting sized to your family's seasonal targets · retail value at USDA avg prices
+                </Text>
             </View>
 
             {/* ── Context pill ── */}
             <View style={styles.contextRow}>
                 <View style={styles.contextPill}>
                     <Text style={styles.contextText}>
-                        🎯 {Math.round(totalTarget)} lbs goal · {produceCrops.length} crops · {crops.length - specialCrops.length} producing
+                        🎯 {Math.round(totalTarget)} lbs targeted · {produceCrops.length} crops · {crops.length - specialCrops.length} producing
                     </Text>
                 </View>
             </View>
@@ -190,8 +280,8 @@ export default function YieldForecast({ crops }) {
 
             {/* ── Full breakdown table ── */}
             <View style={styles.section}>
-                <Text style={styles.sectionTitle}>Retail Value Breakdown</Text>
-                <Text style={styles.sectionSub}>Based on USDA avg retail prices by crop type</Text>
+                <Text style={styles.sectionTitle}>Estimated Retail Value</Text>
+                <Text style={styles.sectionSub}>USDA avg retail $/lb · crop-specific where available, category avg otherwise</Text>
                 <View style={[styles.tableCard, Shadows.card]}>
                     {/* Header */}
                     <View style={[styles.tableRow, styles.tableHeader]}>
@@ -227,9 +317,10 @@ export default function YieldForecast({ crops }) {
             {/* ── Disclaimer ── */}
             <View style={styles.disclaimer}>
                 <Text style={styles.disclaimerText}>
-                    📊 Yields are estimates based on a ±20% range of your family's seasonal goals.
-                    Retail prices reflect USDA averages and vary by region and season.
-                    Actual harvests depend on weather, soil quality, and growing conditions.
+                    📊 These numbers represent your planting targets, not guaranteed harvest yields.
+                    "Seasonal goal" = lbs sized to your family's consumption needs (±20% range).
+                    Retail values use USDA avg prices by crop — actual prices vary by region, season, and market.
+                    True harvest depends on weather, soil quality, pest pressure, and growing experience.
                 </Text>
             </View>
         </ScrollView>
@@ -273,6 +364,19 @@ const styles = StyleSheet.create({
         width: 1, height: 40,
         backgroundColor: 'rgba(255,255,255,0.25)',
         marginHorizontal: Spacing.lg,
+    },
+
+    // ── Hero subtext ──────────────────────────────────────────────────────────
+    heroNote: {
+        alignItems: 'center',
+        marginTop: 6,
+        marginBottom: 2,
+    },
+    heroNoteText: {
+        fontSize: Typography.xs,
+        color: Colors.mutedText,
+        fontStyle: 'italic',
+        textAlign: 'center',
     },
 
     // ── Context row ───────────────────────────────────────────────────────────
