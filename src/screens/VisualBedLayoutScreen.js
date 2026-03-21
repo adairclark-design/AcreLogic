@@ -1170,7 +1170,20 @@ function BedLayoutCanvas({ beds, selectedIds, onBedDrop, onBedClick, width, heig
                     const snappedY = snapTo(rawY, st.snapFt);
                     // ── Resolve overlaps with other beds ─────────────────────
                     const resolved = resolveOverlap(st.drag.bedId, snappedX, snappedY, st.beds, st.spaceInfo, st.minGapFt);
-                    onBedDrop(st.drag.bedId, resolved.x, resolved.y);
+                    // ── Final hard boundary clamp (resolveOverlap nudges can exit the zone) ──
+                    let finalX = resolved.x, finalY = resolved.y;
+                    if (st.spaceInfo) {
+                        const bed2 = st.beds.find(b => b.id === st.drag.bedId);
+                        if (bed2) {
+                            const { w: fw, h: fh } = bedPxVisual(bed2);
+                            const { ox: fvox, oy: fvoy } = visualOffset(bed2);
+                            const fcVL = Math.max(0, Math.min(finalX + fvox, st.spaceInfo.wPx - fw));
+                            const fcVT = Math.max(0, Math.min(finalY + fvoy, st.spaceInfo.hPx - fh));
+                            finalX = fcVL - fvox;
+                            finalY = fcVT - fvoy;
+                        }
+                    }
+                    onBedDrop(st.drag.bedId, finalX, finalY);
                 } else {
                     onBedClick(st.drag.bedId, e.shiftKey || false);
                 }
@@ -1607,9 +1620,21 @@ export default function VisualBedLayoutScreen({ navigation, route }) {
                 const stepPx = snapFtRef.current * PX_PER_FT;
                 const dx = e.key === 'ArrowLeft' ? -stepPx : e.key === 'ArrowRight' ? stepPx : 0;
                 const dy = e.key === 'ArrowUp'   ? -stepPx : e.key === 'ArrowDown'  ? stepPx : 0;
-                setBeds(prev => prev.map(b =>
-                    allSelectedIdsRef.current.includes(b.id) ? { ...b, x: b.x + dx, y: b.y + dy } : b
-                ));
+                setBeds(prev => prev.map(b => {
+                    if (!allSelectedIdsRef.current.includes(b.id)) return b;
+                    let nx = b.x + dx, ny = b.y + dy;
+                    // Clamp to zone boundary so arrow keys can't push beds outside
+                    const si = stateRef.current.spaceInfo;
+                    if (si) {
+                        const { w: bw, h: bh } = bedPxVisual(b);
+                        const { ox: bvox, oy: bvoy } = visualOffset(b);
+                        const clVL = Math.max(0, Math.min(nx + bvox, si.wPx - bw));
+                        const clVT = Math.max(0, Math.min(ny + bvoy, si.hPx - bh));
+                        nx = clVL - bvox;
+                        ny = clVT - bvoy;
+                    }
+                    return { ...b, x: nx, y: ny };
+                }));
             }
         };
         window.addEventListener('keydown', handler);
