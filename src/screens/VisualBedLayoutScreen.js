@@ -1158,46 +1158,19 @@ function BedLayoutCanvas({ beds, selectedIds, onBedDrop, onBedClick, width, heig
         return null;
     }
 
-    // ── Preload crop images on bed list change ─────────────────────────────────
-    // Loads images for: (a) bed.cropId — the primary crop label on each bed;
-    // (b) every cropId in bed.cells — needed for the cell-grid draw.
-    useEffect(() => {
-        const st = stateRef.current;
-        // Collect all unique cropIds across all beds (primary + cells)
-        const allCropIds = new Set();
+    // ── Collect unique cropIds for the hidden image bridge ───────────────────
+    // We render hidden <Image> components (below) that let React Native's pipeline
+    // resolve Expo asset URIs correctly. On load, we grab the DOM img element and
+    // store it in stateRef.cropImages for ctx.drawImage().
+    const uniqueCropIds = useMemo(() => {
+        const ids = new Set();
         for (const bed of beds) {
-            if (bed.cropId) allCropIds.add(bed.cropId);
+            if (bed.cropId) ids.add(bed.cropId);
             for (const cropId of Object.values(bed.cells ?? {})) {
-                if (cropId) allCropIds.add(cropId);
+                if (cropId) ids.add(cropId);
             }
         }
-        for (const cropId of allCropIds) {
-            if (!st.cropImages[cropId]) {
-                const src = CROP_IMAGES[cropId];
-                if (src) {
-                    const img = new window.Image();
-                    img.onload = () => {
-                        st.cropImages[cropId] = img;
-                        redraw();
-                    };
-                    // Resolve the Expo asset to a real URI using the same
-                    // mechanism that <Image source={...}/> uses internally.
-                    // On web this returns { uri: 'https://…/assets/crops/…' }.
-                    let resolvedUri = null;
-                    try {
-                        const resolved = Image.resolveAssetSource(src);
-                        resolvedUri = resolved?.uri ?? null;
-                    } catch {}
-                    // Fallback: if resolveAssetSource isn't available or returns
-                    // nothing, try treating src directly as a string or {uri} object.
-                    if (!resolvedUri) {
-                        resolvedUri = typeof src === 'string' ? src : (src?.uri ?? null);
-                    }
-                    img.src = resolvedUri ?? '';
-                    if (!img.src) delete st.cropImages[cropId];
-                }
-            }
-        }
+        return [...ids];
     }, [beds]);
 
     // ── Mouse / touch events ──────────────────────────────────────────────────
@@ -1429,6 +1402,36 @@ function BedLayoutCanvas({ beds, selectedIds, onBedDrop, onBedClick, width, heig
                 tabIndex={0}
                 style={{ display: 'block', cursor: 'default', outline: 'none' }}
             />
+            {/* Hidden 1×1 Image elements — let React Native's asset pipeline resolve
+                each cropId's real URI, then capture the underlying DOM <img> element
+                for ctx.drawImage(). This is the only reliable way to get asset URLs
+                from Expo's Metro web bundler. */}
+            {uniqueCropIds.map(cropId => {
+                const src = CROP_IMAGES[cropId];
+                if (!src) return null;
+                const nid = `cimg-${cropId}`;
+                return (
+                    <Image
+                        key={cropId}
+                        source={src}
+                        nativeID={nid}
+                        style={{
+                            position: 'absolute', width: 1, height: 1,
+                            opacity: 0, pointerEvents: 'none',
+                        }}
+                        onLoad={() => {
+                            // Grab the underlying DOM <img> element by nativeID
+                            const el = document.getElementById(nid);
+                            // RN web renders Image as a div wrapper; find the inner <img>
+                            const imgEl = el?.tagName === 'IMG' ? el : el?.querySelector('img');
+                            if (imgEl) {
+                                stateRef.current.cropImages[cropId] = imgEl;
+                                redraw();
+                            }
+                        }}
+                    />
+                );
+            })}
             {/* Zoom overlay — bottom-right corner of the canvas */}
             <View style={zoomOverlay.wrap}>
                 <TouchableOpacity style={zoomOverlay.btn} onPress={() => doZoom(1.3)} activeOpacity={0.75}>
