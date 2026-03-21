@@ -852,7 +852,7 @@ function BedLayoutCanvas({ beds, selectedIds, onBedDrop, onBedClick, width, heig
         const canvas = canvasRef.current;
         if (!canvas) return;
         const ctx = canvas.getContext('2d');
-        const { zoom, pan, beds: bs, selectedIds: selIdsArr, spaceInfo: si } = stateRef.current;
+        const { zoom, pan, beds: bs, selectedIds: selIdsArr, spaceInfo: si, cropImages: ciMap } = stateRef.current;
         const selIdSet = new Set(selIdsArr);
 
         ctx.clearRect(0, 0, width, height);
@@ -929,7 +929,7 @@ function BedLayoutCanvas({ beds, selectedIds, onBedDrop, onBedClick, width, heig
 
             // Body
             ctx.fillStyle = BED_FILL;
-            roundRect(ctx, 0, 0, w, h, 8);
+            roundRect(ctx, 0, 0, w, h, 0);
             ctx.fill();
             ctx.shadowColor = 'transparent';
             ctx.shadowBlur = 0;
@@ -949,15 +949,26 @@ function BedLayoutCanvas({ beds, selectedIds, onBedDrop, onBedClick, width, heig
                     const cropId = cells[key];
                     const color  = cropColor(cropId);
                     if (!color) continue;
+                    const cx = c * cellW + 1;
+                    const cy = r * cellH + 1;
+                    const cw = cellW - 2;
+                    const ch = cellH - 2;
+                    // Draw color background
                     ctx.fillStyle = color + 'CC';
-                    ctx.fillRect(c * cellW + 1, r * cellH + 1, cellW - 2, cellH - 2);
-                    const crop = ALL_CROPS.find(x => x.id === cropId);
-                    if (crop) {
-                        ctx.fillStyle = TEXT_COLOR;
-                        ctx.font = `${Math.max(6, Math.min(9, cellH / 2.5))}px sans-serif`;
-                        ctx.textAlign = 'center';
-                        ctx.textBaseline = 'middle';
-                        ctx.fillText(`${crop.emoji ?? '🌱'}`, c * cellW + cellW / 2, r * cellH + cellH / 2);
+                    ctx.fillRect(cx, cy, cw, ch);
+                    // Draw photorealistic image if preloaded, else emoji fallback
+                    const imgEl = ciMap?.[cropId];
+                    if (imgEl) {
+                        ctx.drawImage(imgEl, cx, cy, cw, ch);
+                    } else {
+                        const crop = ALL_CROPS.find(x => x.id === cropId);
+                        if (crop) {
+                            ctx.fillStyle = TEXT_COLOR;
+                            ctx.font = `${Math.max(6, Math.min(9, ch / 2.5))}px sans-serif`;
+                            ctx.textAlign = 'center';
+                            ctx.textBaseline = 'middle';
+                            ctx.fillText(`${crop.emoji ?? '🌱'}`, cx + cw / 2, cy + ch / 2);
+                        }
                     }
                 }
             } else {
@@ -985,7 +996,7 @@ function BedLayoutCanvas({ beds, selectedIds, onBedDrop, onBedClick, width, heig
             // Border
             ctx.strokeStyle = isSelected ? SELECT_STROKE : BED_STROKE;
             ctx.lineWidth = isSelected ? 3 : 2;
-            roundRect(ctx, 0, 0, w, h, 8);
+            roundRect(ctx, 0, 0, w, h, 0);
             ctx.stroke();
 
             ctx.restore(); // ← end of bed-local (rotated) transform
@@ -1148,22 +1159,32 @@ function BedLayoutCanvas({ beds, selectedIds, onBedDrop, onBedClick, width, heig
     }
 
     // ── Preload crop images on bed list change ─────────────────────────────────
+    // Loads images for: (a) bed.cropId — the primary crop label on each bed;
+    // (b) every cropId in bed.cells — needed for the cell-grid draw.
     useEffect(() => {
         const st = stateRef.current;
+        // Collect all unique cropIds across all beds (primary + cells)
+        const allCropIds = new Set();
         for (const bed of beds) {
-            if (bed.cropId && !st.cropImages[bed.cropId]) {
-                const src = CROP_IMAGES[bed.cropId];
+            if (bed.cropId) allCropIds.add(bed.cropId);
+            for (const cropId of Object.values(bed.cells ?? {})) {
+                if (cropId) allCropIds.add(cropId);
+            }
+        }
+        for (const cropId of allCropIds) {
+            if (!st.cropImages[cropId]) {
+                const src = CROP_IMAGES[cropId];
                 if (src) {
                     const img = new window.Image();
                     img.onload = () => {
-                        st.cropImages[bed.cropId] = img;
+                        st.cropImages[cropId] = img;
                         redraw();
                     };
                     // Expo asset: resolve source uri
                     img.src = typeof src === 'number'
                         ? undefined // bundled require — can't easily get URI, use emoji fallback
                         : (src?.uri ?? src);
-                    if (!img.src) delete st.cropImages[bed.cropId];
+                    if (!img.src) delete st.cropImages[cropId];
                 }
             }
         }
