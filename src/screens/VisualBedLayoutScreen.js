@@ -89,54 +89,61 @@ function snap(val) { return snapTo(val, DEFAULT_SNAP_FT); }
 // Nudges a moved bed away from all overlapping beds, respecting the minGapFt
 // margin and clamping to the space boundary. Iterates until fully settled
 // (no remaining overlaps) or until MAX_ITER to prevent infinite loops.
+//
+// KEY: All math is done in VISUAL coordinates (the actual on-screen extents)
+// regardless of rotation. Stored (x,y) tracks the unrotated TL — so we
+// convert in at the start and convert back out at the end.
 function resolveOverlap(movedId, rawX, rawY, beds, spaceInfo, minGapFt = 1) {
     const movedBed = beds.find(b => b.id === movedId);
     if (!movedBed) return { x: rawX, y: rawY };
     const gapPx = minGapFt * PX_PER_FT;
-    let x = rawX, y = rawY;
     const { w: mw, h: mh } = bedPxVisual(movedBed);
+    const { ox: mox, oy: moy } = visualOffset(movedBed);
 
-    // Clamp to space boundary first
+    // Work in visual-TL coordinates
+    let vl = rawX + mox;
+    let vt = rawY + moy;
+
+    // Clamp visual extents to space boundary
     if (spaceInfo) {
-        x = Math.max(0, Math.min(x, spaceInfo.wPx - mw));
-        y = Math.max(0, Math.min(y, spaceInfo.hPx - mh));
+        vl = Math.max(0, Math.min(vl, spaceInfo.wPx - mw));
+        vt = Math.max(0, Math.min(vt, spaceInfo.hPx - mh));
     }
 
-    // Convergence loop: keep nudging until no bed overlaps remain.
-    // One pass can fix overlap with bed A but create a new one with bed B.
-    // We iterate until fully settled or we hit the safety cap.
+    // Convergence loop: iterate until no overlap remains or safety cap hit
     const MAX_ITER = 20;
     for (let iter = 0; iter < MAX_ITER; iter++) {
         let anyOverlap = false;
         for (const other of beds) {
             if (other.id === movedId) continue;
-            const { w: ow, h: oh } = bedPxVisual(other);
-            const ox = other.x ?? 0, oy = other.y ?? 0;
-            const overlapX = x < ox + ow + gapPx && x + mw + gapPx > ox;
-            const overlapY = y < oy + oh + gapPx && y + mh + gapPx > oy;
+            const ob = bedBoundsFromStored(other);
+            const overlapX = vl < ob.right  + gapPx && vl + mw + gapPx > ob.left;
+            const overlapY = vt < ob.bottom + gapPx && vt + mh + gapPx > ob.top;
             if (!overlapX || !overlapY) continue;
             anyOverlap = true;
-            // Nudge in the axis that requires least movement
-            const pushRight = ox + ow + gapPx - x;
-            const pushLeft  = x + mw + gapPx - ox;
-            const pushDown  = oy + oh + gapPx - y;
-            const pushUp    = y + mh + gapPx - oy;
+            // Nudge in the axis requiring least movement
+            const pushRight = ob.right  + gapPx - vl;
+            const pushLeft  = vl + mw   + gapPx - ob.left;
+            const pushDown  = ob.bottom + gapPx - vt;
+            const pushUp    = vt + mh   + gapPx - ob.top;
             const minH = Math.min(pushRight, pushLeft);
             const minV = Math.min(pushDown,  pushUp);
             if (minH <= minV) {
-                x = pushRight <= pushLeft ? ox + ow + gapPx : ox - mw - gapPx;
+                vl = pushRight <= pushLeft ? ob.right + gapPx : ob.left - mw - gapPx;
             } else {
-                y = pushDown  <= pushUp   ? oy + oh + gapPx : oy - mh - gapPx;
+                vt = pushDown <= pushUp ? ob.bottom + gapPx : ob.top - mh - gapPx;
             }
             // Re-clamp after each nudge
             if (spaceInfo) {
-                x = Math.max(0, Math.min(x, spaceInfo.wPx - mw));
-                y = Math.max(0, Math.min(y, spaceInfo.hPx - mh));
+                vl = Math.max(0, Math.min(vl, spaceInfo.wPx - mw));
+                vt = Math.max(0, Math.min(vt, spaceInfo.hPx - mh));
             }
         }
-        if (!anyOverlap) break;  // fully settled — done
+        if (!anyOverlap) break;
     }
-    return { x, y };
+
+    // Convert visual TL back to stored position
+    return { x: vl - mox, y: vt - moy };
 }
 
 function bedPx(bed) {
@@ -156,7 +163,26 @@ function bedPxVisual(bed) {
     const rot = Math.abs((bed.rotation ?? 0) % 180);
     return rot === 90 ? { w: h, h: w } : { w, h };
 }
+// Returns the delta from stored (bed.x, bed.y) to the visual top-left corner.
+// For N/S beds the stored position IS the visual TL (no offset).
+// For E/W (90°/270°) beds the rotation anchor shifts the visual origin:
+//   offset_x = (wPx - hPx) / 2,  offset_y = (hPx - wPx) / 2
+function visualOffset(bed) {
+    const rot = Math.abs((bed.rotation ?? 0) % 180);
+    if (rot !== 90) return { ox: 0, oy: 0 };
+    const wPx = (bed.wFt ?? BED_DEFAULT_W_FT) * PX_PER_FT;
+    const hPx = (bed.hFt ?? BED_DEFAULT_H_FT) * PX_PER_FT;
+    return { ox: (wPx - hPx) / 2, oy: (hPx - wPx) / 2 };
+}
 
+// Visual axis-aligned bounding box of a bed in screen/canvas space.
+function bedBoundsFromStored(bed) {
+    const { w, h } = bedPxVisual(bed);
+    const { ox, oy } = visualOffset(bed);
+    const left = (bed.x ?? 0) + ox;
+    const top  = (bed.y ?? 0) + oy;
+    return { left, top, right: left + w, bottom: top + h };
+}
 
 function roundRect(ctx, x, y, w, h, r = 6) {
     ctx.beginPath();
@@ -1110,13 +1136,17 @@ function BedLayoutCanvas({ beds, selectedIds, onBedDrop, onBedClick, width, heig
                 if (moved) {
                     let rawX = st.drag.origX + dx / st.zoom;
                     let rawY = st.drag.origY + dy / st.zoom;
-                    // ── Clamp to space boundary ───────────────────────────────
+                    // ── Clamp to space boundary using VISUAL extents ─────────────────────
                     if (st.spaceInfo) {
                         const bed = st.beds.find(b => b.id === st.drag.bedId);
                         if (bed) {
                             const { w, h } = bedPxVisual(bed);
-                            rawX = Math.max(0, Math.min(rawX, st.spaceInfo.wPx - w));
-                            rawY = Math.max(0, Math.min(rawY, st.spaceInfo.hPx - h));
+                            const { ox: vox, oy: voy } = visualOffset(bed);
+                            // Clamp visual TL, then convert back to stored position
+                            const clVL = Math.max(0, Math.min(rawX + vox, st.spaceInfo.wPx - w));
+                            const clVT = Math.max(0, Math.min(rawY + voy, st.spaceInfo.hPx - h));
+                            rawX = clVL - vox;
+                            rawY = clVT - voy;
                         }
                     }
                     const snappedX = snapTo(rawX, st.snapFt);
@@ -1612,28 +1642,37 @@ export default function VisualBedLayoutScreen({ navigation, route }) {
         if (spaceInfo) {
             const stepX = footW + gapPx;
             const stepY = footH + gapPx;
-            let found = false;
-            outer: for (let cy = 0; cy + footH <= spaceInfo.hPx; cy += stepY) {
-                for (let cx = 0; cx + footW <= spaceInfo.wPx; cx += stepX) {
-                    const sx = snap(cx), sy = snap(cy);
-                    if (sx + footW > spaceInfo.wPx || sy + footH > spaceInfo.hPx) continue;
-                    let overlaps = false;
-                    for (const other of beds) {
-                        const { w: ow, h: oh } = bedPxVisual(other);
-                        const ox = other.x ?? 0, oy = other.y ?? 0;
-                        if (sx < ox + ow + gapPx && sx + footW + gapPx > ox &&
-                            sy < oy + oh + gapPx && sy + footH + gapPx > oy) {
-                            overlaps = true; break;
-                        }
+            // ── Find the first genuinely-empty slot via grid scan (VISUAL space) ──
+        // cx, cy are candidates for the visual TL of the new bed.
+        // Other beds' positions are also converted to visual bounds via bedBoundsFromStored.
+        const { ox: vox, oy: voy } = visualOffset({ rotation, wFt, hFt });
+        let found = false;
+        outer: for (let cv = 0; cv + footH <= spaceInfo.hPx; cv += stepY) {
+            for (let cu = 0; cu + footW <= spaceInfo.wPx; cu += stepX) {
+                let overlaps = false;
+                for (const other of beds) {
+                    const ob = bedBoundsFromStored(other);
+                    if (cu < ob.right + gapPx && cu + footW + gapPx > ob.left &&
+                        cv < ob.bottom + gapPx && cv + footH + gapPx > ob.top) {
+                        overlaps = true; break;
                     }
-                    if (!overlaps) { baseX = sx; baseY = sy; found = true; break outer; }
+                }
+                if (!overlaps) {
+                    // cu, cv are visual TL → convert to stored position
+                    baseX = snap(cu - vox);
+                    baseY = snap(cv - voy);
+                    found = true; break outer;
                 }
             }
-            if (!found) {
-                // Space is full — clamp to boundary and resolveOverlap will handle it
-                baseX = Math.max(0, Math.min(snap(PX_PER_FT), spaceInfo.wPx - footW));
-                baseY = Math.max(0, Math.min(snap(PX_PER_FT), spaceInfo.hPx - footH));
-            }
+        }
+        if (!found) {
+            // Space full — place near origin and resolveOverlap will handle it
+            const clVL = Math.max(0, Math.min(PX_PER_FT, spaceInfo.wPx - footW));
+            const clVT = Math.max(0, Math.min(PX_PER_FT, spaceInfo.hPx - footH));
+            baseX = snap(clVL - vox);
+            baseY = snap(clVT - voy);
+        }
+
         }
 
         const rowCount = Math.max(1, Math.floor((wFt * PX_PER_FT) / (DEFAULT_SNAP_FT * PX_PER_FT)));
