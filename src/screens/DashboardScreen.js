@@ -246,7 +246,7 @@ export default function DashboardScreen({ navigation, route }) {
             </View>
 
             <Animated.ScrollView
-                style={{ opacity: fadeAnim }}
+                style={{ opacity: fadeAnim, flex: 1 }}
                 contentContainerStyle={s.scroll}
                 showsVerticalScrollIndicator={false}
             >
