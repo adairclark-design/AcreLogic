@@ -1180,10 +1180,20 @@ function BedLayoutCanvas({ beds, selectedIds, onBedDrop, onBedClick, width, heig
                         st.cropImages[cropId] = img;
                         redraw();
                     };
-                    // Expo asset: resolve source uri
-                    img.src = typeof src === 'number'
-                        ? undefined // bundled require — can't easily get URI, use emoji fallback
-                        : (src?.uri ?? src);
+                    // Resolve the Expo asset to a real URI using the same
+                    // mechanism that <Image source={...}/> uses internally.
+                    // On web this returns { uri: 'https://…/assets/crops/…' }.
+                    let resolvedUri = null;
+                    try {
+                        const resolved = Image.resolveAssetSource(src);
+                        resolvedUri = resolved?.uri ?? null;
+                    } catch {}
+                    // Fallback: if resolveAssetSource isn't available or returns
+                    // nothing, try treating src directly as a string or {uri} object.
+                    if (!resolvedUri) {
+                        resolvedUri = typeof src === 'string' ? src : (src?.uri ?? null);
+                    }
+                    img.src = resolvedUri ?? '';
                     if (!img.src) delete st.cropImages[cropId];
                 }
             }
