@@ -36,6 +36,7 @@ import ActionCalendar from '../components/ActionCalendar';
 import SeedShoppingList from '../components/SeedShoppingList';
 import YieldForecast from '../components/YieldForecast';
 import { formatCropDisplayName, formatVarietyLabel } from '../utils/cropDisplay';
+import LocationStep from '../components/LocationStep';
 
 // ─── Full PDF monthly cap ────────────────────────────────────────────────────
 const FULL_PDF_MONTHLY_LIMIT = 10;
@@ -438,7 +439,7 @@ export default function FamilyPlannerScreen({ navigation }) {
     const STORAGE_KEY_CROPS  = 'acrelogic_family_planner_selectedIds';
 
     // ── State ──────────────────────────────────────────────────────────────
-    const [step, setStep]               = useState(1);
+    const [step, setStep]               = useState(0); // 0 = location, 1 = crops, 2 = plan
     // familySize: restored from localStorage so it survives back-navigation
     const [familySize, setFamilySize]   = useState(() => {
         try {
@@ -610,6 +611,8 @@ export default function FamilyPlannerScreen({ navigation }) {
                 setStep(1);
                 slideAnim.setValue(0);
             });
+        } else if (step === 1) {
+            setStep(0);
         } else {
             navigation.goBack();
         }
@@ -664,10 +667,10 @@ export default function FamilyPlannerScreen({ navigation }) {
                 </TouchableOpacity>
                 <View style={{ flex: 1 }}>
                     <Text style={styles.stepLabel}>
-                        {step === 1 ? 'STEP 1 OF 2' : 'STEP 2 OF 2'}
+                        {step === 0 ? 'FEED MY FAMILY' : step === 1 ? 'STEP 1 OF 2' : 'STEP 2 OF 2'}
                     </Text>
                     <Text style={styles.heading}>
-                        {step === 1 ? 'Feed My Family' : 'Your Planting Plan'}
+                        {step === 0 ? 'Your Location' : step === 1 ? 'Feed My Family' : 'Your Planting Plan'}
                     </Text>
                 </View>
                 {selectedIds.size > 0 && step === 1 && (
@@ -679,6 +682,28 @@ export default function FamilyPlannerScreen({ navigation }) {
 
             {/* ── Animated body ── */}
             <Animated.View style={[styles.body, { transform: [{ translateX: slideAnim }] }]}>
+
+                {/* ════════ STEP 0: LOCATION ════════ */}
+                {step === 0 && (
+                    <LocationStep
+                        title="Where is your garden?"
+                        subtitle="We'll pull your local frost dates to calculate exact planting, seeding, and harvest dates."
+                        onDone={(profile) => {
+                            if (profile) {
+                                setGardenProfile({
+                                    address:        profile.address ?? 'Location set',
+                                    frostFreeDays:  profile.frost_free_days,
+                                    lastFrostDate:  profile.last_frost_date,
+                                    firstFrostDate: profile.first_frost_date,
+                                    usdaZone:       profile.usda_zone,
+                                    _raw: profile,
+                                });
+                            }
+                            setStep(1);
+                        }}
+                        onBack={() => navigation.goBack()}
+                    />
+                )}
 
                 {/* ════════ STEP 1 ════════ */}
                 {step === 1 && (

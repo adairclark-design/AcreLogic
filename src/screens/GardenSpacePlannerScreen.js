@@ -54,6 +54,7 @@ import { formatCropDisplayName, formatVarietyLabel } from '../utils/cropDisplay'
 import { useFocusEffect } from '@react-navigation/native';
 import MegaMenuBar from '../components/MegaMenuBar';
 import SharedCropCard from '../components/SharedCropCard';
+import LocationStep from '../components/LocationStep';
 
 const ALL_CROPS = CROPS_DATA.crops ?? [];
 const PLANTABLE_CROPS = ALL_CROPS; // Cover Crops included — visible under the "Cover Crops" MegaMenuBar tab
@@ -487,7 +488,7 @@ export default function GardenSpacePlannerScreen({ navigation }) {
     const planCardWidth = Math.floor((width - 48 - GAP * (planColumns - 1)) / planColumns);
 
     // ── Step state ────────────────────────────────────────────────────────────
-    const [step, setStep] = useState(1);   // 1 Dimensions | 2 Results | 3 Crops
+    const [step, setStep] = useState(0);   // 0 Location | 1 Dimensions | 2 Results | 3 Crops
 
     // ── Step 1: Dimension inputs ──────────────────────────────────────────────
     const [lengthFt, setLengthFt]       = useState('');
@@ -539,7 +540,7 @@ export default function GardenSpacePlannerScreen({ navigation }) {
     // and back would re-show the old results/beds from the last session.
     useFocusEffect(
         useCallback(() => {
-            setStep(1);
+            setStep(0);
             setSpaceResult(null);
             setSoilResult(null);
             setPlanResult(null);
@@ -660,7 +661,7 @@ export default function GardenSpacePlannerScreen({ navigation }) {
     };
     const handleBack = () => {
         if (showReport) { setShowReport(false); return; }
-        if (step > 1) goBackward(step - 1);
+        if (step > 0) goBackward(step - 1);
         else navigation.goBack();
     };
 
@@ -762,6 +763,7 @@ export default function GardenSpacePlannerScreen({ navigation }) {
 
     // ─── Heading text ─────────────────────────────────────────────────────────
     const HEADINGS = {
+        0: { step: 'PLAN MY GARDEN', title: 'Your Location' },
         1: { step: 'STEP 1 OF 3', title: 'Your Garden Space' },
         2: { step: 'STEP 2 OF 3', title: 'Space Results' },
         3: { step: 'STEP 3 OF 3', title: showReport ? 'Your Planting Plan' : 'Crops & Family' },
@@ -787,6 +789,22 @@ export default function GardenSpacePlannerScreen({ navigation }) {
 
             {/* ── Animated body ── */}
             <Animated.View style={[{ flex: 1 }, { transform: [{ translateX: slideAnim }] }]}>
+
+                {/* ══════ STEP 0: LOCATION ══════ */}
+                {step === 0 && (
+                    <LocationStep
+                        title="Where is your garden?"
+                        subtitle="We'll use your frost dates to show exact planting dates for every crop in your plan."
+                        onDone={(profile) => {
+                            if (profile) {
+                                setResolvedProfile(profile);
+                                if (profile.usda_zone) setSelectedZone(profile.usda_zone.toLowerCase());
+                            }
+                            goForward(1);
+                        }}
+                        onBack={() => navigation.goBack()}
+                    />
+                )}
 
                 {/* ══════ STEP 1: DIMENSIONS ══════ */}
                 {step === 1 && (
