@@ -86,44 +86,55 @@ const ROW_COLORS = [
 function snap(val) { return snapTo(val, DEFAULT_SNAP_FT); }
 
 // ─── Overlap resolver ─────────────────────────────────────────────────────────
-// Nudges a moved bed away from any overlapping beds, respecting the minGapFt
-// margin and clamping to the space boundary. Returns the resolved { x, y }.
+// Nudges a moved bed away from all overlapping beds, respecting the minGapFt
+// margin and clamping to the space boundary. Iterates until fully settled
+// (no remaining overlaps) or until MAX_ITER to prevent infinite loops.
 function resolveOverlap(movedId, rawX, rawY, beds, spaceInfo, minGapFt = 1) {
     const movedBed = beds.find(b => b.id === movedId);
     if (!movedBed) return { x: rawX, y: rawY };
     const gapPx = minGapFt * PX_PER_FT;
     let x = rawX, y = rawY;
     const { w: mw, h: mh } = bedPxVisual(movedBed);
+
     // Clamp to space boundary first
     if (spaceInfo) {
         x = Math.max(0, Math.min(x, spaceInfo.wPx - mw));
         y = Math.max(0, Math.min(y, spaceInfo.hPx - mh));
     }
-    // AABB collision + nudge against every other bed
-    for (const other of beds) {
-        if (other.id === movedId) continue;
-        const { w: ow, h: oh } = bedPxVisual(other);
-        const ox = other.x ?? 0, oy = other.y ?? 0;
-        const overlapX = x < ox + ow + gapPx && x + mw + gapPx > ox;
-        const overlapY = y < oy + oh + gapPx && y + mh + gapPx > oy;
-        if (!overlapX || !overlapY) continue;
-        // Nudge in the axis that requires least movement
-        const pushRight = ox + ow + gapPx - x;
-        const pushLeft  = x + mw + gapPx - ox;
-        const pushDown  = oy + oh + gapPx - y;
-        const pushUp    = y + mh + gapPx - oy;
-        const minH = Math.min(pushRight, pushLeft);
-        const minV = Math.min(pushDown, pushUp);
-        if (minH <= minV) {
-            x = pushRight <= pushLeft ? ox + ow + gapPx : ox - mw - gapPx;
-        } else {
-            y = pushDown <= pushUp ? oy + oh + gapPx : oy - mh - gapPx;
+
+    // Convergence loop: keep nudging until no bed overlaps remain.
+    // One pass can fix overlap with bed A but create a new one with bed B.
+    // We iterate until fully settled or we hit the safety cap.
+    const MAX_ITER = 20;
+    for (let iter = 0; iter < MAX_ITER; iter++) {
+        let anyOverlap = false;
+        for (const other of beds) {
+            if (other.id === movedId) continue;
+            const { w: ow, h: oh } = bedPxVisual(other);
+            const ox = other.x ?? 0, oy = other.y ?? 0;
+            const overlapX = x < ox + ow + gapPx && x + mw + gapPx > ox;
+            const overlapY = y < oy + oh + gapPx && y + mh + gapPx > oy;
+            if (!overlapX || !overlapY) continue;
+            anyOverlap = true;
+            // Nudge in the axis that requires least movement
+            const pushRight = ox + ow + gapPx - x;
+            const pushLeft  = x + mw + gapPx - ox;
+            const pushDown  = oy + oh + gapPx - y;
+            const pushUp    = y + mh + gapPx - oy;
+            const minH = Math.min(pushRight, pushLeft);
+            const minV = Math.min(pushDown,  pushUp);
+            if (minH <= minV) {
+                x = pushRight <= pushLeft ? ox + ow + gapPx : ox - mw - gapPx;
+            } else {
+                y = pushDown  <= pushUp   ? oy + oh + gapPx : oy - mh - gapPx;
+            }
+            // Re-clamp after each nudge
+            if (spaceInfo) {
+                x = Math.max(0, Math.min(x, spaceInfo.wPx - mw));
+                y = Math.max(0, Math.min(y, spaceInfo.hPx - mh));
+            }
         }
-        // Re-clamp after nudge
-        if (spaceInfo) {
-            x = Math.max(0, Math.min(x, spaceInfo.wPx - mw));
-            y = Math.max(0, Math.min(y, spaceInfo.hPx - mh));
-        }
+        if (!anyOverlap) break;  // fully settled — done
     }
     return { x, y };
 }
@@ -1592,21 +1603,39 @@ export default function VisualBedLayoutScreen({ navigation, route }) {
         const footW = ori === 'EW' ? hFt * PX_PER_FT : wFt * PX_PER_FT;
         const footH = ori === 'EW' ? wFt * PX_PER_FT : hFt * PX_PER_FT;
         const gapPx = minGapFt * PX_PER_FT;
-        // Place new bed inside boundary if available, else 1ft from top-left
+        // ── Find the first genuinely-empty slot via grid scan ─────────────────
+        // Scans column-major (left→right, top→bottom) at stride intervals
+        // and returns the first position with no overlap. This is O(slots × beds)
+        // but guaranteed to find an empty spot if one exists.
         let baseX = snap(PX_PER_FT);
         let baseY = snap(PX_PER_FT);
         if (spaceInfo) {
-            // Stack beds vertically inside the boundary with spacing
-            const placed = beds.length;
-            const stride = footH + gapPx;
-            const col = spaceInfo.wPx > 0 ? Math.floor((placed * stride) / spaceInfo.hPx) : 0;
-            const row = placed - col * Math.max(1, Math.floor(spaceInfo.hPx / stride));
-            baseX = snap(col * (footW + gapPx));
-            baseY = snap(row * stride);
-            // Clamp so bed stays inside boundary
-            baseX = Math.max(0, Math.min(baseX, spaceInfo.wPx - footW));
-            baseY = Math.max(0, Math.min(baseY, spaceInfo.hPx - footH));
+            const stepX = footW + gapPx;
+            const stepY = footH + gapPx;
+            let found = false;
+            outer: for (let cy = 0; cy + footH <= spaceInfo.hPx; cy += stepY) {
+                for (let cx = 0; cx + footW <= spaceInfo.wPx; cx += stepX) {
+                    const sx = snap(cx), sy = snap(cy);
+                    if (sx + footW > spaceInfo.wPx || sy + footH > spaceInfo.hPx) continue;
+                    let overlaps = false;
+                    for (const other of beds) {
+                        const { w: ow, h: oh } = bedPxVisual(other);
+                        const ox = other.x ?? 0, oy = other.y ?? 0;
+                        if (sx < ox + ow + gapPx && sx + footW + gapPx > ox &&
+                            sy < oy + oh + gapPx && sy + footH + gapPx > oy) {
+                            overlaps = true; break;
+                        }
+                    }
+                    if (!overlaps) { baseX = sx; baseY = sy; found = true; break outer; }
+                }
+            }
+            if (!found) {
+                // Space is full — clamp to boundary and resolveOverlap will handle it
+                baseX = Math.max(0, Math.min(snap(PX_PER_FT), spaceInfo.wPx - footW));
+                baseY = Math.max(0, Math.min(snap(PX_PER_FT), spaceInfo.hPx - footH));
+            }
         }
+
         const rowCount = Math.max(1, Math.floor((wFt * PX_PER_FT) / (DEFAULT_SNAP_FT * PX_PER_FT)));
         const newBed = {
             id: makeId(),
