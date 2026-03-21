@@ -218,6 +218,64 @@ function cropColor(cropId) {
     return CELL_COLORS[h % CELL_COLORS.length];
 }
 
+// ─── Build visual beds from BedWorkspace succession plan ──────────────────────
+// Converts { bedNum: [{ crop_id, crop_name, ... }] } into canvas bed objects.
+// Each bed is color-striped horizontally by succession — the first crop fills the
+// top rows, second crop the next rows, etc. Positioned in a cols×rows grid.
+function buildBedsFromSuccessions(bedSuccessions, layout) {
+    const { cols = 4, rowsCount = 2, bedW = 4, bedH = 8, pathW = 2 } = layout;
+    const bedWPx  = bedW  * PX_PER_FT;
+    const bedHPx  = bedH  * PX_PER_FT;
+    const pathWPx = pathW * PX_PER_FT;
+    const numCols = Math.round(bedW);   // cells across bed (4 for 4ft wide)
+    const numRows = Math.round(bedH);   // cells along bed  (8 for 8ft long)
+
+    const beds = [];
+    const bedNums = Object.keys(bedSuccessions)
+        .map(Number)
+        .filter(n => (bedSuccessions[n] ?? []).some(s => s.crop_id))
+        .sort((a, b) => a - b);
+
+    bedNums.forEach((bedNum, idx) => {
+        const successions = (bedSuccessions[bedNum] ?? []).filter(s => s.crop_id);
+
+        // Grid position: left-to-right, top-to-bottom
+        const col = idx % cols;
+        const row = Math.floor(idx / cols);
+        const x = snap(col * (bedWPx + pathWPx) + pathWPx / 2);
+        const y = snap(row * (bedHPx + pathWPx) + pathWPx / 2);
+
+        // Paint cells: divide the bed rows evenly among successions
+        const cells = {};
+        if (successions.length > 0) {
+            const rowsPerSucc = Math.ceil(numRows / successions.length);
+            successions.forEach((s, sIdx) => {
+                const startRow = sIdx * rowsPerSucc;
+                const endRow   = Math.min(startRow + rowsPerSucc, numRows);
+                for (let r = startRow; r < endRow; r++) {
+                    for (let c = 0; c < numCols; c++) {
+                        cells[`${c}_${r}`] = s.crop_id;
+                    }
+                }
+            });
+        }
+
+        beds.push({
+            id: makeId(),
+            label: bedNum,
+            x,
+            y,
+            rotation: 0,
+            wFt: bedW,
+            hFt: bedH,
+            cropId: successions[0]?.crop_id ?? null,
+            cells,
+        });
+    });
+
+    return beds;
+}
+
 // ─── Cell-Grid Crop Overlay ───────────────────────────────────────────────────
 // Modal that shows a 1ft×1ft grid over the selected bed for crop-cell painting.
 function CellGridOverlay({ visible, bed, onAssignCell, onClose }) {
@@ -377,7 +435,7 @@ const cgo = StyleSheet.create({
 
 // ─── Add-Bed Sidebar ──────────────────────────────────────────────────────────
 // Fixed left panel on web/tablet with Create Bed form + selected bed actions.
-function AddBedSidebar({ onAdd, selectedBed, selectedCount = 1, onRotate, onDelete, onDeleteSelected, onAssignCrops, undoStack, onUndo, minGapFt, onMinGapChange }) {
+function AddBedSidebar({ onAdd, selectedBed, selectedCount = 1, onRotate, onDelete, onDeleteSelected, onAssignCrops, undoStack, onUndo, minGapFt, onMinGapChange, onReloadFromPlan }) {
     const [wFt, setWFt] = useState('4');
     const [hFt, setHFt] = useState('8');
     const [bedOri, setBedOri] = useState('NS');
@@ -466,6 +524,15 @@ function AddBedSidebar({ onAdd, selectedBed, selectedCount = 1, onRotate, onDele
             <TouchableOpacity style={[sb.actionBtn, !undoStack.length && sb.dim]} onPress={onUndo} disabled={!undoStack.length}>
                 <Text style={sb.actionTxt}>↩ Undo</Text>
             </TouchableOpacity>
+            {/* Reload from Farm Block plan — only shown when navigated from BedWorkspace */}
+            {onReloadFromPlan && (
+                <>
+                    <View style={sb.divider} />
+                    <TouchableOpacity style={[sb.actionBtn, { backgroundColor: 'rgba(45,79,30,0.10)' }]} onPress={onReloadFromPlan}>
+                        <Text style={sb.actionTxt}>🔄 Reload Plan</Text>
+                    </TouchableOpacity>
+                </>
+            )}
             {/* Min spacing picker */}
             <View style={sb.divider} />
             <Text style={sb.fieldLabel}>Min. Spacing</Text>
@@ -1480,11 +1547,36 @@ export default function VisualBedLayoutScreen({ navigation, route }) {
                 label: `${spaceWidthFt}\u2032 \u00d7 ${spaceLengthFt}\u2032`,
             });
 
-            // ── Sandbox mode: start with empty canvas — user adds beds manually ──
+            // ── Sandbox mode: may be launched from BedWorkspace with a prebuilt plan ──
             if (sp.isSandbox) {
+                // Always re-populate from bedPlanJson when navigated from Farm Block.
+                // This ensures Layout always reflects the current plan on each visit.
+                const bedPlanJsonStr = route?.params?.bedPlanJson;
+                if (bedPlanJsonStr) {
+                    try {
+                        const bedSuccessions = JSON.parse(bedPlanJsonStr);
+                        const populatedBeds = buildBedsFromSuccessions(bedSuccessions, {
+                            cols:      sp.bedsAcrossWidth  ?? 4,
+                            rowsCount: sp.bedsAlongLength  ?? 2,
+                            bedW:      sp.bedWidthFt        ?? 4,
+                            bedH:      sp.bedLengthFt       ?? 8,
+                            pathW:     sp.pathwayWidthFt    ?? 2,
+                        });
+                        if (populatedBeds.length > 0) {
+                            pushUndo(beds);  // allow undo back to previous canvas state
+                            setBeds(populatedBeds);
+                            bedCounter.current = populatedBeds.length + 1;
+                            sandboxInitialized.current = true;
+                            return;
+                        }
+                    } catch (e) {
+                        console.warn('[VisualBedLayout] bedPlanJson parse error:', e);
+                    }
+                }
+
+                // No bedPlanJson (pure sandbox mode — Design My Garden flow)
                 if (!sandboxInitialized.current) {
                     sandboxInitialized.current = true;
-                    // Restore any previously saved sandbox layout, or start empty
                     if (saved?.beds?.length) {
                         setBeds(saved.beds);
                         const maxLabel = saved.beds.reduce((m, b) => Math.max(m, b.label ?? 0), 0);
@@ -1563,7 +1655,7 @@ export default function VisualBedLayoutScreen({ navigation, route }) {
             setBeds(initBeds);
         }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [route?.params?.spaceJson, route?.params?.initialBedCount, route?.params?.clearOnLoad]));
+    }, [route?.params?.spaceJson, route?.params?.initialBedCount, route?.params?.clearOnLoad, route?.params?.bedPlanJson]));
 
     // ── Persist on every change ───────────────────────────────────────────────
     useEffect(() => {
@@ -1915,9 +2007,26 @@ export default function VisualBedLayoutScreen({ navigation, route }) {
                         undoStack={undoStack}
                         onUndo={undo}
                         snapFt={DEFAULT_SNAP_FT}
-
                         minGapFt={minGapFt}
                         onMinGapChange={setMinGapFt}
+                        onReloadFromPlan={route?.params?.bedPlanJson ? (() => {
+                            try {
+                                const sp = route?.params?.spaceJson ? JSON.parse(route.params.spaceJson) : null;
+                                const bedSuccessions = JSON.parse(route.params.bedPlanJson);
+                                const reloadedBeds = buildBedsFromSuccessions(bedSuccessions, {
+                                    cols:      sp?.bedsAcrossWidth  ?? 4,
+                                    rowsCount: sp?.bedsAlongLength  ?? 2,
+                                    bedW:      sp?.bedWidthFt        ?? 4,
+                                    bedH:      sp?.bedLengthFt       ?? 8,
+                                    pathW:     sp?.pathwayWidthFt    ?? 2,
+                                });
+                                if (reloadedBeds.length > 0) {
+                                    pushUndo(beds);
+                                    setBeds(reloadedBeds);
+                                    bedCounter.current = reloadedBeds.length + 1;
+                                }
+                            } catch (e) { console.warn('[VisualBedLayout] reload error:', e); }
+                        }) : null}
                     />
                 )}
                 <View style={{ flex: 1, height: canvasH }}>

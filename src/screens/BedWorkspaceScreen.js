@@ -1288,10 +1288,9 @@ export default function BedWorkspaceScreen({ navigation, route }) {
                     <TouchableOpacity
                         style={styles.viewToggleBtn}
                         onPress={() => {
-                            // Build a sandbox canvas that matches the block's plot.
-                            // 8 beds (4×8 ft) in 2 rows × 4 columns with 2 ft pathways
-                            // → 28 ft wide × 24 ft long plot.
-                            // isSandbox:true = starts empty, user adds beds; boundary is drawn.
+                            // Build a sandbox canvas sized for 8 beds (4×8 ft) in 2 rows × 4 cols.
+                            // isSandbox:true draws the boundary; bedPlanJson populates all beds
+                            // with the current succession plan, color-striped per crop.
                             const bedW = 4, bedH = 8, pathW = 2, cols = 4, rows = 2;
                             const plotW = cols * bedW + (cols - 1) * pathW + pathW * 2; // 28 ft
                             const plotH = rows * bedH + (rows - 1) * pathW + pathW * 2; // 24 ft
@@ -1308,7 +1307,11 @@ export default function BedWorkspaceScreen({ navigation, route }) {
                                 mainPathWidthFt: 0,
                                 isSandbox:       true,
                             });
-                            navigation.navigate('VisualBedLayout', { farmProfile, spaceJson });
+                            navigation.navigate('VisualBedLayout', {
+                                farmProfile,
+                                spaceJson,
+                                bedPlanJson: JSON.stringify(bedSuccessions),
+                            });
                         }}
                     >
                         <Text style={styles.viewToggleBtnText}>🖊 Layout</Text>
