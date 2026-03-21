@@ -1618,8 +1618,20 @@ export default function VisualBedLayoutScreen({ navigation, route }) {
             hFt,
             rows: Array(rowCount).fill(null),
         };
-        setBeds(prev => { pushUndo(prev); return [...prev, newBed]; });
-        setSelectedIds([newBed.id]);
+
+        // ── Run 3-pass collision resolution so the new bed never overlaps ─────
+        // existing beds regardless of their size or mixed-size scenarios.
+        let tempBeds = [...beds, newBed];
+        let resolved = { x: baseX, y: baseY };
+        for (let pass = 0; pass < 3; pass++) {
+            resolved = resolveOverlap(newBed.id, resolved.x, resolved.y, tempBeds, spaceInfo, minGapFt);
+            // Update the temp bed position for the next pass
+            tempBeds = tempBeds.map(b => b.id === newBed.id ? { ...b, x: resolved.x, y: resolved.y } : b);
+        }
+        const finalBed = { ...newBed, x: snap(resolved.x), y: snap(resolved.y) };
+
+        setBeds(prev => { pushUndo(prev); return [...prev, finalBed]; });
+        setSelectedIds([finalBed.id]);
         setExtraSelectedIds(new Set());
     }
 
