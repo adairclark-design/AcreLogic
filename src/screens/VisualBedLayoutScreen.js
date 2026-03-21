@@ -933,16 +933,23 @@ function BedLayoutCanvas({ beds, selectedIds, onBedDrop, onBedClick, width, heig
             roundRect(ctx, 0, 0, w, h, 8);
             ctx.stroke();
 
-            // Bed number badge
+            // Bed number badge — scales with bed size so it's never too large or tiny.
+            // Use the smaller visual dimension (min of visual w, h) as the reference.
+            const _badgeRef = Math.min(w, h);           // visual short side in px
+            const _badgeR   = Math.min(28, Math.max(8, _badgeRef * 0.14));  // 14% of short side, 8–28px
+            const _badgeX   = _badgeR + 4;
+            const _badgeY   = _badgeR + 4;
+            const _fontSize = Math.round(_badgeR * 0.85);
             ctx.fillStyle = isSelected ? SELECT_STROKE : BED_STROKE;
             ctx.beginPath();
-            ctx.arc(14, 14, 10, 0, Math.PI * 2);
+            ctx.arc(_badgeX, _badgeY, _badgeR, 0, Math.PI * 2);
             ctx.fill();
             ctx.fillStyle = '#FFF';
-            ctx.font = 'bold 10px sans-serif';
+            ctx.font = `bold ${_fontSize}px sans-serif`;
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
-            ctx.fillText(String(bed.label ?? '?'), 14, 14);
+            ctx.fillText(String(bed.label ?? '?'), _badgeX, _badgeY);
+
 
             ctx.restore();
         }
