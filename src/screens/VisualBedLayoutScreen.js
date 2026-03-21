@@ -93,7 +93,7 @@ function resolveOverlap(movedId, rawX, rawY, beds, spaceInfo, minGapFt = 1) {
     if (!movedBed) return { x: rawX, y: rawY };
     const gapPx = minGapFt * PX_PER_FT;
     let x = rawX, y = rawY;
-    const { w: mw, h: mh } = bedPx(movedBed);
+    const { w: mw, h: mh } = bedPxVisual(movedBed);
     // Clamp to space boundary first
     if (spaceInfo) {
         x = Math.max(0, Math.min(x, spaceInfo.wPx - mw));
@@ -102,7 +102,7 @@ function resolveOverlap(movedId, rawX, rawY, beds, spaceInfo, minGapFt = 1) {
     // AABB collision + nudge against every other bed
     for (const other of beds) {
         if (other.id === movedId) continue;
-        const { w: ow, h: oh } = bedPx(other);
+        const { w: ow, h: oh } = bedPxVisual(other);
         const ox = other.x ?? 0, oy = other.y ?? 0;
         const overlapX = x < ox + ow + gapPx && x + mw + gapPx > ox;
         const overlapY = y < oy + oh + gapPx && y + mh + gapPx > oy;
@@ -134,6 +134,18 @@ function bedPx(bed) {
         h: (bed.hFt ?? BED_DEFAULT_H_FT) * PX_PER_FT,
     };
 }
+
+// Returns the VISUAL on-screen footprint of the bed, accounting for rotation.
+// Use this for boundary clamping and overlap detection.
+// The canvas draw code applies the rotation via ctx.rotate() and uses the
+// unswapped bedPx() dimensions — so bedPx() itself must NOT swap.
+function bedPxVisual(bed) {
+    const { w, h } = bedPx(bed);
+    // E/W beds are stored as rotation:90; at 90° or 270° the w/h axes are swapped
+    const rot = Math.abs((bed.rotation ?? 0) % 180);
+    return rot === 90 ? { w: h, h: w } : { w, h };
+}
+
 
 function roundRect(ctx, x, y, w, h, r = 6) {
     ctx.beginPath();
@@ -1079,7 +1091,7 @@ function BedLayoutCanvas({ beds, selectedIds, onBedDrop, onBedClick, width, heig
                     if (st.spaceInfo) {
                         const bed = st.beds.find(b => b.id === st.drag.bedId);
                         if (bed) {
-                            const { w, h } = bedPx(bed);
+                            const { w, h } = bedPxVisual(bed);
                             rawX = Math.max(0, Math.min(rawX, st.spaceInfo.wPx - w));
                             rawY = Math.max(0, Math.min(rawY, st.spaceInfo.hPx - h));
                         }
