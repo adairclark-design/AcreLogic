@@ -927,32 +927,39 @@ function BedLayoutCanvas({ beds, selectedIds, onBedDrop, onBedClick, width, heig
                 ctx.stroke();
             }
 
+
             // Border
             ctx.strokeStyle = isSelected ? SELECT_STROKE : BED_STROKE;
             ctx.lineWidth = isSelected ? 3 : 2;
             roundRect(ctx, 0, 0, w, h, 8);
             ctx.stroke();
 
-            // Bed number badge — scales with bed size so it's never too large or tiny.
-            // Use the smaller visual dimension (min of visual w, h) as the reference.
-            const _badgeRef = Math.min(w, h);           // visual short side in px
-            const _badgeR   = Math.min(28, Math.max(8, _badgeRef * 0.14));  // 14% of short side, 8–28px
-            const _badgeX   = _badgeR + 4;
-            const _badgeY   = _badgeR + 4;
-            const _fontSize = Math.round(_badgeR * 0.85);
-            ctx.fillStyle = isSelected ? SELECT_STROKE : BED_STROKE;
-            ctx.beginPath();
-            ctx.arc(_badgeX, _badgeY, _badgeR, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.fillStyle = '#FFF';
-            ctx.font = `bold ${_fontSize}px sans-serif`;
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillText(String(bed.label ?? '?'), _badgeX, _badgeY);
+            ctx.restore(); // ← end of bed-local (rotated) transform
 
-
-            ctx.restore();
+            // ── Bed number badge — drawn in world+pan space so screen size is fixed ──
+            // badgeR in world units = desired screen px / zoom → always 12px on screen.
+            {
+                const { ox: _vox, oy: _voy } = visualOffset(bed);
+                const _vtlX = (bed.x ?? 0) + _vox;   // visual top-left in world coords
+                const _vtlY = (bed.y ?? 0) + _voy;
+                const _bR   = 12 / zoom;              // 12px screen radius
+                const _bX   = _vtlX + _bR + 4 / zoom;
+                const _bY   = _vtlY + _bR + 4 / zoom;
+                const _bFs  = Math.round(_bR * 0.9);
+                ctx.save();
+                ctx.fillStyle = isSelected ? SELECT_STROKE : BED_STROKE;
+                ctx.beginPath();
+                ctx.arc(_bX, _bY, _bR, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillStyle = '#FFF';
+                ctx.font = `bold ${_bFs}px sans-serif`;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(String(bed.label ?? '?'), _bX, _bY);
+                ctx.restore();
+            }
         }
+
 
         // North compass rose (top-right, screen-space)
         drawCompass(ctx, width - 50, 50, zoom);
