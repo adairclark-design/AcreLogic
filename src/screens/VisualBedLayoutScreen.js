@@ -1898,7 +1898,7 @@ export default function VisualBedLayoutScreen({ navigation, route }) {
                         width={Platform.OS === 'web' ? width - 176 : width}
                         height={canvasH}
                         spaceInfo={spaceInfo}
-                        snapFt={snapFt}
+                        snapFt={DEFAULT_SNAP_FT}
                         minGapFt={minGapFt}
                     />
                 </View>
