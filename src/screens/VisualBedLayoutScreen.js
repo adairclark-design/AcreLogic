@@ -377,7 +377,7 @@ const cgo = StyleSheet.create({
 
 // ─── Add-Bed Sidebar ──────────────────────────────────────────────────────────
 // Fixed left panel on web/tablet with Create Bed form + selected bed actions.
-function AddBedSidebar({ onAdd, selectedBed, selectedCount = 1, onRotate, onDelete, onDeleteSelected, onAssignCrops, undoStack, onUndo, snapFt, onSnapChange, minGapFt, onMinGapChange }) {
+function AddBedSidebar({ onAdd, selectedBed, selectedCount = 1, onRotate, onDelete, onDeleteSelected, onAssignCrops, undoStack, onUndo, minGapFt, onMinGapChange }) {
     const [wFt, setWFt] = useState('4');
     const [hFt, setHFt] = useState('8');
     const [bedOri, setBedOri] = useState('NS');
@@ -466,22 +466,6 @@ function AddBedSidebar({ onAdd, selectedBed, selectedCount = 1, onRotate, onDele
             <TouchableOpacity style={[sb.actionBtn, !undoStack.length && sb.dim]} onPress={onUndo} disabled={!undoStack.length}>
                 <Text style={sb.actionTxt}>↩ Undo</Text>
             </TouchableOpacity>
-            <View style={sb.divider} />
-            {/* Snap grid picker */}
-            <Text style={sb.fieldLabel}>Side Limit</Text>
-            <View style={sb.snapRow}>
-                {SNAP_PRESETS.map(p => (
-                    <TouchableOpacity
-                        key={p.ft}
-                        style={[sb.snapBtn, snapFt === p.ft && sb.snapBtnActive]}
-                        onPress={() => onSnapChange(p.ft)}
-                    >
-                        <Text style={[sb.snapBtnTxt, snapFt === p.ft && sb.snapBtnTxtActive]}>
-                            {p.label}
-                        </Text>
-                    </TouchableOpacity>
-                ))}
-            </View>
             {/* Min spacing picker */}
             <View style={sb.divider} />
             <Text style={sb.fieldLabel}>Min. Spacing</Text>
@@ -1383,9 +1367,7 @@ export default function VisualBedLayoutScreen({ navigation, route }) {
     // Guards against useFocusEffect re-clearing beds when browser focus cycles
     const sandboxInitialized = useRef(false);
     // Configurable snap grid (feet). Shown as pill buttons in the sidebar.
-    const [snapFt, setSnapFt] = useState(DEFAULT_SNAP_FT);
-    const snapFtRef = useRef(DEFAULT_SNAP_FT);
-    useEffect(() => { snapFtRef.current = snapFt; }, [snapFt]);
+
 
     // Derived: primary selected ID + bed object (for single-bed sidebar ops)
     const selectedId  = selectedIds[0] ?? null;
@@ -1617,7 +1599,7 @@ export default function VisualBedLayoutScreen({ navigation, route }) {
                 setExtraSelectedIds(new Set());
             } else if (['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key) && selectedIdRef.current) {
                 e.preventDefault();
-                const stepPx = snapFtRef.current * PX_PER_FT;
+                const stepPx = DEFAULT_SNAP_FT * PX_PER_FT;
                 const dx = e.key === 'ArrowLeft' ? -stepPx : e.key === 'ArrowRight' ? stepPx : 0;
                 const dy = e.key === 'ArrowUp'   ? -stepPx : e.key === 'ArrowDown'  ? stepPx : 0;
                 setBeds(prev => prev.map(b => {
@@ -1901,8 +1883,8 @@ export default function VisualBedLayoutScreen({ navigation, route }) {
                         onAssignCrops={() => setShowCellGrid(true)}
                         undoStack={undoStack}
                         onUndo={undo}
-                        snapFt={snapFt}
-                        onSnapChange={setSnapFt}
+                        snapFt={DEFAULT_SNAP_FT}
+
                         minGapFt={minGapFt}
                         onMinGapChange={setMinGapFt}
                     />
