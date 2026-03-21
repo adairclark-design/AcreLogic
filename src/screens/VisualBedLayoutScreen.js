@@ -43,6 +43,7 @@ const UNDO_LIMIT = 10;
 
 // Snap grid presets (feet). User scrolls through these in the sidebar.
 const SNAP_PRESETS = [
+    { label: '0 ft',  ft: 0   },
     { label: '10 ft', ft: 10 },
     { label: '5 ft',  ft: 5  },
     { label: '2 ft',  ft: 2  },
@@ -52,9 +53,11 @@ const SNAP_PRESETS = [
 const DEFAULT_SNAP_FT = 1;
 const SNAP_PX = DEFAULT_SNAP_FT * PX_PER_FT; // 8 px — 1 foot in canvas pixels (used by grid and row-count calculations)
 
-// Dynamic snap helper: rounds val to the nearest multiple of snapFt in canvas pixels
+// Dynamic snap helper: rounds val to the nearest multiple of snapFt in canvas pixels.
+// When snapFt = 0 ("Free" preset) the value is returned as-is — no grid alignment.
 function snapTo(val, snapFt) {
-    const snapPx = Math.max(1, snapFt * PX_PER_FT);
+    if (!snapFt) return val;  // 0 ft = free positioning
+    const snapPx = snapFt * PX_PER_FT;
     return Math.round(val / snapPx) * snapPx;
 }
 
@@ -465,7 +468,7 @@ function AddBedSidebar({ onAdd, selectedBed, selectedCount = 1, onRotate, onDele
             </TouchableOpacity>
             <View style={sb.divider} />
             {/* Snap grid picker */}
-            <Text style={sb.fieldLabel}>Snap Grid</Text>
+            <Text style={sb.fieldLabel}>Side Limit</Text>
             <View style={sb.snapRow}>
                 {SNAP_PRESETS.map(p => (
                     <TouchableOpacity
