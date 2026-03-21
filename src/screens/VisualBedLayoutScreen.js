@@ -1627,7 +1627,12 @@ export default function VisualBedLayoutScreen({ navigation, route }) {
     }, []);
 
     function addBed({ wFt, hFt, ori = 'NS' }) {
-        const label = bedCounter.current++;
+        // Always assign the lowest label number not currently in use,
+        // so deleted beds' numbers are immediately reused (gap-filling).
+        const _usedLabels = new Set(beds.map(b => b.label));
+        let label = 1;
+        while (_usedLabels.has(label)) label++;
+
         const rotation = ori === 'EW' ? 90 : 0;
         // Effective footprint on the canvas (accounting for 90° rotation)
         const footW = ori === 'EW' ? hFt * PX_PER_FT : wFt * PX_PER_FT;
