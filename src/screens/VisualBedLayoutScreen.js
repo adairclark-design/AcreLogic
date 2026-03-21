@@ -995,7 +995,7 @@ function BedLayoutCanvas({ beds, selectedIds, onBedDrop, onBedClick, width, heig
 
             // Border
             ctx.strokeStyle = isSelected ? SELECT_STROKE : BED_STROKE;
-            ctx.lineWidth = isSelected ? 3 : 2;
+            ctx.lineWidth = isSelected ? 1.5 : 1;
             roundRect(ctx, 0, 0, w, h, 0);
             ctx.stroke();
 
