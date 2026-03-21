@@ -729,6 +729,7 @@ function BedLayoutCanvas({ beds, selectedIds, onBedDrop, onBedClick, width, heig
         spaceInfo: spaceInfo ?? null,
         snapFt: (snapFt !== undefined && snapFt !== null) ? snapFt : DEFAULT_SNAP_FT,
         minGapFt: minGapFt ?? 1,
+        minZoom: MIN_ZOOM,   // locked to auto-fit level in effect below
     });
 
     // ── Sync props into stateRef ───────────────────────────────────────────────
@@ -746,6 +747,7 @@ function BedLayoutCanvas({ beds, selectedIds, onBedDrop, onBedClick, width, heig
             const scaleY = (height - PAD * 2) / si.hPx;
             const z = Math.min(scaleX, scaleY);
             stateRef.current.zoom = z;
+            stateRef.current.minZoom = z;  // zoom-out cannot go below auto-fit level
             stateRef.current.pan  = {
                 x: (width  - si.wPx * z) / 2,
                 y: (height - si.hPx * z) / 2,
@@ -1047,7 +1049,6 @@ function BedLayoutCanvas({ beds, selectedIds, onBedDrop, onBedClick, width, heig
         function onDown(e) {
             const pos = toCanvas(e);
             clickStart = { x: pos.x, y: pos.y, t: Date.now() };
-            // Steal focus from sidebar inputs so keyboard Delete/arrow shortcuts work
             canvasRef.current?.focus();
             const st = stateRef.current;
             const hit = hitTest(pos.x, pos.y);
@@ -1059,6 +1060,10 @@ function BedLayoutCanvas({ beds, selectedIds, onBedDrop, onBedClick, width, heig
                     origX: hit.x ?? 60,
                     origY: hit.y ?? 60,
                 };
+            } else {
+                // No bed hit — start canvas pan
+                st.panning = true;
+                st.panStart = { x: pos.x, y: pos.y, ox: st.pan.x, oy: st.pan.y };
             }
         }
 
@@ -1073,6 +1078,13 @@ function BedLayoutCanvas({ beds, selectedIds, onBedDrop, onBedClick, width, heig
                 // Optimistic local update for smooth drag
                 const bed = st.beds.find(b => b.id === st.drag.bedId);
                 if (bed) { bed.x = newX; bed.y = newY; }
+                redraw();
+            } else if (st.panning && st.panStart) {
+                // Canvas pan
+                st.pan = {
+                    x: st.panStart.ox + (pos.x - st.panStart.x),
+                    y: st.panStart.oy + (pos.y - st.panStart.y),
+                };
                 redraw();
             }
         }
@@ -1106,36 +1118,109 @@ function BedLayoutCanvas({ beds, selectedIds, onBedDrop, onBedClick, width, heig
                 }
                 st.drag = null;
             } else {
-                // Click on empty canvas — deselect
+                // Panning ended (or tap on empty canvas)
                 const dt  = Date.now() - clickStart.t;
                 const ddx = pos.x - clickStart.x;
                 const ddy = pos.y - clickStart.y;
                 if (dt < 250 && Math.sqrt(ddx * ddx + ddy * ddy) < 5) {
-                    onBedClick(null, false);
+                    onBedClick(null, false);   // short tap → deselect
                 }
+                // Always clean up panning state
+                st.panning  = false;
+                st.panStart = null;
             }
         }
 
-        // Zoom/pan intentionally removed — canvas uses auto-fit (static viewport)
+        // ── Mouse wheel zoom (toward cursor position) ────────────────────────
+        function onWheel(e) {
+            e.preventDefault();
+            const st = stateRef.current;
+            const factor   = e.deltaY < 0 ? 1.12 : 1 / 1.12;   // ~12% per tick
+            const newZoom  = Math.min(MAX_ZOOM, Math.max(st.minZoom, st.zoom * factor));
+            if (Math.abs(newZoom - st.zoom) < 0.001) return;
+            // Zoom toward the mouse cursor so the point under the cursor stays fixed
+            const rect = canvas.getBoundingClientRect();
+            const mx = e.clientX - rect.left;
+            const my = e.clientY - rect.top;
+            st.pan  = {
+                x: mx - (mx - st.pan.x) * (newZoom / st.zoom),
+                y: my - (my - st.pan.y) * (newZoom / st.zoom),
+            };
+            st.zoom = newZoom;
+            redraw();
+        }
+        canvas.addEventListener('wheel', onWheel, { passive: false });
+
+        // ── Touch pinch zoom ───────────────────────────────────────────
+        let lastPinchDist = null;
+        function getTouchDist(e) {
+            if (e.touches.length < 2) return null;
+            const dx = e.touches[0].clientX - e.touches[1].clientX;
+            const dy = e.touches[0].clientY - e.touches[1].clientY;
+            return Math.sqrt(dx * dx + dy * dy);
+        }
+        function onTouchPinch(e) {
+            if (e.touches.length !== 2) { lastPinchDist = null; return; }
+            e.preventDefault();
+            const dist = getTouchDist(e);
+            if (dist !== null && lastPinchDist !== null) {
+                const st     = stateRef.current;
+                const factor = dist / lastPinchDist;
+                const newZoom = Math.min(MAX_ZOOM, Math.max(st.minZoom, st.zoom * factor));
+                const rect = canvas.getBoundingClientRect();
+                const mx = (e.touches[0].clientX + e.touches[1].clientX) / 2 - rect.left;
+                const my = (e.touches[0].clientY + e.touches[1].clientY) / 2 - rect.top;
+                st.pan  = {
+                    x: mx - (mx - st.pan.x) * (newZoom / st.zoom),
+                    y: my - (my - st.pan.y) * (newZoom / st.zoom),
+                };
+                st.zoom = newZoom;
+                redraw();
+            }
+            lastPinchDist = dist;
+        }
 
         canvas.addEventListener('mousedown', onDown);
         canvas.addEventListener('mousemove', onMove);
-        canvas.addEventListener('mouseup', onUp);
-        canvas.addEventListener('touchstart', onDown, { passive: true });
-        canvas.addEventListener('touchmove', onMove, { passive: true });
-        canvas.addEventListener('touchend', onUp);
+        canvas.addEventListener('mouseup',   onUp);
+        canvas.addEventListener('touchstart', onDown,       { passive: true });
+        canvas.addEventListener('touchmove',  onTouchPinch, { passive: false });
+        canvas.addEventListener('touchend',   onUp);
 
         return () => {
             canvas.removeEventListener('mousedown', onDown);
             canvas.removeEventListener('mousemove', onMove);
-            canvas.removeEventListener('mouseup', onUp);
+            canvas.removeEventListener('mouseup',   onUp);
             canvas.removeEventListener('touchstart', onDown);
-            canvas.removeEventListener('touchmove', onMove);
-            canvas.removeEventListener('touchend', onUp);
+            canvas.removeEventListener('touchmove',  onTouchPinch);
+            canvas.removeEventListener('touchend',   onUp);
+            canvas.removeEventListener('wheel',      onWheel);
         };
     }, [onBedDrop, onBedClick, redraw]);
 
     // Redraw handled by main sync useEffect (which now includes width/height deps)
+
+    // ── Zoom click helpers (called by the overlay buttons) ───────────────────
+    function doZoom(factor) {
+        const st  = stateRef.current;
+        const newZ = Math.min(MAX_ZOOM, Math.max(st.minZoom, st.zoom * factor));
+        if (Math.abs(newZ - st.zoom) < 0.001) return;
+        const cx = width / 2, cy = height / 2;  // zoom toward canvas center
+        st.pan  = { x: cx - (cx - st.pan.x) * (newZ / st.zoom), y: cy - (cy - st.pan.y) * (newZ / st.zoom) };
+        st.zoom = newZ;
+        redraw();
+    }
+    function doZoomReset() {
+        // Snap back to the auto-fit view
+        const st = stateRef.current;
+        const si = st.spaceInfo;
+        if (!si || !si.wPx || !si.hPx) return;
+        const PAD = 28;
+        const z = Math.min((width - PAD * 2) / si.wPx, (height - PAD * 2) / si.hPx);
+        st.zoom = z;
+        st.pan  = { x: (width - si.wPx * z) / 2, y: (height - si.hPx * z) / 2 };
+        redraw();
+    }
 
     if (Platform.OS !== 'web') {
         return (
@@ -1152,15 +1237,56 @@ function BedLayoutCanvas({ beds, selectedIds, onBedDrop, onBedClick, width, heig
     }
 
     return (
-        <canvas
-            ref={canvasRef}
-            width={width}
-            height={height}
-            tabIndex={0}
-            style={{ display: 'block', cursor: 'default', outline: 'none' }}
-        />
+        <View style={{ flex: 1, position: 'relative' }}>
+            <canvas
+                ref={canvasRef}
+                width={width}
+                height={height}
+                tabIndex={0}
+                style={{ display: 'block', cursor: 'default', outline: 'none' }}
+            />
+            {/* Zoom overlay — bottom-right corner of the canvas */}
+            <View style={zoomOverlay.wrap}>
+                <TouchableOpacity style={zoomOverlay.btn} onPress={() => doZoom(1.3)} activeOpacity={0.75}>
+                    <Text style={zoomOverlay.txt}>+</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={zoomOverlay.btn} onPress={doZoomReset} activeOpacity={0.75}>
+                    <Text style={[zoomOverlay.txt, { fontSize: 13 }]}>⊙</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={zoomOverlay.btn} onPress={() => doZoom(1 / 1.3)} activeOpacity={0.75}>
+                    <Text style={zoomOverlay.txt}>−</Text>
+                </TouchableOpacity>
+            </View>
+        </View>
     );
 }
+
+// ─── Zoom overlay button styles ───────────────────────────────────────────────
+const zoomOverlay = StyleSheet.create({
+    wrap: {
+        position: 'absolute',
+        bottom: 50,
+        right: 16,
+        gap: 6,
+    },
+    btn: {
+        width: 36, height: 36,
+        borderRadius: 18,
+        backgroundColor: 'rgba(255,255,255,0.92)',
+        borderWidth: 1.5,
+        borderColor: 'rgba(45,79,30,0.25)',
+        alignItems: 'center',
+        justifyContent: 'center',
+        shadowColor: '#000',
+        shadowOpacity: 0.12,
+        shadowRadius: 4,
+        shadowOffset: { width: 0, height: 2 },
+    },
+    txt: {
+        fontSize: 18, lineHeight: 22, fontWeight: '700',
+        color: '#2D4F1E',
+    },
+});
 
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 export default function VisualBedLayoutScreen({ navigation, route }) {
