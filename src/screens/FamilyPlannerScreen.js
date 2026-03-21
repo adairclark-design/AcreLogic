@@ -884,7 +884,7 @@ export default function FamilyPlannerScreen({ navigation }) {
                         ) : viewMode === 'seeds' ? (
                             <SeedShoppingList crops={planResult.supported} />
                         ) : viewMode === 'yield' ? (
-                            <YieldForecast crops={planResult.supported} />
+                            <YieldForecast crops={planResult.supported} gardenProfile={gardenProfile} />
                         ) : (
                         (() => {
                             const cards = planResult.supported;

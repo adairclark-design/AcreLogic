@@ -14,124 +14,17 @@
 import React from 'react';
 import { View, Text, ScrollView, StyleSheet } from 'react-native';
 import { Colors, Typography, Spacing, Radius, Shadows } from '../theme';
-
-// ─── Retail price reference (USDA avg retail, $/lb) ─────────────────────────
-// Category baselines — used when no crop-specific override is present.
-// Sources: USDA AMS Market News, national average retail 2023-2025.
-const RETAIL_PRICE_PER_LB = {
-    'Greens':     3.00,
-    'Brassica':   2.50,
-    'Root':       1.50,
-    'Tuber':      1.00,
-    'Allium':     1.75,   // updated: garlic & shallots skew higher than plain onion
-    'Legume':     3.00,
-    'Herb':       8.00,   // category median — overrides below handle wide spread
-    'Nightshade': 2.75,
-    'Cucurbit':   1.50,
-    'Specialty':  3.00,
-    'Grain':      1.00,
-    'Fruit':      4.00,
-    'Cover Crop': null,   // not harvested for food
-    'Flower':     null,   // priced per stem, not weight
-};
-
-// ─── Crop-specific retail price overrides ─────────────────────────────────────
-// Applied when a crop's real retail price diverges significantly from its
-// category average. All values are national USDA AMS avg retail $/lb.
-const CROP_RETAIL_OVERRIDES = {
-    // ── Herbs: widest spread of any category ──────────────────────────────────
-    cilantro_santo:        4.00,  // abundant, sold by bunch at grocery scale
-    cilantro_slow_bolt:    4.00,
-    parsley_flat_leaf:     6.00,
-    parsley_root:          5.00,
-    dill_fernleaf:         8.00,
-    basil_genovese:       10.00,
-    basil_thai:            8.00,
-    basil_purple:          8.00,
-    basil_lemon:           8.00,
-    mint_spearmint:        8.00,
-    mint_peppermint:       8.00,
-    mint_apple:            7.00,
-    chives_standard:       9.00,
-    tarragon_french:      18.00,  // specialty, rarely sold in volume
-    thyme_english:        16.00,
-    lemon_thyme:          14.00,
-    oregano_greek:        14.00,
-    marjoram_standard:    14.00,
-    sage_garden:          18.00,
-    rosemary_tuscan_blue: 14.00,
-    winter_savory:        14.00,
-    summer_savory:        12.00,
-    chamomile_german:     12.00,  // fresh weight; dried commands much more
-    lemon_balm:            8.00,
-    lovage_standard:      10.00,
-    borage_standard:       8.00,
-    stevia_standard:      12.00,
-    korean_mint:           8.00,
-    lemon_verbena:        14.00,
-    fenugreek_standard:    5.00,
-    caraway_standard:      6.00,
-    epazote_standard:      5.00,
-    vietnamese_coriander:  7.00,
-    culantro:              6.00,
-    echinacea_purpurea:   10.00,
-    ashwagandha_standard:  8.00,
-    // ── Root outliers (much higher than $1.50 category avg) ───────────────────
-    ginger_rhizome:        6.00,  // fresh ginger retail avg
-    turmeric_standard:     7.00,  // fresh turmeric root retail avg
-    // ── Allium: garlic & shallots command premium over plain onion ────────────
-    garlic_music:          8.00,  // fresh garlic, store avg
-    shallots_ambition:     5.00,
-    cipollini_onion:       3.00,
-    // ── Nightshade: cherry tomatoes and sweet peppers fetch more ──────────────
-    cherry_tomato_sungold: 5.00,  // cherry/grape tomatoes retail premium
-    tomato_yellow_pear:    5.00,
-    tomato_black_cherry:   5.00,
-    tomato_large_red_cherry: 4.50,
-    tomato_juliet:         4.50,
-    pepper_shishito:       5.00,
-    pepper_padron:         5.00,
-    pepper_mini_sweet:     4.00,
-    // ── Specialty crops ───────────────────────────────────────────────────────
-    asparagus_millennium:  5.00,  // USDA avg fresh asparagus ~$4.50–$5.50/lb
-    asparagus_purple:      5.50,
-    asparagus_mary_washington: 5.00,
-    artichoke_imperial:    4.00,  // per-head retail premium
-    artichoke_violetto:    4.00,
-    lemongrass_standard:   5.00,
-    // ── Fruits & Berries ──────────────────────────────────────────────────────
-    strawberry_seascape:   5.00,
-    strawberry_alpine:     7.00,
-    raspberry_everbearing: 8.00,
-    blackberry_thornless:  6.00,
-    currant_red:           6.00,
-    currant_black:         6.00,
-    elderberry_standard:   8.00,
-    honeyberry_standard:   7.00,
-    aronia_chokeberry:     5.00,
-    goji_berry:            8.00,
-};
-
-const DEFAULT_RETAIL = 2.00;
-
-// Look up retail price: crop-specific override first, then category baseline.
-function priceFor(category, cropId) {
-    if (cropId && CROP_RETAIL_OVERRIDES[cropId] != null) {
-        return CROP_RETAIL_OVERRIDES[cropId];
-    }
-    const p = RETAIL_PRICE_PER_LB[category];
-    return (p == null) ? null : p;
-}
+import { getRetailPrice, getRegionName } from '../services/cropPricing';
 
 function fmt(n) { return `$${n.toFixed(2)}`; }
 function fmtRange(lo, hi) { return `${lo}–${hi} lbs`; }
 
 // ─── Bar chart helpers ────────────────────────────────────────────────────────
 
-function BarRow({ crop, maxYield, barColor }) {
+function BarRow({ crop, maxYield, barColor, zipCode }) {
     const pct = maxYield > 0 ? (crop.yieldHigh ?? 0) / maxYield : 0;
     const barW = `${Math.max(4, Math.round(pct * 100))}%`;
-    const price = priceFor(crop.category, crop.cropId);
+    const price = getRetailPrice(crop.cropId, crop.category, zipCode);
     const valueLow  = price != null ? Math.round((crop.yieldLow  ?? 0) * price) : null;
     const valueHigh = price != null ? Math.round((crop.yieldHigh ?? 0) * price) : null;
 
@@ -156,8 +49,8 @@ function BarRow({ crop, maxYield, barColor }) {
 
 // ─── Breakdown table row ──────────────────────────────────────────────────────
 
-function TableRow({ crop, isAlt }) {
-    const price = priceFor(crop.category, crop.cropId);
+function TableRow({ crop, isAlt, zipCode }) {
+    const price = getRetailPrice(crop.cropId, crop.category, zipCode);
     const valueLow  = price != null ? Math.round((crop.yieldLow  ?? 0) * price) : null;
     const valueHigh = price != null ? Math.round((crop.yieldHigh ?? 0) * price) : null;
 
@@ -179,7 +72,25 @@ function TableRow({ crop, isAlt }) {
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-export default function YieldForecast({ crops }) {
+export default function YieldForecast({ crops, gardenProfile }) {
+    // Extract zip from gardenProfile — try explicit fields first, then regex on user input / address
+    const _extractZip = (profile) => {
+        if (!profile) return null;
+        if (profile.zip)     return String(profile.zip);
+        if (profile.zipCode) return String(profile.zipCode);
+        if (profile._raw?.zip)     return String(profile._raw.zip);
+        if (profile._raw?.zipCode) return String(profile._raw.zipCode);
+        // Try regex on the original typed input (embedded by LocationStep)
+        const inputMatch = profile._userInput?.match(/\b(\d{5})(?:-\d{4})?\b/);
+        if (inputMatch) return inputMatch[1];
+        // Try regex on the address string (may contain zip after geocoding)
+        const addrMatch = profile.address?.match(/\b(\d{5})(?:-\d{4})?\b/);
+        if (addrMatch) return addrMatch[1];
+        return null;
+    };
+    const zipCode = _extractZip(gardenProfile);
+    const regionName = getRegionName(zipCode);
+    const hasRegion = zipCode && regionName !== 'National';
     // Separate produce crops from flowers / cover crops
     const produceCrops = crops.filter(c =>
         !c.isFlower && c.yieldLow != null && c.yieldHigh != null && c.yieldHigh > 0
@@ -205,13 +116,13 @@ export default function YieldForecast({ crops }) {
     const totalHigh = produceCrops.reduce((s, c) => s + (c.yieldHigh ?? 0), 0);
     const totalTarget = produceCrops.reduce((s, c) => s + (c.targetLbs ?? 0), 0);
 
-    // Retail value totals — use crop-specific overrides where available
+    // Retail value totals — use full crop-specific prices with regional adjustment
     const valueLow  = produceCrops.reduce((s, c) => {
-        const p = priceFor(c.category, c.cropId);
+        const p = getRetailPrice(c.cropId, c.category, zipCode);
         return s + (p != null ? (c.yieldLow ?? 0) * p : 0);
     }, 0);
     const valueHigh = produceCrops.reduce((s, c) => {
-        const p = priceFor(c.category, c.cropId);
+        const p = getRetailPrice(c.cropId, c.category, zipCode);
         return s + (p != null ? (c.yieldHigh ?? 0) * p : 0);
     }, 0);
 
@@ -249,7 +160,8 @@ export default function YieldForecast({ crops }) {
             {/* ── Hero subtext — clarifies what the numbers mean ── */}
             <View style={styles.heroNote}>
                 <Text style={styles.heroNoteText}>
-                    Planting sized to your family's seasonal targets · retail value at USDA avg prices
+                    Planting sized to your family's seasonal targets
+                    {hasRegion ? ` · ${regionName} regional prices` : ' · national avg retail prices'}
                 </Text>
             </View>
 
@@ -273,6 +185,7 @@ export default function YieldForecast({ crops }) {
                             crop={c}
                             maxYield={maxYield}
                             barColor={barColor(c.category)}
+                            zipCode={zipCode}
                         />
                     ))}
                 </View>
@@ -291,7 +204,7 @@ export default function YieldForecast({ crops }) {
                         <Text style={[styles.tdValue, styles.thText]}>Est. Value</Text>
                     </View>
                     {sortedByYield.map((c, i) => (
-                        <TableRow key={c.cropId} crop={c} isAlt={i % 2 === 1} />
+                        <TableRow key={c.cropId} crop={c} isAlt={i % 2 === 1} zipCode={zipCode} />
                     ))}
                     {/* Total row */}
                     <View style={styles.totalRow}>

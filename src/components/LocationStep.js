@@ -95,7 +95,9 @@ export default function LocationStep({
     };
 
     const handleContinue = () => {
-        onDone(profile);
+        // Embed the user's original typed input so downstream components
+        // (e.g. YieldForecast) can extract a zip code for regional pricing.
+        onDone({ ...profile, _userInput: address.trim() });
     };
 
     const handleSkip = () => {
