@@ -37,6 +37,9 @@ import {
     calculateGardenPlan,
 } from '../services/homeGardenCalculator';
 import UpgradeModal from '../components/UpgradeModal';
+import ActionCalendar from '../components/ActionCalendar';
+import SeedShoppingList from '../components/SeedShoppingList';
+import YieldForecast from '../components/YieldForecast';
 import CROP_IMAGES from '../data/cropImages';
 import CROPS_DATA from '../data/crops.json';
 import { exportGardenPlan } from '../services/planExporter';
@@ -514,6 +517,7 @@ export default function GardenSpacePlannerScreen({ navigation }) {
     const [cropSearch, setCropSearch]   = useState('');
     const [planResult, setPlanResult]   = useState(null);
     const [showReport, setShowReport]   = useState(false);   // within step 3
+    const [viewMode, setViewMode]       = useState('cards'); // 'cards' | 'calendar' | 'seeds' | 'yield'
 
     // ── Upgrade modal ─────────────────────────────────────────────────────────
     const [upgradeVisible, setUpgradeVisible]   = useState(false);
@@ -1360,8 +1364,55 @@ export default function GardenSpacePlannerScreen({ navigation }) {
                             </Text>
                         </View>
 
-                        {/* Report cards — responsive multi-column grid (matches FamilyPlannerScreen) */}
-                        {(() => {
+                        {/* —— View mode tab bar (4 tabs) —— */}
+                        <View style={styles.viewTabBar}>
+                            <TouchableOpacity
+                                style={[styles.viewTab, viewMode === 'cards' && styles.viewTabActive]}
+                                onPress={() => setViewMode('cards')}
+                            >
+                                <Text style={[styles.viewTabText, viewMode === 'cards' && styles.viewTabTextActive]}>
+                                    📋  Cards
+                                </Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                style={[styles.viewTab, viewMode === 'calendar' && styles.viewTabActive]}
+                                onPress={() => setViewMode('calendar')}
+                            >
+                                <Text style={[styles.viewTabText, viewMode === 'calendar' && styles.viewTabTextActive]}>
+                                    📅  Calendar
+                                </Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                style={[styles.viewTab, viewMode === 'seeds' && styles.viewTabActive]}
+                                onPress={() => setViewMode('seeds')}
+                            >
+                                <Text style={[styles.viewTabText, viewMode === 'seeds' && styles.viewTabTextActive]}>
+                                    🛒  Seeds
+                                </Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                style={[styles.viewTab, viewMode === 'yield' && styles.viewTabActive]}
+                                onPress={() => setViewMode('yield')}
+                            >
+                                <Text style={[styles.viewTabText, viewMode === 'yield' && styles.viewTabTextActive]}>
+                                    📊  Yield
+                                </Text>
+                            </TouchableOpacity>
+                        </View>
+
+                        {/* Conditional content based on tab */}
+                        {viewMode === 'calendar' ? (
+                            <ActionCalendar
+                                crops={planResult.supported}
+                                gardenProfile={gardenFarmProfile}
+                            />
+                        ) : viewMode === 'seeds' ? (
+                            <SeedShoppingList crops={planResult.supported} />
+                        ) : viewMode === 'yield' ? (
+                            <YieldForecast crops={planResult.supported} />
+                        ) : (
+                        // —— Default: cards grid ——
+                        (() => {
                             const cards = planResult.supported;
                             const rows = [];
                             for (let i = 0; i < cards.length; i += planColumns) {
@@ -1406,7 +1457,8 @@ export default function GardenSpacePlannerScreen({ navigation }) {
                                     </View>
                                 </ScrollView>
                             );
-                        })()}
+                        })()
+                        )}
 
                         <View style={styles.footer}>
                             <View style={{ flexDirection: 'row', gap: Spacing.sm }}>
@@ -1872,7 +1924,39 @@ const styles = StyleSheet.create({
     successionIcon: { fontSize: 13, lineHeight: 18 },
     successionText: { flex: 1, fontSize: Typography.xs, color: '#7a5800', lineHeight: 16 },
 
+
+    // ── Plan view tab bar (Cards / Calendar / Seeds / Yield) ─────────────────
+    viewTabBar: {
+        flexDirection: 'row',
+        backgroundColor: Colors.white,
+        marginHorizontal: Spacing.lg,
+        marginTop: Spacing.sm,
+        marginBottom: Spacing.sm,
+        borderRadius: Radius.full,
+        borderWidth: 1.5,
+        borderColor: 'rgba(45,79,30,0.15)',
+        overflow: 'hidden',
+    },
+    viewTab: {
+        flex: 1,
+        paddingVertical: 8,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    viewTabActive: {
+        backgroundColor: Colors.primaryGreen,
+    },
+    viewTabText: {
+        fontSize: Typography.xs,
+        fontWeight: Typography.semiBold,
+        color: Colors.primaryGreen,
+    },
+    viewTabTextActive: {
+        color: '#fff',
+    },
+
     goodLuck: { alignItems: 'center', paddingVertical: Spacing.xl, gap: Spacing.sm },
+
     goodLuckTitle: { fontSize: Typography.xl, fontWeight: Typography.bold, color: Colors.primaryGreen },
     goodLuckSub:   { fontSize: Typography.sm, color: Colors.mutedText },
 
