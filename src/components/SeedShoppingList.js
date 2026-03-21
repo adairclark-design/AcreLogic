@@ -110,10 +110,31 @@ const CROP_SPECS_OVERRIDE = {
 
 const DEFAULT_SPECS = { seedsPerPacket: 50, price: 4.99, unit: 'seeds' };
 
-// Check crop-specific override first, then fall back to category average.
+/**
+ * Return seed packet specs for a crop.
+ *
+ * Priority (most-specific wins):
+ *   1. Crop's own data fields (seeds_per_packet etc.) from crops.json
+ *   2. CROP_SPECS_OVERRIDE — code-level fallbacks for any crop missing data fields
+ *   3. CATEGORY_SPECS      — category-level defaults
+ *   4. DEFAULT_SPECS       — absolute fallback
+ */
 function specsFor(crop) {
-    return CROP_SPECS_OVERRIDE[crop.cropId] ?? CATEGORY_SPECS[crop.category] ?? DEFAULT_SPECS;
+    // Prefer data-file fields if the crop has them
+    if (crop.seeds_per_packet != null) {
+        return {
+            seedsPerPacket:    crop.seeds_per_packet,
+            price:             crop.seed_price_usd   ?? 3.99,
+            unit:              crop.seed_unit         ?? 'seeds',
+            isSpecial:         crop.is_special_purchase ?? false,
+        };
+    }
+    // Code-level override table (covers any crops not yet in the data)
+    return CROP_SPECS_OVERRIDE[crop.cropId]
+        ?? CATEGORY_SPECS[crop.category]
+        ?? DEFAULT_SPECS;
 }
+
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
