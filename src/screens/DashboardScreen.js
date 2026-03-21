@@ -246,7 +246,10 @@ export default function DashboardScreen({ navigation, route }) {
             </View>
 
             <Animated.ScrollView
-                style={{ opacity: fadeAnim, flex: 1 }}
+                style={[
+                    { opacity: fadeAnim, flex: 1 },
+                    Platform.OS === 'web' && { overflowY: 'scroll', WebkitOverflowScrolling: 'touch' },
+                ]}
                 contentContainerStyle={s.scroll}
                 showsVerticalScrollIndicator={false}
             >
@@ -299,7 +302,11 @@ export default function DashboardScreen({ navigation, route }) {
 
 // ─── Styles ────────────────────────────────────────────────────────────────────
 const s = StyleSheet.create({
-    container: { flex: 1, backgroundColor: '#F5F2EA' },
+    container: {
+        flex: 1,
+        backgroundColor: '#F5F2EA',
+        ...(Platform.OS === 'web' ? { maxHeight: '100dvh', overflow: 'hidden' } : {}),
+    },
 
     // Header
     header: {
