@@ -1,387 +1,482 @@
-/**
- * CropCalendarScreen
- * Shows all beds grouped as single rows, each with planting segments.
- * Changes (#1-#7): DS/TP shorthand, IGD, tray dates, seed/bed labels, no book refs.
- */
 import React, { useEffect, useState } from 'react';
 import {
     View, Text, StyleSheet, ScrollView, TouchableOpacity,
-    ActivityIndicator, Platform, Modal, Animated,
+    ActivityIndicator, Platform
 } from 'react-native';
 import { Colors, Typography, Spacing, Radius, Shadows } from '../theme';
-import { generateFullCalendar } from '../services/calendarGenerator';
-import { calculateFarmYield } from '../services/yieldCalculator';
+import { generateBedCalendar } from '../services/calendarGenerator';
+import { loadBlocks, loadBlockBeds } from '../services/persistence';
+import GlobalNavBar from '../components/GlobalNavBar';
 import cropData from '../data/crops.json';
 
-// Matches yieldCalculator.js BED_LENGTH_FT constant
-const BED_LENGTH_FT = 50;
-// Matches yieldCalculator.js YIELD_VARIANCE — kept in sync
-const YIELD_VARIANCE = {
-    'Greens': { low: 0.65, high: 1.00 },
-    'Herb': { low: 0.70, high: 1.00 },
-    'Brassica': { low: 0.70, high: 0.95 },
-    'Nightshade': { low: 0.55, high: 1.00 },
-    'Cucurbit': { low: 0.60, high: 1.00 },
-    'Root': { low: 0.75, high: 0.95 },
-    'Allium': { low: 0.75, high: 0.95 },
-    'Legume': { low: 0.70, high: 0.95 },
-    'Flower': { low: 0.65, high: 1.00 },
-    'Specialty': { low: 0.65, high: 0.95 },
-};
-const DEFAULT_VARIANCE = { low: 0.70, high: 1.00 };
-
-// ─── Colors per action ────────────────────────────────────────────────────────
-const ACTION_COLOR = {
-    direct_seed: Colors.primaryGreen,
-    transplant: Colors.burntOrange,
-    seed_start: Colors.softLavender,
-    cover_crop: Colors.mutedText,
+// ─── Event type config (Same as ActionCalendar with slight Farm tweaks) ──────
+const EVENT_TYPES = {
+    seed_start: { emoji: '🌱', label: 'Start indoors',  color: '#2E7D32', bg: '#E8F5E9', border: '#A5D6A7' },
+    direct_seed:{ emoji: '💧', label: 'Direct sow',     color: '#1565C0', bg: '#E3F2FD', border: '#90CAF9' },
+    buy_starts: { emoji: '🛍️', label: 'Buy starts',    color: '#6A1B9A', bg: '#F3E5F5', border: '#CE93D8' },
+    transplant: { emoji: '🌤', label: 'Transplant out', color: '#E65100', bg: '#FFF3E0', border: '#FFCC80' },
+    harvest:    { emoji: '✂️', label: 'Harvest',        color: '#BF360C', bg: '#FBE9E7', border: '#FFAB91' },
+    cover_crop: { emoji: '🌾', label: 'Sow Cover',      color: '#4E342E', bg: '#EFEBE9', border: '#BCAAA4' },
+    scout:      { emoji: '🛡️', label: 'IPM Scout',      color: '#6A1B9A', bg: '#F3E5F5', border: '#CE93D8' },
 };
 
-// ─── Short labels (#4) ────────────────────────────────────────────────────────
-const ACTION_SHORT = {
-    direct_seed: 'DS',
-    transplant: 'TP',
-    seed_start: 'Tray',
-    cover_crop: 'CC',
-};
+const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 
-function fmtDate(iso) {
-    if (!iso) return '—';
-    const d = new Date(iso + 'T12:00:00');
-    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+function parseISO(d) {
+    if (!d) return null;
+    if (d instanceof Date) return d;
+    if (d.length <= 10) {
+        const [y, m, day] = d.split('-').map(Number);
+        return new Date(y, m - 1, day);
+    }
+    return new Date(d); // for full ISO strings
 }
 
-// ─── Single planting segment inside a bed row (#3) ───────────────────────────
-// ─── Harvest Detail Modal ────────────────────────────────────────────────────
-function HarvestDetailModal({ entry, visible, onClose }) {
-    if (!entry) return null;
-    // Look up harvest metadata from crops.json
-    const cropMeta = cropData.crops.find(c =>
-        c.name?.toLowerCase() === entry.crop_name?.toLowerCase() ||
-        c.id === entry.crop_id
-    );
-    return (
-        <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-            <TouchableOpacity style={hdStyles.backdrop} activeOpacity={1} onPress={onClose}>
-                <View style={hdStyles.card} onStartShouldSetResponder={() => true}>
-                    {/* Header */}
-                    <View style={hdStyles.header}>
-                        <Text style={hdStyles.emoji}>{cropMeta?.emoji ?? '🌱'}</Text>
-                        <View style={hdStyles.headerText}>
-                            <Text style={hdStyles.title}>{entry.crop_name}</Text>
-                            {entry.crop_variety ? <Text style={hdStyles.variety}>{entry.crop_variety}</Text> : null}
-                        </View>
-                        <TouchableOpacity style={hdStyles.closeBtn} onPress={onClose}>
-                            <Text style={hdStyles.closeBtnText}>✕</Text>
-                        </TouchableOpacity>
-                    </View>
-
-                    <View style={hdStyles.divider} />
-
-                    {/* Harvest Frequency */}
-                    <View style={hdStyles.row}>
-                        <Text style={hdStyles.rowLabel}>⏱ Harvest Frequency</Text>
-                        <Text style={hdStyles.rowValue}>{cropMeta?.harvest_frequency ?? 'See notes'}</Text>
-                    </View>
-                    {/* Harvest Method */}
-                    <View style={hdStyles.row}>
-                        <Text style={hdStyles.rowLabel}>✂️ Method</Text>
-                        <Text style={hdStyles.rowValue}>{cropMeta?.harvest_method ?? cropMeta?.harvest_notes ?? '—'}</Text>
-                    </View>
-                    {/* Yield (lbs) — label matches crops.json source unit: per 100ft row */}
-                    <View style={hdStyles.row}>
-                        <Text style={hdStyles.rowLabel}>📦 Expected yield (per 100ft row)</Text>
-                        <Text style={hdStyles.rowValue}>
-                            {(() => {
-                                if (cropMeta?.harvest_expectation) return cropMeta.harvest_expectation;
-                                const raw100ft = cropMeta?.yield_lbs_per_100ft;
-                                if (!raw100ft) return '—';
-                                const baseLbs = raw100ft * (BED_LENGTH_FT / 100);
-                                const v = YIELD_VARIANCE[cropMeta?.category] ?? DEFAULT_VARIANCE;
-                                const low = Math.round(baseLbs * v.low);
-                                const high = Math.round(baseLbs * v.high);
-                                return low === high ? `${high} lbs` : `${low}–${high} lbs`;
-                            })()}
-                        </Text>
-                    </View>
-                    {/* Bunches yield — only shown when crop has bunch data */}
-                    {cropMeta?.yield_bunches_per_100ft ? (
-                        <View style={hdStyles.row}>
-                            <Text style={hdStyles.rowLabel}>🫙 Expected bunches (per 100ft row)</Text>
-                            <Text style={hdStyles.rowValue}>
-                                {(() => {
-                                    const raw = cropMeta.yield_bunches_per_100ft;
-                                    const v = YIELD_VARIANCE[cropMeta?.category] ?? DEFAULT_VARIANCE;
-                                    const low = Math.round(raw * v.low);
-                                    const high = Math.round(raw * v.high);
-                                    return low === high ? `~${high} bunches` : `${low}–${high} bunches`;
-                                })()}
-                            </Text>
-                        </View>
-                    ) : null}
-                    {/* DTM reminder */}
-                    <View style={hdStyles.row}>
-                        <Text style={hdStyles.rowLabel}>📅 Days to maturity</Text>
-                        <Text style={hdStyles.rowValue}>{entry.dtm ?? cropMeta?.dtm ?? '?'} days</Text>
-                    </View>
-                    {cropMeta?.notes ? (
-                        <View style={[hdStyles.row, hdStyles.noteRow]}>
-                            <Text style={hdStyles.noteText}>{cropMeta.notes}</Text>
-                        </View>
-                    ) : null}
-
-                    <TouchableOpacity style={hdStyles.doneBtn} onPress={onClose}>
-                        <Text style={hdStyles.doneBtnText}>Got it</Text>
-                    </TouchableOpacity>
-                </View>
-            </TouchableOpacity>
-        </Modal>
-    );
+function startOfWeek(d) {
+    const x = new Date(d), day = x.getDay();
+    x.setDate(x.getDate() - (day === 0 ? 6 : day - 1));
+    return x;
 }
 
-const hdStyles = StyleSheet.create({
-    backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'center', alignItems: 'center', padding: 24 },
-    card: { backgroundColor: '#FAFAF7', borderRadius: 20, padding: 20, width: '100%', maxWidth: 420, gap: 8 },
-    header: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-    emoji: { fontSize: 36 },
-    headerText: { flex: 1 },
-    title: { fontSize: 18, fontWeight: '800', color: '#2D4F1E' },
-    variety: { fontSize: 11, color: '#757575' },
-    closeBtn: { width: 28, height: 28, borderRadius: 14, backgroundColor: 'rgba(45,79,30,0.08)', alignItems: 'center', justifyContent: 'center' },
-    closeBtnText: { fontSize: 12, color: '#2D4F1E', fontWeight: '700' },
-    divider: { height: 1, backgroundColor: 'rgba(45,79,30,0.1)', marginVertical: 4 },
-    row: { gap: 2 },
-    rowLabel: { fontSize: 10, fontWeight: '800', color: '#2D4F1E', letterSpacing: 0.5, textTransform: 'uppercase' },
-    rowValue: { fontSize: 13, color: '#3D3D3D', lineHeight: 18 },
-    noteRow: { backgroundColor: 'rgba(45,79,30,0.05)', borderRadius: 8, padding: 8, marginTop: 2 },
-    noteText: { fontSize: 11, color: '#757575', fontStyle: 'italic', lineHeight: 16 },
-    doneBtn: { marginTop: 6, backgroundColor: '#2D4F1E', borderRadius: 12, paddingVertical: 12, alignItems: 'center' },
-    doneBtnText: { color: '#F5F0E1', fontWeight: '800', fontSize: 14 },
-});
+function isoDate(d) { return d.toISOString().split('T')[0]; }
+function weekLabel(d) { return `Week of ${MONTH_NAMES[d.getMonth()].slice(0, 3)} ${d.getDate()}`; }
 
-// ─── Planting Segment ─────────────────────────────────────────────────────────
-function PlantingSegment({ entry, isLast }) {
-    const color = ACTION_COLOR[entry.action] ?? Colors.primaryGreen;
-    const short = ACTION_SHORT[entry.action] ?? 'DS';
-    const igd = entry.igd ?? entry.dtm;
-    const [showDetail, setShowDetail] = React.useState(false);
+function groupEvents(events) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const msPerDay = 1000 * 60 * 60 * 24;
+
+    const mm = new Map();
+
+    for (const ev of events) {
+        if (!ev.date) continue;
+        const diffDaysVal = Math.round((ev.date - today) / msPerDay);
+
+        let sectionKey, sectionLabel, weekKey, weekLbl;
+
+        if (diffDaysVal < 0) {
+            sectionKey   = '00_overdue';
+            sectionLabel = '⚠️ OVERDUE / ACT NOW';
+            weekKey      = '00_w';
+            weekLbl      = 'Past Due Events';
+        } else if (diffDaysVal <= 7) {
+            sectionKey   = '01_this_week';
+            sectionLabel = '📍 THIS WEEK';
+            weekKey      = '01_w';
+            weekLbl      = 'Next 7 days';
+        } else if (diffDaysVal <= 14) {
+            sectionKey   = '02_next_week';
+            sectionLabel = '🗓 NEXT WEEK';
+            weekKey      = '02_w';
+            weekLbl      = '8 to 14 days out';
+        } else {
+            sectionKey   = ev.monthKey;
+            sectionLabel = ev.monthLabel;
+            weekKey      = ev.weekKey;
+            weekLbl      = ev.weekLabel;
+        }
+
+        if (!mm.has(sectionKey)) {
+            mm.set(sectionKey, { monthLabel: sectionLabel, sectionKey, wm: new Map() });
+        }
+        const m = mm.get(sectionKey);
+        if (!m.wm.has(weekKey)) {
+            m.wm.set(weekKey, { weekLabel: weekLbl, weekKey, events: [] });
+        }
+        m.wm.get(weekKey).events.push(ev);
+    }
+
+    return [...mm.values()]
+        .sort((a, b) => a.sectionKey.localeCompare(b.sectionKey))
+        .map(m => ({
+            monthLabel:  m.monthLabel,
+            isHighlight: m.sectionKey.startsWith('0'),
+            weeks: [...m.wm.values()].sort((a, b) => a.weekKey.localeCompare(b.weekKey)),
+        }));
+}
+
+// ─── Farm Trays ───────────────────────────────────────────────────────────────
+function recommendTrayFarm(cropData) {
+    if (!cropData) return null;
+    const cat = cropData.category ?? '';
+    if (cat === 'Cucurbit')
+        return { type: 'tray', cells: 50, label: '50-cell flat' };
+    if (['Nightshade', 'Specialty', 'Fruit'].includes(cat))
+        return { type: 'tray', cells: 72, label: '72-cell flat' };
+    if (['Allium'].includes(cat))
+        return { type: 'tray', cells: 288, label: '288-cell flat' };
+    return { type: 'tray', cells: 128, label: '128-cell flat' };
+}
+
+function traysNeeded(plants, tray) {
+    const seedsToSow = Math.ceil(plants * 1.20); // 20% buffer for germ and pest loss
+    return tray.type === 'pot' ? seedsToSow : Math.ceil(seedsToSow / (tray.cells ?? 128));
+}
+
+// ─── Components ───────────────────────────────────────────────────────────────
+function EventChip({ ev }) {
+    const t = EVENT_TYPES[ev.type] ?? EVENT_TYPES.direct_seed;
 
     return (
-        <View style={styles.segmentWrapper}>
-            <HarvestDetailModal entry={entry} visible={showDetail} onClose={() => setShowDetail(false)} />
-            <TouchableOpacity
-                style={[styles.segment, { borderColor: color + '40' }]}
-                onLongPress={() => setShowDetail(true)}
-                delayLongPress={600}
-                activeOpacity={0.85}
-                {...(Platform.OS === 'web' ? {
-                    onMouseEnter: undefined, // hover handled via title tooltip on web
-                } : {})}
-            >
-                {/* #4: Action shorthand pill */}
-                <View style={[styles.segPill, { backgroundColor: color }]}>
-                    <Text style={styles.segPillText}>{short}</Text>
+        <View style={[styles.chip, { backgroundColor: t.bg, borderColor: t.border }]}>
+            <View style={styles.chipTop}>
+                <Text style={styles.chipEmoji}>{t.emoji}</Text>
+                <Text style={[styles.chipType, { color: t.color }]} numberOfLines={1}>
+                    {t.label}
+                </Text>
+            </View>
+            <Text style={[styles.chipCrop, { color: t.color }]} numberOfLines={2}>
+                {ev.cropName}{ev.cropVariety ? ` · ${ev.cropVariety}` : ''}
+            </Text>
+            
+            {/* Explicit location tracking requirement */}
+            <View style={styles.locationBadge}>
+                <Text style={styles.locationText}>BLOCK {ev.blockName.toUpperCase()} · BED {(ev.bed_label || '').replace('Bed ', '')}</Text>
+            </View>
+
+            {/* Nursery-rescue / Rebased badges */}
+            {ev.rescuedViaNursery && ev.type === 'buy_starts' ? (
+                <View style={styles.nurseryBadge}>
+                    <Text style={styles.nurseryText}>🌿 Nursery only (late)</Text>
                 </View>
-
-                <Text style={styles.segCrop} numberOfLines={1}>{entry.crop_name}</Text>
-                <Text style={styles.segVariety} numberOfLines={1}>{entry.crop_variety}</Text>
-                <Text style={styles.segDate}>{fmtDate(entry.entry_date)}</Text>
-
-                {/* #5: DTM · IGD */}
-                {entry.dtm > 0 && (
-                    <Text style={styles.segDtm}>
-                        DTM: {entry.dtm}d · IGD: {igd}d
-                    </Text>
-                )}
-
-                {/* #7: Tray date for TP crops */}
-                {entry.action === 'transplant' && entry.tray_date && (
-                    <Text style={styles.segTray}>
-                        Tray: {fmtDate(entry.tray_date)}
-                    </Text>
-                )}
-
-                {/* #1: Seed amount with context */}
-                {entry.seed_amount_label && entry.action !== 'transplant' && (
-                    <Text style={styles.segSeed}>{entry.seed_amount_label}</Text>
-                )}
-
-                {/* Plant count for TP */}
-                {entry.action === 'transplant' && entry.plant_count && (
-                    <Text style={styles.segSeed}>{entry.plant_count} plants</Text>
-                )}
-
-                {/* Spacing */}
-                {entry.spacing_label && (
-                    <Text style={styles.segSpacing}>{entry.spacing_label}</Text>
-                )}
-
-                {/* JANG config */}
-                {entry.jang_config_label && (
-                    <Text style={styles.segJang}>{entry.jang_config_label}</Text>
-                )}
-
-                {/* Special notes (trellised, interplant — no book refs) */}
-                {entry.special_notes && (
-                    <Text style={styles.segNotes}>{entry.special_notes}</Text>
-                )}
-            </TouchableOpacity>
-            {!isLast && (
-                <View style={styles.segArrowWrap}>
-                    <Text style={styles.segArrow}>›</Text>
+            ) : ev.wasRebased && (ev.type === 'direct_seed' || ev.type === 'seed_start') ? (
+                <View style={styles.rebasedBadge}>
+                    <Text style={styles.rebasedText}>⏩ Shifted to today</Text>
                 </View>
+            ) : null}
+
+            {/* Volume/Weight of seeds requirement rendering */}
+            {ev.type === 'direct_seed' && ev.seed_amount_label && (
+                <Text style={styles.chipExtra}>⚖️ {ev.seed_amount_label}</Text>
+            )}
+
+            {ev.plants != null && ev.plants > 0 && ev.type !== 'seed_start' && ev.type !== 'harvest' && (
+                <Text style={styles.chipExtra}>🪴 {ev.plants} plants</Text>
+            )}
+
+            {ev.type === 'seed_start' && ev.tray ? (
+                <View style={styles.chipExpanded}>
+                    <Text style={styles.chipDetail}>🌱 {Math.ceil(ev.plants * 1.2)} seeds required</Text>
+                    <Text style={styles.chipDetail}>📦 {ev.tray.label}</Text>
+                    {ev.traysCount != null && (
+                        <Text style={styles.chipDetail}>🔢 sow {ev.traysCount} {ev.traysCount === 1 ? 'tray' : 'trays'}</Text>
+                    )}
+                </View>
+            ) : null}
+            
+            {/* If Harvest entry, show DTM */}
+            {ev.type === 'harvest' && ev.dtm && (
+                <Text style={styles.chipExtra}>⏱ {ev.dtm} DTM</Text>
             )}
         </View>
     );
 }
 
-// ─── One bed row containing all its segments (#3) ────────────────────────────
-function BedRow({ bedNumber, entries }) {
-    // Filter out seed_start entries — their info is embedded in the TP segment
-    const mainEntries = entries.filter(e => e.action !== 'seed_start');
-
+function WeekSection({ week }) {
     return (
-        <View style={[styles.bedRow, Shadows.card]}>
-            <View style={styles.bedLabelCol}>
-                <Text style={styles.bedLabel}>Bed</Text>
-                <Text style={styles.bedNum}>{bedNumber}</Text>
-            </View>
-            <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.bedScrollContent}
-            >
-                {mainEntries.map((entry, idx) => (
-                    <PlantingSegment
-                        key={idx}
-                        entry={entry}
-                        isLast={idx === mainEntries.length - 1}
-                    />
+        <View style={styles.weekSection}>
+            <Text style={styles.weekLabel}>{week.weekLabel}</Text>
+            <View style={styles.chipGrid}>
+                {week.events.map((ev, i) => (
+                    <EventChip key={`${ev.weekKey}-${ev.cropName}-${ev.type}-${i}`} ev={ev} />
                 ))}
-            </ScrollView>
+            </View>
         </View>
     );
 }
 
-// ─── Main Screen ──────────────────────────────────────────────────────────────
+function MonthSection({ month }) {
+    return (
+        <View style={styles.monthSection}>
+            <Text style={[styles.monthLabel, month.isHighlight && { color: '#E65100' }]}>
+                {month.isHighlight ? month.monthLabel : month.monthLabel.toUpperCase()}
+            </Text>
+            <View style={[styles.monthDivider, month.isHighlight && { backgroundColor: '#E65100', opacity: 0.4 }]} />
+            {month.weeks.map(w => <WeekSection key={w.weekKey} week={w} />)}
+        </View>
+    );
+}
+
 export default function CropCalendarScreen({ navigation, route }) {
-    const { farmProfile = {}, planId, bedSuccessions = {} } = route?.params ?? {};
-    const [bedGroups, setBedGroups] = useState([]); // [{bedNumber, entries}]
-    const [yieldSummary, setYieldSummary] = useState(null);
+    const { farmProfile = {}, planId, bedSuccessions, fromWorkspace } = route?.params ?? {};
+    const [events, setEvents] = useState([]);
     const [loading, setLoading] = useState(true);
 
-    useEffect(() => { generatePlan(); }, []);
+    useEffect(() => {
+        loadAndProcessEvents();
+    }, [planId]);
 
-    const generatePlan = async () => {
+    const loadAndProcessEvents = async () => {
         try {
-            const allBedSuccessions = Object.entries(bedSuccessions).map(([num, succs]) => ({
-                bed_number: parseInt(num),
-                successions: succs,
-            }));
+            let allSuccessionsData = [];
 
-            const [entries, yields] = await Promise.all([
-                generateFullCalendar(allBedSuccessions, farmProfile),
-                calculateFarmYield(allBedSuccessions, farmProfile),
-            ]);
-
-            // #3: Group entries by bed number
-            const grouped = {};
-            for (const entry of entries) {
-                if (!grouped[entry.bed_number]) grouped[entry.bed_number] = [];
-                grouped[entry.bed_number].push(entry);
-            }
-            const sortedGroups = Object.entries(grouped)
-                .sort(([a], [b]) => parseInt(a) - parseInt(b))
-                .map(([bedNum, bedEntries]) => ({
-                    bedNumber: parseInt(bedNum),
-                    entries: bedEntries,
+            if (fromWorkspace && bedSuccessions) {
+                // Called from generic workspace or older component
+                allSuccessionsData = Object.entries(bedSuccessions).map(([bedNum, succs]) => ({
+                    blockName: '8-Bed Plan',
+                    bed_number: parseInt(bedNum),
+                    successions: succs
                 }));
+            } else {
+                // The intended path via MegaMenuBar. Load all blocks!
+                const allBlocks = loadBlocks();
+                const activeBlocks = planId ? allBlocks.filter(b => b.planId === planId) : allBlocks;
+                
+                for (const block of activeBlocks) {
+                    const blockBeds = loadBlockBeds(block.id);
+                    if (!blockBeds) continue;
+                    
+                    for (const [bedNumStr, bedData] of Object.entries(blockBeds)) {
+                        if (bedData && Array.isArray(bedData.successions)) {
+                            allSuccessionsData.push({
+                                blockName: block.name || `Block ${block.id.slice(0, 4)}`,
+                                bed_number: parseInt(bedNumStr),
+                                successions: bedData.successions
+                            });
+                        }
+                    }
+                }
+            }
 
-            setBedGroups(sortedGroups);
-            setYieldSummary(yields.totals);
-        } catch (err) {
-            console.error('[CropCalendar] Error generating plan:', err);
+            // Standardize and generate event fragments
+            let fullEventsList = [];
+            for (const item of allSuccessionsData) {
+                // Pass dynamic bedLengthFt into the generator for accurate plant count/seed weight math
+                const entries = await generateBedCalendar(item.bed_number, item.successions, farmProfile, item.bedLengthFt || 50);
+                
+                for (const entry of entries) {
+                    const dateObj = parseISO(entry.entry_date);
+                    if (!dateObj) continue;
+                    
+                    const ws = startOfWeek(dateObj);
+                    
+                    fullEventsList.push({
+                        ...entry,
+                        date: dateObj,
+                        type: entry.plan_entry_type,
+                        blockName: item.blockName,
+                        weekKey: isoDate(ws),
+                        monthKey: `${dateObj.getFullYear()}-${String(dateObj.getMonth()).padStart(2, '0')}`,
+                        monthLabel: `${MONTH_NAMES[dateObj.getMonth()]} ${dateObj.getFullYear()}`,
+                        weekLabel: weekLabel(ws),
+                        plants: entry.plant_count,
+                        cropName: entry.crop_name,
+                        cropVariety: entry.crop_variety,
+                        dtm: entry.dtm || null,
+                        seed_amount_label: entry.seed_amount_label,
+                    });
+                }
+            }
+
+            // Post-process Tray calculations on fullEventsList
+            
+            fullEventsList.forEach(ev => {
+                if (ev.type === 'seed_start') {
+                    const dbCrop = cropData.crops?.find(c => c.id === ev.crop_id);
+                    if (dbCrop) {
+                        ev.tray = recommendTrayFarm(dbCrop);
+                        if (ev.plants && ev.tray) ev.traysCount = traysNeeded(ev.plants, ev.tray);
+                    }
+                }
+            });
+
+            fullEventsList.sort((a, b) => a.date - b.date);
+            setEvents(fullEventsList);
+        } catch (e) {
+            console.error('CropCalendar load error', e);
         } finally {
             setLoading(false);
         }
     };
 
+    const groupedEvents = groupEvents(events);
+
     return (
-        <View style={styles.container}>
-            <View style={styles.header}>
-                <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
-                    <Text style={styles.backArrow}>‹</Text>
-                </TouchableOpacity>
-                <View style={styles.headerText}>
-                    <Text style={styles.stepLabel}>YOUR PLAN</Text>
-                    <Text style={styles.heading}>Crop Calendar</Text>
-                </View>
-                {Platform.OS === 'web' && (
-                    <TouchableOpacity style={styles.printBtn} onPress={() => window.print()}>
-                        <Text style={styles.printBtnText}>🖨️</Text>
-                    </TouchableOpacity>
-                )}
-            </View>
+        <View style={screenStyles.container}>
+            <GlobalNavBar 
+                navigation={navigation} 
+                farmProfile={farmProfile} 
+                planId={planId} 
+                activeRoute="CropCalendar" 
+                rightAction={
+                    Platform.OS === 'web' ? (
+                        <TouchableOpacity style={screenStyles.printBtn} onPress={() => window.print()}>
+                            <Text style={screenStyles.printBtnText}>🖨️</Text>
+                        </TouchableOpacity>
+                    ) : null
+                }
+            />
 
             {loading ? (
-                <View style={styles.loadingContainer}>
+                <View style={screenStyles.loadingContainer}>
                     <ActivityIndicator color={Colors.primaryGreen} size="large" />
-                    <Text style={styles.loadingText}>Generating your crop calendar…</Text>
+                    <Text style={screenStyles.loadingText}>Loading timeline events...</Text>
+                </View>
+            ) : groupedEvents.length === 0 ? (
+                <View style={screenStyles.loadingContainer}>
+                    <Text style={{ fontSize: 40, marginBottom: 10 }}>🗓</Text>
+                    <Text style={{ fontSize: 18, fontWeight: 'bold', color: Colors.primaryGreen }}>No Schedule Found</Text>
+                    <Text style={screenStyles.loadingText}>Start laying out blocks to populate your timeline.</Text>
                 </View>
             ) : (
-                <ScrollView
-                    contentContainerStyle={styles.scrollContent}
-                    showsVerticalScrollIndicator={false}
-                    style={Platform.OS === 'web' ? { overflowY: 'scroll' } : undefined}
-                >
-                    {/* Revenue Summary */}
-                    {yieldSummary && (
-                        <View style={[styles.revenueCard, Shadows.card]}>
-                            <Text style={styles.revenueLabel}>Estimated Season Revenue</Text>
-                            <Text style={styles.revenueRange}>
-                                ${yieldSummary.total_revenue_low.toLocaleString()} – ${yieldSummary.total_revenue_high.toLocaleString()}
+                <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
+                    {/* Banners */}
+                    {events.some(e => e.wasRebased) && (
+                        <View style={styles.rebaseBanner}>
+                            <Text style={styles.rebaseBannerText}>
+                                ⏩ Some planting windows were in the past. Dates have been shifted to start today — harvest and succession rounds adjusted accordingly.
                             </Text>
-                            <Text style={styles.revenueMid}>
-                                ~${yieldSummary.total_revenue_mid.toLocaleString()} organic wholesale
-                            </Text>
-                            <Text style={styles.revenueDetail}>
-                                {yieldSummary.total_yield_lbs?.toLocaleString()} lbs estimated
+                        </View>
+                    )}
+                    
+                    {events.some(e => e.rescuedViaNursery) && (
+                        <View style={styles.nurseryBanner}>
+                            <Text style={styles.nurseryBannerText}>
+                                🛍 One or more crops can no longer be started from seed because the window has closed before frost. Seed tasks have been replaced with "Buy Starts" timed to your transplant date.
                             </Text>
                         </View>
                     )}
 
-                    {/* Legend */}
-                    <View style={styles.legend}>
-                        {[['DS', Colors.primaryGreen, 'Direct Seed'],
-                        ['TP', Colors.burntOrange, 'Transplant'],
-                        ['Tray', Colors.softLavender, 'Seed to Tray'],
-                        ['CC', Colors.mutedText, 'Cover Crop']].map(([lbl, color, full]) => (
-                            <View key={lbl} style={styles.legendItem}>
-                                <View style={[styles.legendDot, { backgroundColor: color }]} />
-                                <Text style={styles.legendText}>{lbl} = {full}</Text>
-                            </View>
-                        ))}
-                    </View>
-
-                    {/* One row per bed (#3) */}
-                    {bedGroups.map(({ bedNumber, entries }) => (
-                        <BedRow key={bedNumber} bedNumber={bedNumber} entries={entries} />
-                    ))}
-
-                    <View style={{ height: 60 }} />
+                    {groupedEvents.map(m => <MonthSection key={m.sectionKey} month={m} />)}
+                    <View style={{ height: 100 }} />
                 </ScrollView>
             )}
         </View>
     );
 }
 
-// ─── Styles ───────────────────────────────────────────────────────────────────
+// ─── Shared Styles from ActionCalendar ───
 const styles = StyleSheet.create({
+    container: {
+        paddingHorizontal: Spacing.md,
+        paddingTop: Spacing.lg,
+        paddingBottom: 180,
+        ...Platform.select({ web: { maxHeight: '100vh', overflowY: 'scroll' } }) // Fix Expo Web scrolling issue
+    },
+    monthSection: { marginBottom: Spacing.xl },
+    monthLabel: {
+        fontSize: Typography.lg,
+        fontWeight: Typography.bold,
+        color: Colors.primaryGreen,
+        letterSpacing: 1.5,
+        marginBottom: 5,
+    },
+    monthDivider: {
+        height: 2,
+        backgroundColor: Colors.primaryGreen,
+        borderRadius: 1,
+        marginBottom: Spacing.sm,
+        opacity: 0.25,
+    },
+    weekSection: { marginBottom: Spacing.sm },
+    weekLabel: {
+        fontSize: Typography.xs,
+        fontWeight: Typography.semiBold,
+        color: Colors.mutedText,
+        textTransform: 'uppercase',
+        letterSpacing: 0.8,
+        marginBottom: 5,
+        paddingLeft: 2,
+    },
+    chipGrid: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 6,
+    },
+    chip: {
+        width: Platform.OS === 'web' ? 'calc(16.66% - 5px)' : '15.5%',
+        minWidth: 100, // wider for detailed market text
+        borderRadius: 6,
+        borderWidth: 1,
+        padding: 8,
+    },
+    chipTop: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        marginBottom: 2,
+    },
+    chipEmoji: { fontSize: 14 },
+    chipType: {
+        fontSize: 11,
+        fontWeight: '700',
+        textTransform: 'uppercase',
+        letterSpacing: 0.3,
+        flex: 1,
+    },
+    chipCrop: {
+        fontSize: 13,
+        fontWeight: '800',
+        lineHeight: 16,
+        marginBottom: 4,
+    },
+    locationBadge: {
+        backgroundColor: '#2E7D32',
+        alignSelf: 'flex-start',
+        paddingHorizontal: 6,
+        paddingVertical: 3,
+        borderRadius: 4,
+        marginBottom: 6,
+        marginTop: 2,
+    },
+    locationText: {
+        fontSize: 10,
+        fontWeight: '800',
+        color: '#FFFFFF',
+        letterSpacing: 0.5,
+    },
+    chipExtra: {
+        fontSize: 11,
+        fontWeight: '600',
+        color: 'rgba(0,0,0,0.6)',
+        marginTop: 2,
+    },
+    chipExpanded: { marginTop: 4, gap: 2 },
+    chipDetail: { fontSize: 11, fontWeight: '700', color: 'rgba(0,0,0,0.7)' },
+    nurseryBadge: {
+        backgroundColor: '#EDE7F6',
+        borderRadius: 3,
+        paddingHorizontal: 4,
+        paddingVertical: 2,
+        marginBottom: 3,
+        alignSelf: 'flex-start',
+    },
+    nurseryText: { fontSize: 9, color: '#4A0072', fontWeight: '700' },
+    rebasedBadge: {
+        backgroundColor: '#FFF3CD',
+        borderRadius: 3,
+        paddingHorizontal: 4,
+        paddingVertical: 2,
+        marginBottom: 3,
+        alignSelf: 'flex-start',
+    },
+    rebasedText: { fontSize: 9, color: '#856404', fontWeight: '700' },
+    rebaseBanner: {
+        backgroundColor: '#FFF8E1',
+        borderRadius: Radius.sm,
+        borderLeftWidth: 3,
+        borderLeftColor: '#F9A825',
+        paddingVertical: 7,
+        paddingHorizontal: 10,
+        marginBottom: 6,
+    },
+    rebaseBannerText: { fontSize: 10, color: '#6D4C00', lineHeight: 15, fontStyle: 'italic' },
+    nurseryBanner: {
+        backgroundColor: '#F3E5F5',
+        borderRadius: Radius.sm,
+        borderLeftWidth: 3,
+        borderLeftColor: '#6A1B9A',
+        paddingVertical: 7,
+        paddingHorizontal: 10,
+        marginBottom: 16,
+    },
+    nurseryBannerText: { fontSize: 10, color: '#4A0072', lineHeight: 15, fontStyle: 'italic' },
+});
+
+const screenStyles = StyleSheet.create({
     container: {
         flex: 1,
         backgroundColor: Colors.backgroundGrey,
-        ...Platform.select({ web: { maxHeight: '100vh', overflow: 'hidden' } }),
     },
     header: {
         flexDirection: 'row',
@@ -401,83 +496,4 @@ const styles = StyleSheet.create({
     heading: { fontSize: Typography.lg, fontWeight: Typography.bold, color: Colors.cream },
     loadingContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: Spacing.md },
     loadingText: { fontSize: Typography.sm, color: Colors.mutedText, fontStyle: 'italic' },
-    scrollContent: { padding: Spacing.lg, gap: Spacing.sm, paddingBottom: 80 },
-
-    // Revenue card
-    revenueCard: {
-        backgroundColor: Colors.primaryGreen,
-        borderRadius: Radius.lg,
-        padding: Spacing.lg,
-        marginBottom: Spacing.sm,
-        gap: 4,
-    },
-    revenueLabel: { fontSize: Typography.xs, color: Colors.warmTan, letterSpacing: 1, fontWeight: Typography.bold },
-    revenueRange: { fontSize: Typography.xxl, fontWeight: Typography.bold, color: Colors.cream },
-    revenueMid: { fontSize: Typography.sm, color: Colors.warmTan },
-    revenueDetail: { fontSize: Typography.xs, color: 'rgba(245,245,220,0.6)', marginTop: 4 },
-
-    // Legend
-    legend: {
-        flexDirection: 'row',
-        flexWrap: 'wrap',
-        gap: Spacing.sm,
-        marginBottom: Spacing.sm,
-        paddingHorizontal: Spacing.xs,
-    },
-    legendItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-    legendDot: { width: 8, height: 8, borderRadius: 4 },
-    legendText: { fontSize: 10, color: Colors.mutedText },
-
-    // Bed row (#3)
-    bedRow: {
-        backgroundColor: Colors.cardBg,
-        borderRadius: Radius.md,
-        flexDirection: 'row',
-        overflow: 'hidden',
-        borderWidth: 1,
-        borderColor: 'rgba(45,79,30,0.12)',
-        minHeight: 60,
-    },
-    bedLabelCol: {
-        width: 40,
-        backgroundColor: Colors.primaryGreen,
-        alignItems: 'center',
-        justifyContent: 'center',
-        paddingVertical: Spacing.sm,
-    },
-    bedLabel: { fontSize: 9, color: Colors.warmTan, fontWeight: Typography.bold, letterSpacing: 0.5 },
-    bedNum: { fontSize: 16, color: Colors.cream, fontWeight: Typography.bold },
-    bedScrollContent: { flexDirection: 'row', alignItems: 'stretch', paddingVertical: Spacing.sm, paddingHorizontal: Spacing.xs },
-
-    // Planting segment
-    segmentWrapper: { flexDirection: 'row', alignItems: 'center' },
-    segment: {
-        paddingHorizontal: 10,
-        paddingVertical: 8,
-        borderRadius: Radius.sm,
-        borderWidth: 1,
-        minWidth: 120,
-        maxWidth: 160,
-        gap: 2,
-        backgroundColor: 'rgba(255,255,255,0.7)',
-    },
-    segPill: {
-        alignSelf: 'flex-start',
-        paddingVertical: 2,
-        paddingHorizontal: 7,
-        borderRadius: Radius.full,
-        marginBottom: 3,
-    },
-    segPillText: { fontSize: 9, color: Colors.white, fontWeight: Typography.bold, letterSpacing: 0.5 },
-    segCrop: { fontSize: 12, fontWeight: Typography.semiBold, color: Colors.primaryGreen },
-    segVariety: { fontSize: 10, color: Colors.mutedText },
-    segDate: { fontSize: 11, fontWeight: Typography.bold, color: Colors.darkText, marginTop: 2 },
-    segDtm: { fontSize: 10, color: Colors.primaryGreen, opacity: 0.85 },   // #5: DTM·IGD
-    segTray: { fontSize: 10, color: Colors.softLavender, fontWeight: Typography.semiBold }, // #7: tray date
-    segSeed: { fontSize: 10, color: Colors.mutedText },                     // #1: seed/bed label
-    segSpacing: { fontSize: 9, color: Colors.mutedText, opacity: 0.8 },
-    segJang: { fontSize: 9, color: Colors.mutedText },
-    segNotes: { fontSize: 9, color: Colors.burntOrange, fontStyle: 'italic' },
-    segArrowWrap: { paddingHorizontal: 5, alignItems: 'center', justifyContent: 'center' },
-    segArrow: { fontSize: 20, color: Colors.mutedText, opacity: 0.5 },
 });

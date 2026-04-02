@@ -21,8 +21,9 @@ import {
     calculateBedsFromDimensions, blockSummaryLine,
     generateBlockId, GRID_POSITIONS, FAMILY_OPTIONS,
 } from '../services/farmUtils';
+import HomeLogoButton from '../components/HomeLogoButton';
 
-const TOTAL_STEPS = 5;
+const TOTAL_STEPS = 4;
 
 // ─── Step indicator ────────────────────────────────────────────────────────────
 const StepDots = ({ step }) => (
@@ -53,7 +54,7 @@ const ChipSelect = ({ options, value, onSelect, multi = false }) => (
 );
 
 // ─── Field row ────────────────────────────────────────────────────────────────
-const FieldRow = ({ label, unit, value, onChangeText, keyboardType = 'numeric', placeholder = '0' }) => (
+const FieldRow = ({ label, unit, value, onChangeText, onBlur, keyboardType = 'numeric', placeholder = '0' }) => (
     <View style={styles.fieldRow}>
         <Text style={styles.fieldLabel}>{label}</Text>
         <View style={styles.fieldInputWrap}>
@@ -61,6 +62,7 @@ const FieldRow = ({ label, unit, value, onChangeText, keyboardType = 'numeric', 
                 style={styles.fieldInput}
                 value={value}
                 onChangeText={onChangeText}
+                onBlur={onBlur}
                 keyboardType={keyboardType}
                 placeholder={placeholder}
                 placeholderTextColor={Colors.mutedText}
@@ -75,6 +77,8 @@ export default function BlockSetupWizard({ route, navigation }) {
     const existingBlock = route?.params?.block ?? null;
     const farmProfile = route?.params?.farmProfile ?? null;
     const defaultGridPos = route?.params?.defaultGridPos ?? null;
+    const planId = route?.params?.planId ?? null;  // from FarmDesigner → tags each saved block
+    const selectedCropIds = route?.params?.selectedCropIds ?? [];
     // prefill: data passed from FarmSatelliteScreen after drawing a polygon
     const prefill = route?.params?.prefill ?? null;
 
@@ -84,7 +88,7 @@ export default function BlockSetupWizard({ route, navigation }) {
     // ── Form State — falls back to satellite prefill before using defaults ─────
     const [blockName, setBlockName] = useState(existingBlock?.name ?? prefill?.blockName ?? '');
     const [familyAssignment, setFamilyAssignment] = useState(existingBlock?.familyAssignment ?? 'Mixed (no restriction)');
-    const [gridPos, setGridPos] = useState(existingBlock?.gridPosition ?? defaultGridPos ?? prefill?.gridPosition ?? GRID_POSITIONS[4]);
+    const [gridPos, setGridPos] = useState(existingBlock?.gridPosition ?? defaultGridPos ?? prefill?.gridPosition ?? null);
 
     const [inputMode, setInputMode] = useState(existingBlock?.inputMode ?? prefill?.inputMode ?? 'beds');
     const [bedCount, setBedCount] = useState(String(existingBlock?.bedCount ?? prefill?.bedCount ?? '8'));
@@ -109,43 +113,67 @@ export default function BlockSetupWizard({ route, navigation }) {
     // dupeGridPositions[i] is the explicit grid slot for block i (parallel to dupeNames)
     // Initialized with auto-sequential defaults from available slots.
     const [dupeGridPositions, setDupeGridPositions] = useState(() => {
-        // Block 0 gets the user's chosen gridPos; blocks 1+ get the next 1 available slot
-        const used = new Set(gridPos ? [`${gridPos.col}_${gridPos.row}`] : []);
-        const available = GRID_POSITIONS.filter(p => !used.has(`${p.col}_${p.row}`));
-        return [gridPos ?? null, available[0] ?? null];
+        return [gridPos ?? null, null];
     });
 
-    // Recompute available positions for auto-defaults, given what other blocks in the
-    // batch have already claimed. Returns positions NOT claimed by any other index.
-    const getAvailableForIdx = (positions, skipIdx) => {
-        const used = new Set(
-            positions
-                .filter((p, i) => i !== skipIdx && p)
-                .map(p => `${p.col}_${p.row}`)
-        );
-        return GRID_POSITIONS.filter(p => !used.has(`${p.col}_${p.row}`));
+    // ── Extended grid rows and cols ────────────────────────────────────────────
+    // extraGridRows = extra rows below standard 3×3
+    // extraGridCols = extra columns to the right of standard 3×3
+    const [extraGridRows, setExtraGridRows] = useState(0);
+    const [extraGridCols, setExtraGridCols] = useState(0);
+
+    const buildAllPositions = (extraRows = extraGridRows, extraCols = extraGridCols) => {
+        const all = [...GRID_POSITIONS]; // NW/N/NE/W/Center/E/SW/S/SE (rows 0–2)
+
+        // Extra rows below base grid: SW1/S1/SE1, SW2/S2/SE2…
+        for (let r = 0; r < extraRows; r++) {
+            const n = r + 1;
+            all.push(
+                { label: `SW${n}`, col: 0, row: 3 + r },
+                { label: `S${n}`,  col: 1, row: 3 + r },
+                { label: `SE${n}`, col: 2, row: 3 + r },
+            );
+        }
+
+        // Extra columns to the right: NE1/E1/SE1, NE2/E2/SE2…
+        // SE{n} is skipped when extraRows >= n — that row already placed SE{n} at col:2
+        for (let c = 0; c < extraCols; c++) {
+            const n = c + 1;
+            all.push({ label: `NE${n}`, col: 3 + c, row: 0 });
+            all.push({ label: `E${n}`,  col: 3 + c, row: 1 });
+            if (n > extraRows) {
+                // SE{n} hasn’t been added by a row yet — add it from the column
+                all.push({ label: `SE${n}`, col: 3 + c, row: 2 });
+            }
+        }
+
+        // Sort row-major (row first, then col) so flexWrap lays out as a proper grid
+        all.sort((a, b) => a.row !== b.row ? a.row - b.row : a.col - b.col);
+        return all;
     };
 
-    // Update dupeNames array when count changes
-    const applyDupeCount = (val) => {
-        const n = Math.max(2, Math.min(20, parseInt(val) || 2));
-        setDupeCountStr(String(n));
-        setDupeNames(prev => {
-            const arr = Array.from({ length: n }, (_, i) => prev[i] ?? '');
-            return arr;
-        });
-        // Also resize dupeGridPositions, filling new slots with next auto-available position
+
+
+    // Helper: total number of columns in the current expanded grid
+    const totalGridCols = 3 + extraGridCols;
+
+    // Update dupeNames and positions when user finishes typing the count
+    // Using a raw string during typing (dupeCountStr) so deletion works naturally;
+    // actual clamping only happens on blur or when moving to the next step.
+    const applyDupeCount = (rawVal) => {
+        // Allow the field to freely show what the user typed (even blank)
+        setDupeCountStr(rawVal);
+        const n = Math.max(2, Math.min(20, parseInt(rawVal) || 2));
+        setDupeNames(prev => Array.from({ length: n }, (_, i) => prev[i] ?? ''));
         setDupeGridPositions(prev => {
-            const arr = Array.from({ length: n }, (_, i) => prev[i] ?? null);
-            // Fill any nulls (newly added slots) with the next available unoccupied position
-            for (let i = 0; i < n; i++) {
-                if (!arr[i]) {
-                    const avail = getAvailableForIdx(arr, i);
-                    arr[i] = avail[0] ?? null;
-                }
-            }
-            return arr;
+            return Array.from({ length: n }, (_, i) => prev[i] ?? null);
         });
+    };
+
+    // Clamp to valid range on blur so we don't leave invalid state
+    const commitDupeCount = () => {
+        const n = Math.max(2, Math.min(20, parseInt(dupeCountStr) || 2));
+        applyDupeCount(String(n));
     };
 
     const updateDupeName = (idx, val) => {
@@ -166,11 +194,11 @@ export default function BlockSetupWizard({ route, navigation }) {
 
     // Skip the duplication step entirely when editing an existing block
     const isEditing = !!existingBlock;
-    // Actual step count: 5 when creating, 4 when editing (Step 1 hidden)
+    // Actual step count: 4 when creating, 3 when editing (Step 0 / Multiple? hidden)
     const effectiveTotalSteps = isEditing ? TOTAL_STEPS - 1 : TOTAL_STEPS;
     // Map internal step index → wizard content index
-    // When isEditing, step 1 (duplicate) is not shown, so we offset
-    const contentIdx = (!isEditing || step === 0) ? step : step + 1;
+    // When isEditing, step 0 (multiple?) is not shown, so we offset by 1
+    const contentIdx = isEditing ? step + 1 : step;
 
     // ── Derived: computed bed count for dimension mode ──────────────────────
     const computedBedCount = inputMode === 'dimensions'
@@ -191,19 +219,26 @@ export default function BlockSetupWizard({ route, navigation }) {
     const effectiveBedLen = parseFloat(bedLengthFt) || 100;
 
     // ── Navigation ───────────────────────────────────────────────────────────
+    // When isDuplicate, Step 1 (single-block naming) is skipped because
+    // all block names were already collected in Step 0.
     const goForward = () => {
+        const skip = !isEditing && isDuplicate && step === 0; // skip naming step in dupe mode
+        const nextStep = skip ? step + 2 : step + 1;
         Animated.timing(slideAnim, { toValue: -30, duration: 80, useNativeDriver: true }).start(() => {
             slideAnim.setValue(30);
-            setStep(s => s + 1);
+            setStep(nextStep);
             Animated.spring(slideAnim, { toValue: 0, tension: 80, friction: 12, useNativeDriver: true }).start();
         });
     };
 
     const goBack = () => {
         if (step === 0) { navigation.goBack(); return; }
+        // When coming back from step 2 in dupe mode, skip step 1 and return to step 0
+        const skip = !isEditing && isDuplicate && step === 2;
+        const prevStep = skip ? step - 2 : step - 1;
         Animated.timing(slideAnim, { toValue: 30, duration: 80, useNativeDriver: true }).start(() => {
             slideAnim.setValue(-30);
-            setStep(s => s - 1);
+            setStep(prevStep);
             Animated.spring(slideAnim, { toValue: 0, tension: 80, friction: 12, useNativeDriver: true }).start();
         });
     };
@@ -235,6 +270,7 @@ export default function BlockSetupWizard({ route, navigation }) {
                     id: generateBlockId(),
                     name,
                     gridPosition: assignedPos,
+                    planId: planId ?? undefined,
                 });
             }
         } else {
@@ -243,72 +279,36 @@ export default function BlockSetupWizard({ route, navigation }) {
                 ...baseBlock,
                 id: existingBlock?.id ?? prefill?.id ?? generateBlockId(),
                 name: blockName.trim() || `Block ${Date.now().toString(36).toUpperCase().slice(-4)}`,
+                planId: planId ?? undefined,
             });
         }
 
-        navigation.navigate('FarmDesigner', { farmProfile, saved: true });
+        navigation.navigate('FarmDesigner', { farmProfile, planId, selectedCropIds, saved: true });
     };
 
     // ─── Step content ─────────────────────────────────────────────────────
     const stepContent = [
-        // Step 0: Name + Position
-        <ScrollView key="step0" style={styles.stepContent} contentContainerStyle={styles.stepInner}
-            showsVerticalScrollIndicator={false}
-            {...(Platform.OS === 'web' ? { style: [styles.stepContent, { overflowY: 'scroll' }], contentContainerStyle: styles.stepInner } : {})}
+        // Step 0 (NEW — skipped when editing): Multiple or Single?
+        <ScrollView key="step0"
+            style={[styles.stepContent, Platform.OS === 'web' ? { overflowY: 'scroll', flex: 1, minHeight: 0, maxHeight: 'calc(100dvh - 190px)' } : null]}
+            contentContainerStyle={styles.stepInner}
+            showsVerticalScrollIndicator={Platform.OS !== 'web'}
         >
-            <Text style={styles.stepTitle}>Name Your Block</Text>
-            <Text style={styles.stepSubtitle}>What do you call this section of your farm?</Text>
-            <TextInput
-                style={styles.bigInput}
-                value={blockName}
-                onChangeText={setBlockName}
-                placeholder="e.g. Block A, North Field, Hoop House..."
-                placeholderTextColor={Colors.mutedText}
-                autoFocus
-            />
-            <Text style={styles.fieldLabel}>Crop Family Assignment (optional)</Text>
-            <Text style={styles.fieldHint}>Dedicating a block to one family makes rotation tracking across seasons automatic.</Text>
-            <ChipSelect
-                options={FAMILY_OPTIONS}
-                value={familyAssignment}
-                onSelect={setFamilyAssignment}
-            />
-            <Text style={[styles.fieldLabel, { marginTop: Spacing.md }]}>Grid Position on Farm Map</Text>
-            <View style={styles.gridPicker}>
-                {GRID_POSITIONS.map(pos => (
-                    <TouchableOpacity
-                        key={pos.label}
-                        style={[styles.gridCell, gridPos?.label === pos.label && styles.gridCellActive]}
-                        onPress={() => setGridPos(pos)}
-                    >
-                        <Text style={[styles.gridCellText, gridPos?.label === pos.label && styles.gridCellTextActive]}>
-                            {pos.label}
-                        </Text>
-                    </TouchableOpacity>
-                ))}
-            </View>
-            <View style={{ height: 40 }} />
-        </ScrollView>,
-
-        // Step 1 (NEW — skipped when editing): Block Duplication
-        <ScrollView key="step1" style={styles.stepContent} contentContainerStyle={styles.stepInner}
-            showsVerticalScrollIndicator={false}
-            {...(Platform.OS === 'web' ? { style: [styles.stepContent, { overflowY: 'scroll' }], contentContainerStyle: styles.stepInner } : {})}
-        >
-            <Text style={styles.stepTitle}>Multiple Blocks?</Text>
+            <Text style={styles.stepTitle}>Multiple Blocks with the Same Layout?</Text>
             <Text style={styles.stepSubtitle}>
-                Do you have more than one block with the same layout? You can create them all at once.
+                Do you have more than one block with the same bed configuration? Create them all at once.
             </Text>
 
-            {/* Yes / No toggle */}
-            <View style={styles.modeToggle}>
-                {[{ v: false, l: 'No — just this one' }, { v: true, l: 'Yes — duplicate layout' }].map(({ v, l }) => (
+            {/* Yes / No prominent buttons */}
+            <View style={styles.yesNoRow}>
+                {[{ v: false, l: 'No', sub: 'Just this one block' }, { v: true, l: 'Yes', sub: 'Same layout, multiple locations' }].map(({ v, l, sub }) => (
                     <TouchableOpacity
                         key={String(v)}
-                        style={[styles.modeBtn, isDuplicate === v && styles.modeBtnActive]}
+                        style={[styles.yesNoBtn, isDuplicate === v && styles.yesNoBtnActive]}
                         onPress={() => setIsDuplicate(v)}
                     >
-                        <Text style={[styles.modeBtnText, isDuplicate === v && styles.modeBtnTextActive]}>{l}</Text>
+                        <Text style={[styles.yesNoBtnLabel, isDuplicate === v && styles.yesNoBtnLabelActive]}>{l}</Text>
+                        <Text style={[styles.yesNoBtnSub, isDuplicate === v && styles.yesNoBtnSubActive]}>{sub}</Text>
                     </TouchableOpacity>
                 ))}
             </View>
@@ -316,12 +316,13 @@ export default function BlockSetupWizard({ route, navigation }) {
             {isDuplicate && (
                 <>
                     <Text style={styles.fieldHint}>
-                        How many blocks total with this layout? (2–20)
+                        How many blocks total? (2–20)
                     </Text>
                     <FieldRow
                         label="Total blocks"
                         value={dupeCountStr}
                         onChangeText={applyDupeCount}
+                        onBlur={commitDupeCount}
                         placeholder="2"
                     />
 
@@ -355,11 +356,11 @@ export default function BlockSetupWizard({ route, navigation }) {
                                     />
                                 </View>
 
-                                {/* Mini 3×3 grid position picker */}
+                                {/* Mini grid position picker with extended rows + cols */}
                                 <View style={styles.dupeGridWrap}>
                                     <Text style={styles.dupeGridLabel}>📍 Grid Position</Text>
                                     <View style={styles.dupeGrid}>
-                                        {GRID_POSITIONS.map(pos => {
+                                        {buildAllPositions().map(pos => {
                                             const isSelected = myPos?.label === pos.label;
                                             const isTaken = takenByOthers.has(`${pos.col}_${pos.row}`);
                                             return (
@@ -369,6 +370,7 @@ export default function BlockSetupWizard({ route, navigation }) {
                                                         styles.dupeGridCell,
                                                         isSelected && styles.dupeGridCellActive,
                                                         isTaken && styles.dupeGridCellTaken,
+                                                        { width: `${Math.floor(96 / totalGridCols)}%` },
                                                     ]}
                                                     onPress={() => !isTaken && updateDupeGridPos(idx, pos)}
                                                     activeOpacity={isTaken ? 1 : 0.7}
@@ -384,6 +386,30 @@ export default function BlockSetupWizard({ route, navigation }) {
                                             );
                                         })}
                                     </View>
+                                    {/* + Add Row / + Add Column — shared, only shown on first card */}
+                                    {idx === 0 && (
+                                        <View style={styles.addBtnsRow}>
+                                            <TouchableOpacity
+                                                style={[styles.addRowBtn, { flex: 1 }]}
+                                                onPress={() => setExtraGridRows(r => r + 1)}
+                                            >
+                                                <Text style={styles.addRowBtnText}>
+                                                    + Row (SW{extraGridRows + 1} | S{extraGridRows + 1} | SE{extraGridRows + 1})
+                                                </Text>
+                                            </TouchableOpacity>
+                                            <TouchableOpacity
+                                                style={[styles.addRowBtn, { flex: 1 }]}
+                                                onPress={() => setExtraGridCols(c => c + 1)}
+                                            >
+                                                <Text style={styles.addRowBtnText}>
+                                                    {extraGridCols + 1 > extraGridRows
+                                                        ? `+ Col (NE${extraGridCols + 1} | E${extraGridCols + 1} | SE${extraGridCols + 1})`
+                                                        : `+ Col (NE${extraGridCols + 1} | E${extraGridCols + 1})`
+                                                    }
+                                                </Text>
+                                            </TouchableOpacity>
+                                        </View>
+                                    )}
                                 </View>
                             </View>
                         );
@@ -393,10 +419,79 @@ export default function BlockSetupWizard({ route, navigation }) {
             <View style={{ height: 40 }} />
         </ScrollView>,
 
-        // Step 2: Beds or Dimensions
-        <ScrollView key="step2" style={styles.stepContent} contentContainerStyle={styles.stepInner}
-            showsVerticalScrollIndicator={false}
-            {...(Platform.OS === 'web' ? { style: [styles.stepContent, { overflowY: 'scroll' }], contentContainerStyle: styles.stepInner } : {})}
+        // Step 1: Single-block Name + Grid Position only
+        // (When isDuplicate, names were collected in Step 0 above — skip to bed config)
+        <ScrollView key="step1"
+            style={[styles.stepContent, Platform.OS === 'web' ? { overflowY: 'scroll', flex: 1, minHeight: 0, maxHeight: 'calc(100dvh - 190px)' } : null]}
+            contentContainerStyle={styles.stepInner}
+            showsVerticalScrollIndicator={Platform.OS !== 'web'}
+        >
+            <Text style={styles.stepTitle}>Name Your Block</Text>
+            <Text style={styles.stepSubtitle}>What do you call this section of your farm?</Text>
+            <TextInput
+                style={styles.bigInput}
+                value={blockName}
+                onChangeText={setBlockName}
+                placeholder="e.g. Block A, North Field, Hoop House..."
+                placeholderTextColor={Colors.mutedText}
+                autoFocus
+            />
+            <Text style={styles.fieldLabel}>Crop Family Assignment (optional)</Text>
+            <Text style={styles.fieldHint}>Dedicating a block to one family makes rotation tracking across seasons automatic.</Text>
+            <ChipSelect
+                options={FAMILY_OPTIONS}
+                value={familyAssignment}
+                onSelect={setFamilyAssignment}
+            />
+            <Text style={[styles.fieldLabel, { marginTop: Spacing.md }]}>Grid Position on Farm Map</Text>
+            <View style={styles.gridPicker}>
+                {buildAllPositions().map(pos => (
+                    <TouchableOpacity
+                        key={pos.label}
+                        style={[
+                            styles.gridCell,
+                            gridPos?.label === pos.label && styles.gridCellActive,
+                            { width: `${Math.floor(96 / totalGridCols)}%` },
+                        ]}
+                        onPress={() => setGridPos(pos)}
+                    >
+                        <Text style={[styles.gridCellText, gridPos?.label === pos.label && styles.gridCellTextActive]}>
+                            {pos.label}
+                        </Text>
+                    </TouchableOpacity>
+                ))}
+            </View>
+            {/* + Add Row / + Add Column for extended positions */}
+            <View style={styles.addBtnsRow}>
+                <TouchableOpacity
+                    style={[styles.addRowBtn, { flex: 1 }]}
+                    onPress={() => setExtraGridRows(r => r + 1)}
+                >
+                    <Text style={styles.addRowBtnText}>
+                        + Add Row  (SW{extraGridRows + 1} / S{extraGridRows + 1} / SE{extraGridRows + 1})
+                    </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                    style={[styles.addRowBtn, { flex: 1 }]}
+                    onPress={() => setExtraGridCols(c => c + 1)}
+                >
+                    <Text style={styles.addRowBtnText}>
+                        {extraGridCols + 1 > extraGridRows
+                            ? `+ Add Column  (NE${extraGridCols + 1} | E${extraGridCols + 1} | SE${extraGridCols + 1})`
+                            : `+ Add Column  (NE${extraGridCols + 1} | E${extraGridCols + 1})`
+                        }
+                    </Text>
+                </TouchableOpacity>
+            </View>
+            <View style={{ height: 40 }} />
+        </ScrollView>,
+
+        // Step 2: Bed Config + Pathways
+        <ScrollView
+            key="step2"
+            style={[styles.stepContent, Platform.OS === 'web' ? { overflowY: 'scroll', flex: 1, minHeight: 0, maxHeight: 'calc(100dvh - 190px)' } : null]}
+            contentContainerStyle={styles.stepInner}
+            showsVerticalScrollIndicator={Platform.OS !== 'web'}
         >
             <Text style={styles.stepTitle}>Bed Configuration</Text>
             <View style={styles.modeToggle}>
@@ -425,15 +520,11 @@ export default function BlockSetupWizard({ route, navigation }) {
                     <FieldRow label="Bed length" unit="ft" value={bedLengthFt} onChangeText={setBedLengthFt} />
                 </>
             )}
-            <View style={{ height: 40 }} />
-        </ScrollView>,
 
-        // Step 3: Pathways + bisecting road
-        <ScrollView key="step3" style={styles.stepContent} contentContainerStyle={styles.stepInner}
-            showsVerticalScrollIndicator={false}
-            {...(Platform.OS === 'web' ? { style: [styles.stepContent, { overflowY: 'scroll' }], contentContainerStyle: styles.stepInner } : {})}
-        >
-            <Text style={styles.stepTitle}>Pathways</Text>
+            {/* ── Pathways (merged from old Step 3) ─── */}
+            <View style={[styles.bisectRow, { marginTop: Spacing.md }]}>
+                <Text style={[styles.fieldLabel, { flex: 1 }]}>Pathways</Text>
+            </View>
             <FieldRow label="Bed width" unit="ft" value={bedWidthFt} onChangeText={setBedWidthFt} placeholder="2.5" />
             <FieldRow label="Pathway width between beds" unit="ft" value={pathwayFt} onChangeText={setPathwayFt} placeholder="4" />
 
@@ -454,8 +545,8 @@ export default function BlockSetupWizard({ route, navigation }) {
                 <>
                     <Text style={styles.fieldLabel}>Orientation</Text>
                     <ChipSelect
-                        options={['NS (runs N↕5, splits E/W)', 'EW (runs E↔W, splits N/S)']}
-                        value={bisectOrient === 'NS' ? 'NS (runs N↕5, splits E/W)' : 'EW (runs E↔W, splits N/S)'}
+                        options={['NS (runs N↕S, splits E/W)', 'EW (runs E↔W, splits N/S)']}
+                        value={bisectOrient === 'NS' ? 'NS (runs N↕S, splits E/W)' : 'EW (runs E↔W, splits N/S)'}
                         onSelect={v => setBisectOrient(v.startsWith('NS') ? 'NS' : 'EW')}
                     />
                     <FieldRow label="Road / path width" unit="ft" value={bisectWidFt} onChangeText={setBisectWidFt} placeholder="14" />
@@ -471,10 +562,11 @@ export default function BlockSetupWizard({ route, navigation }) {
             <View style={{ height: 40 }} />
         </ScrollView>,
 
-        // Step 4: Review
-        <ScrollView key="step4" style={styles.stepContent} showsVerticalScrollIndicator={false}
+        // Step 3: Review
+        <ScrollView key="step3"
+            style={[styles.stepContent, Platform.OS === 'web' ? { overflowY: 'scroll', flex: 1, minHeight: 0, maxHeight: 'calc(100dvh - 190px)' } : null]}
             contentContainerStyle={styles.stepInner}
-            {...(Platform.OS === 'web' ? { style: [styles.stepContent, { overflowY: 'scroll' }], contentContainerStyle: styles.stepInner } : {})}
+            showsVerticalScrollIndicator={Platform.OS !== 'web'}
         >
             <Text style={styles.stepTitle}>Review & Save</Text>
             <View style={styles.reviewCard}>
@@ -493,16 +585,18 @@ export default function BlockSetupWizard({ route, navigation }) {
                 ) : (
                     <Row label="Block name" value={blockName || '(unnamed)'} />
                 )}
-                <Row label="Grid position" value={gridPos?.label ?? 'Center'} />
+                <Row label="Grid position" value={gridPos?.label ?? '—'} />
                 <Row label="Family assignment" value={familyAssignment} />
                 <Row label="Beds" value={`${effectiveBedCount} beds`} />
                 <Row label="Bed length" value={`${effectiveBedLen} ft`} />
                 <Row label="Bed width" value={`${bedWidthFt} ft`} />
                 <Row label="Pathway width" value={`${pathwayFt} ft`} />
                 {bisectEnabled && <Row label="Bisecting road" value={`${bisectOrient}, ${bisectWidFt}ft wide`} />}
+                {inputMode === 'dimensions' && (
+                    <Row label="Block dimensions" value={`${blockLenFt || '—'} ft × ${blockWidFt || '—'} ft`} />
+                )}
                 <View style={styles.reviewDivider} />
-                <Row label="Total planted area (per block)" value={`${(effectiveBedCount * effectiveBedLen * (parseFloat(bedWidthFt) || 2.5)).toLocaleString()} sq ft`} />
-                <Row label="Total linear feet (per block)" value={`${(effectiveBedCount * effectiveBedLen * 4).toLocaleString()} row-ft`} />
+                <Row label="Total Planted Area (Per Block)" value={`${(effectiveBedCount * effectiveBedLen * (parseFloat(bedWidthFt) || 2.5)).toLocaleString()} sq ft`} />
             </View>
             <TouchableOpacity style={styles.saveBlockBtn} onPress={handleSave}>
                 <Text style={styles.saveBlockBtnText}>
@@ -516,11 +610,10 @@ export default function BlockSetupWizard({ route, navigation }) {
     ];
 
     const canAdvance = [
-        true, // step 0: name optional
-        true, // step 1 (duplicate): always optional, skip if not needed
-        inputMode === 'beds' ? (parseInt(bedCount) > 0) : (parseFloat(blockLenFt) > 0 && parseFloat(blockWidFt) > 0), // step 2
-        true, // step 3: pathways always valid
-        false, // step 4: save button handles it
+        true, // step 0: multiple? always valid
+        true, // step 1: name optional
+        inputMode === 'beds' ? (parseInt(bedCount) > 0) : (parseFloat(blockLenFt) > 0 && parseFloat(blockWidFt) > 0), // step 2: bed config
+        false, // step 3: save button handles it
     ][contentIdx] ?? false;
 
     return (
@@ -530,32 +623,33 @@ export default function BlockSetupWizard({ route, navigation }) {
                 <TouchableOpacity style={styles.backBtn} onPress={goBack}>
                     <Text style={styles.backArrow}>‹</Text>
                 </TouchableOpacity>
+                <HomeLogoButton navigation={navigation} />
                 <View style={{ flex: 1 }}>
                     <Text style={styles.stepLabel}>FARM DESIGNER</Text>
                     <Text style={styles.heading}>{existingBlock ? 'Edit Block' : 'New Block'}</Text>
+                    <StepDots step={step} />
                 </View>
-                <StepDots step={step} />
-            </View>
-
-            <Animated.View style={[styles.body, { transform: [{ translateX: slideAnim }] }]}>
-                {stepContent[contentIdx]}
-            </Animated.View>
-
-            {/* Bottom nav */}
-            {step < effectiveTotalSteps - 1 && (
-                <View style={styles.footer}>
+                {step < effectiveTotalSteps - 1 && (
                     <TouchableOpacity
-                        style={[styles.nextBtn, !canAdvance && styles.nextBtnDisabled]}
+                        style={[styles.headerNextBtn, !canAdvance && styles.headerNextBtnDisabled]}
                         onPress={goForward}
                         disabled={!canAdvance}
                     >
-
-                        <Text style={styles.nextBtnText}>
+                        <Text style={styles.headerNextBtnText}>
                             {step === TOTAL_STEPS - 2 ? 'Review →' : 'Next →'}
                         </Text>
                     </TouchableOpacity>
-                </View>
-            )}
+                )}
+            </View>
+
+            <Animated.View style={[
+                styles.body,
+                { transform: [{ translateX: slideAnim }] },
+                Platform.OS === 'web' ? { overflow: 'clip', minHeight: 0 } : null,
+            ]}>
+                {stepContent[contentIdx]}
+            </Animated.View>
+
         </View>
     );
 }
@@ -569,7 +663,11 @@ const Row = ({ label, value }) => (
 );
 
 const styles = StyleSheet.create({
-    container: { flex: 1, backgroundColor: '#F0EDE6' },
+    container: {
+        flex: 1,
+        backgroundColor: '#F0EDE6',
+        ...Platform.select({ web: { height: '100dvh', overflow: 'clip' } }),
+    },
 
     header: {
         flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
@@ -581,12 +679,12 @@ const styles = StyleSheet.create({
     stepLabel: { fontSize: Typography.xs, fontWeight: Typography.bold, color: Colors.warmTan, letterSpacing: 2 },
     heading: { fontSize: Typography.lg, fontWeight: Typography.bold, color: Colors.cream },
 
-    stepDots: { flexDirection: 'row', gap: 5 },
+    stepDots: { flexDirection: 'row', gap: 5, marginTop: 3 },
     dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.3)' },
     dotActive: { backgroundColor: Colors.cream },
 
-    body: { flex: 1 },
-    stepContent: { flex: 1 },
+    body: { flex: 1, ...Platform.select({ web: { minHeight: 0 } }) },
+    stepContent: { flex: 1, ...Platform.select({ web: { minHeight: 0 } }) },
     stepInner: { padding: Spacing.lg, gap: Spacing.md, paddingBottom: 60 },
     stepTitle: { fontSize: 22, fontWeight: '800', color: Colors.primaryGreen },
     stepSubtitle: { fontSize: Typography.sm, color: Colors.mutedText, marginTop: -Spacing.sm },
@@ -630,11 +728,59 @@ const styles = StyleSheet.create({
     gridCellText: { fontSize: 7, fontWeight: '700', color: Colors.primaryGreen },
     gridCellTextActive: { color: Colors.cream },
 
+    // ── + Add Row / + Add Column buttons row ───────────────────────────────────
+    addBtnsRow: {
+        flexDirection: 'row',
+        gap: 6,
+        marginTop: Spacing.sm,
+    },
+    addRowBtn: {
+        flex: 1, // Added flex: 1 to make buttons share space
+        paddingVertical: 9,
+        paddingHorizontal: 14,
+        borderRadius: Radius.md,
+        borderWidth: 1.5,
+        borderStyle: 'dashed',
+        borderColor: 'rgba(45,79,30,0.3)',
+        alignItems: 'center',
+    },
+    addRowBtnText: {
+        fontSize: Typography.xs,
+        fontWeight: '700',
+        color: Colors.primaryGreen,
+        letterSpacing: 0.3,
+    },
+
     modeToggle: { flexDirection: 'row', gap: 8, borderRadius: Radius.md, overflow: 'hidden' },
     modeBtn: { flex: 1, paddingVertical: 10, borderRadius: Radius.sm, borderWidth: 1.5, borderColor: 'rgba(45,79,30,0.2)', alignItems: 'center' },
     modeBtnActive: { backgroundColor: Colors.primaryGreen, borderColor: Colors.primaryGreen },
     modeBtnText: { fontSize: Typography.sm, fontWeight: '700', color: Colors.primaryGreen },
     modeBtnTextActive: { color: Colors.cream },
+
+    // Yes / No big buttons for duplicate layout question
+    yesNoRow: { flexDirection: 'row', gap: 12, marginVertical: Spacing.sm },
+    yesNoBtn: {
+        flex: 1, paddingVertical: 20,
+        borderRadius: Radius.lg,
+        borderWidth: 2, borderColor: 'rgba(45,79,30,0.2)',
+        alignItems: 'center', gap: 4,
+        backgroundColor: 'rgba(45,79,30,0.03)',
+    },
+    yesNoBtnActive: {
+        backgroundColor: Colors.primaryGreen,
+        borderColor: Colors.primaryGreen,
+    },
+    yesNoBtnLabel: {
+        fontSize: 28, fontWeight: '900',
+        color: Colors.primaryGreen,
+    },
+    yesNoBtnLabelActive: { color: Colors.cream },
+    yesNoBtnSub: {
+        fontSize: Typography.xs, fontWeight: '600',
+        color: Colors.mutedText, textAlign: 'center',
+        paddingHorizontal: 8,
+    },
+    yesNoBtnSubActive: { color: 'rgba(245,245,220,0.78)' },
 
     bisectRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
 
@@ -651,6 +797,22 @@ const styles = StyleSheet.create({
     saveBlockBtn: { backgroundColor: Colors.primaryGreen, borderRadius: Radius.md, paddingVertical: 16, alignItems: 'center', marginTop: Spacing.md },
     saveBlockBtnText: { color: Colors.cream, fontWeight: '800', fontSize: Typography.md },
 
+    headerNextBtn: {
+        backgroundColor: Colors.cream,
+        paddingHorizontal: 16,
+        paddingVertical: 8,
+        borderRadius: 20,
+        minWidth: 90,
+        alignItems: 'center',
+    },
+    headerNextBtnDisabled: {
+        backgroundColor: 'rgba(255,255,255,0.3)',
+    },
+    headerNextBtnText: {
+        color: Colors.primaryGreen,
+        fontWeight: '700',
+        fontSize: 14,
+    },
     footer: { padding: Spacing.lg, paddingBottom: 32 },
     nextBtn: { backgroundColor: Colors.primaryGreen, borderRadius: Radius.md, paddingVertical: 16, alignItems: 'center' },
     nextBtnDisabled: { opacity: 0.4 },

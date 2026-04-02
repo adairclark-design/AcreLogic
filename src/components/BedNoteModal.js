@@ -50,7 +50,7 @@ function formatNow() {
 }
 
 // ─── Component ─────────────────────────────────────────────────────────────────
-export default function BedNoteModal({ visible, bedNum, onClose }) {
+export default function BedNoteModal({ visible, bedNum, blockName, onClose }) {
     const [text, setText] = useState('');
     const [saving, setSaving] = useState(false);
     const [saved, setSaved] = useState(false);
@@ -113,7 +113,7 @@ export default function BedNoteModal({ visible, bedNum, onClose }) {
             ].filter(Boolean).join('  ·  ');
 
             const fullText = `${trimmed}\n\n${stamp}`;
-            const bedTag = bedNum ? `Bed ${bedNum}` : 'General';
+            const bedTag = bedNum ? `${blockName ? blockName + ' — ' : ''}Bed ${bedNum}` : 'General';
 
             saveJournalEntry({ bedTag, text: fullText });
             setSaved(true);
@@ -131,7 +131,7 @@ export default function BedNoteModal({ visible, bedNum, onClose }) {
 
     if (!visible) return null;
 
-    const bedLabel = bedNum ? `Bed ${bedNum}` : 'General';
+    const bedLabel = bedNum ? `${blockName ? blockName + ' — ' : ''}Bed ${bedNum}` : 'General';
 
     return (
         <Modal

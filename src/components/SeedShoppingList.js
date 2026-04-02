@@ -14,7 +14,7 @@
  */
 import React from 'react';
 import {
-    View, Text, ScrollView, StyleSheet, Image,
+    View, Text, ScrollView, StyleSheet, Image, useWindowDimensions,
 } from 'react-native';
 import { Colors, Typography, Spacing, Radius, Shadows } from '../theme';
 import CROP_IMAGES from '../data/cropImages';
@@ -146,6 +146,26 @@ function packetsLabel(n) {
     return n === 1 ? '1 packet' : `${n} packets`;
 }
 
+/** Mirror logic from ActionCalendar / homeGardenCalculator to ensure sync */
+function seedsPerCell(germRate) {
+    if (germRate >= 0.85) return 1;
+    if (germRate >= 0.70) return 2;
+    return 3;
+}
+function withSeasonBuffer(n) { return Math.ceil((n ?? 0) * 1.20); }
+
+function getSeedQty(crop, specs) {
+    if (specs.isSpecial) {
+        return crop.plantsNeeded || 1;
+    }
+    const plantsToGrow = withSeasonBuffer(crop.plantsNeeded ?? 0);
+    if (crop.seedType === 'TP') {
+        const perCell = seedsPerCell(crop.germRate ?? 0.75);
+        return (plantsToGrow || 1) * perCell;
+    }
+    return withSeasonBuffer(crop.seedsToStart ?? crop.plantsNeeded ?? 1);
+}
+
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
 function SectionHeader({ emoji, title, subtitle }) {
@@ -160,60 +180,44 @@ function SectionHeader({ emoji, title, subtitle }) {
     );
 }
 
-function ShoppingRow({ crop }) {
-    const specs = specsFor(crop);
-    const qty   = crop.seedsToStart ?? crop.plantsNeeded ?? crop.seedsToStart ?? 1;
-
-    // For special-purchase crops (tubers, bare root) show individual unit count
-    if (specs.isSpecial) {
-        const lineTotal = qty * specs.price;
-        return (
-            <View style={[styles.row, Shadows.card]}>
-                <View style={styles.rowImage}>
-                    {CROP_IMAGES[crop.cropId]
-                        ? <Image source={CROP_IMAGES[crop.cropId]} style={styles.rowImg} resizeMode="cover" />
-                        : <Text style={styles.rowEmoji}>{crop.emoji ?? '🌱'}</Text>
-                    }
-                </View>
-                <View style={styles.rowMain}>
-                    <Text style={styles.rowName} numberOfLines={1}>
-                        {crop.cropName}{crop.variety ? ` · ${crop.variety}` : ''}
-                    </Text>
-                    <Text style={styles.rowDetail}>
-                        {qty} {specs.unit}  ·  {fmt(specs.price)}/ea
-                    </Text>
-                </View>
-                <View style={styles.rowRight}>
-                    <Text style={styles.rowPackets}>{qty} {specs.unit}</Text>
-                    <Text style={styles.rowPrice}>{fmt(lineTotal)}</Text>
-                </View>
-            </View>
-        );
-    }
-
-    const packets   = Math.max(1, Math.ceil(qty / specs.seedsPerPacket));
+function SeedCard({ crop, cardWidth }) {
+    const specs  = specsFor(crop);
+    const qty    = getSeedQty(crop, specs);
+    const isSpec = specs.isSpecial;
+    const packets = isSpec ? qty : Math.max(1, Math.ceil(qty / specs.seedsPerPacket));
     const lineTotal = packets * specs.price;
+    const label = isSpec
+        ? `${qty} ${specs.unit}`
+        : packetsLabel(packets);
 
     return (
-        <View style={[styles.row, Shadows.card]}>
-            <View style={styles.rowImage}>
+        <View style={[styles.seedCard, { width: cardWidth }, Shadows.card]}>
+            {/* Image / emoji */}
+            <View style={styles.seedCardImg}>
                 {CROP_IMAGES[crop.cropId]
-                    ? <Image source={CROP_IMAGES[crop.cropId]} style={styles.rowImg} resizeMode="cover" />
-                    : <Text style={styles.rowEmoji}>{crop.emoji ?? '🌱'}</Text>
+                    ? <Image source={CROP_IMAGES[crop.cropId]} style={styles.seedCardImgEl} resizeMode="cover" />
+                    : <Text style={styles.seedCardEmoji}>{crop.emoji ?? '🌱'}</Text>
                 }
             </View>
-            <View style={styles.rowMain}>
-                <Text style={styles.rowName} numberOfLines={1}>
-                    {crop.cropName}{crop.variety ? ` · ${crop.variety}` : ''}
+            {/* Crop name */}
+            <Text style={styles.seedCardName} numberOfLines={2}>
+                {crop.cropName}
+            </Text>
+            {crop.variety ? (
+                <Text style={[styles.seedCardName, { fontSize: 9, opacity: 0.65, fontWeight: '400', marginTop: 1 }]} numberOfLines={1}>
+                    {crop.variety}
                 </Text>
-                <Text style={styles.rowDetail}>
-                    {qty} seeds needed  ·  ~{specs.seedsPerPacket}/packet
+            ) : null}
+            {/* Packet/unit count */}
+            <Text style={styles.seedCardPackets} numberOfLines={1}>{label}</Text>
+            {/* Price */}
+            <Text style={styles.seedCardPrice}>{fmt(lineTotal)}</Text>
+            {/* Packet Details */}
+            {!isSpec && (
+                <Text style={styles.seedCardDetail} numberOfLines={1}>
+                    ~{specs.seedsPerPacket} {specs.unit}/pkt
                 </Text>
-            </View>
-            <View style={styles.rowRight}>
-                <Text style={styles.rowPackets}>{packetsLabel(packets)}</Text>
-                <Text style={styles.rowPrice}>{fmt(lineTotal)}</Text>
-            </View>
+            )}
         </View>
     );
 }
@@ -221,11 +225,10 @@ function ShoppingRow({ crop }) {
 function Subtotal({ label, crops }) {
     const total = crops.reduce((sum, c) => {
         const specs = specsFor(c);
+        const qty = getSeedQty(c, specs);
         if (specs.isSpecial) {
-            const qty = c.seedsToStart ?? c.plantsNeeded ?? 1;
             return sum + qty * specs.price;
         }
-        const qty     = c.seedsToStart ?? 1;
         const packets = Math.max(1, Math.ceil(qty / specs.seedsPerPacket));
         return sum + packets * specs.price;
     }, 0);
@@ -242,6 +245,13 @@ function Subtotal({ label, crops }) {
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function SeedShoppingList({ crops }) {
+    const { width } = useWindowDimensions();
+    // Target: 12 across on wide desktop, 8 on tablet, 5 on mobile
+    const COLS    = width > 1100 ? 12 : width > 700 ? 8 : 5;
+    const GAP     = 6;
+    const HPAD    = 32; // container horizontal padding total
+    const cardWidth = Math.floor((width - HPAD - GAP * (COLS - 1)) / COLS);
+
     // Partition into three groups
     const directSow = crops.filter(c => c.seedType === 'DS' && !specsFor(c).isSpecial);
     const startIndoors = crops.filter(c => c.seedType === 'TP' && !specsFor(c).isSpecial);
@@ -251,11 +261,10 @@ export default function SeedShoppingList({ crops }) {
     const all = [...directSow, ...startIndoors, ...specialPurchase];
     const grandTotal = all.reduce((sum, c) => {
         const specs = specsFor(c);
+        const qty = getSeedQty(c, specs);
         if (specs.isSpecial) {
-            const qty = c.seedsToStart ?? c.plantsNeeded ?? 1;
             return sum + qty * specs.price;
         }
-        const qty     = c.seedsToStart ?? 1;
         const packets = Math.max(1, Math.ceil(qty / specs.seedsPerPacket));
         return sum + packets * specs.price;
     }, 0);
@@ -263,7 +272,7 @@ export default function SeedShoppingList({ crops }) {
     const grandHigh = grandTotal * 1.2;
     const totalPackets = [...directSow, ...startIndoors].reduce((sum, c) => {
         const specs = specsFor(c);
-        const qty = c.seedsToStart ?? 1;
+        const qty = getSeedQty(c, specs);
         return sum + Math.max(1, Math.ceil(qty / specs.seedsPerPacket));
     }, 0);
 
@@ -293,7 +302,9 @@ export default function SeedShoppingList({ crops }) {
                         title="Direct Sow Seeds"
                         subtitle="Plant these seeds directly in the ground"
                     />
-                    {directSow.map(c => <ShoppingRow key={c.cropId} crop={c} />)}
+                    <View style={[styles.seedGrid, { gap: GAP }]}>
+                        {directSow.map(c => <SeedCard key={c.cropId} crop={c} cardWidth={cardWidth} />)}
+                    </View>
                     <Subtotal label="Direct Sow" crops={directSow} />
                 </View>
             )}
@@ -306,7 +317,9 @@ export default function SeedShoppingList({ crops }) {
                         title="Start Indoors / Transplant"
                         subtitle="Germinate inside 4–8 weeks before last frost, or buy as nursery transplants"
                     />
-                    {startIndoors.map(c => <ShoppingRow key={c.cropId} crop={c} />)}
+                    <View style={[styles.seedGrid, { gap: GAP }]}>
+                        {startIndoors.map(c => <SeedCard key={c.cropId} crop={c} cardWidth={cardWidth} />)}
+                    </View>
                     <Subtotal label="Transplant Seeds" crops={startIndoors} />
                 </View>
             )}
@@ -315,12 +328,14 @@ export default function SeedShoppingList({ crops }) {
             {specialPurchase.length > 0 && (
                 <View style={styles.section}>
                     <SectionHeader
-                        emoji="🛒"
+                        emoji="🛍️"
                         title="Buy as Starts / Tubers"
                         subtitle="These aren't grown from seed — purchase as tubers, slips, or bare-root plants"
                     />
-                    {specialPurchase.map(c => <ShoppingRow key={c.cropId} crop={c} />)}
-                    <Subtotal label="Starts & Tubers" crops={specialPurchase} />
+                    <View style={[styles.seedGrid, { gap: GAP }]}>
+                        {specialPurchase.map(c => <SeedCard key={c.cropId} crop={c} cardWidth={cardWidth} />)}
+                    </View>
+                    <Subtotal label="Starts &amp; Tubers" crops={specialPurchase} />
                 </View>
             )}
 
@@ -337,9 +352,9 @@ export default function SeedShoppingList({ crops }) {
             {/* Disclaimer */}
             <View style={styles.disclaimer}>
                 <Text style={styles.disclaimerText}>
-                    💡 Packet sizes and prices are based on Johnny's, Baker Creek, and High Mowing averages.
+                    💡 Seed packet costs are derived from a national average of similar seeds and varieties. They may be more or less depending on where they are purchased.
                     Garlic, shallots, and propagated alliums appear under "Buy as Starts" since they're sold as bulbs or sets, not seeds.
-                    Germination buffer already factored into seed quantities. Your actual cost will vary.
+                    A germination buffer is already factored into seed quantities.
                 </Text>
             </View>
         </ScrollView>
@@ -407,7 +422,59 @@ const styles = StyleSheet.create({
         marginTop: 2,
     },
 
-    // ── Row ───────────────────────────────────────────────────────────────────
+    // ── Compact Seed Card (grid item) ─────────────────────────────────────
+    seedGrid: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        marginBottom: 6,
+    },
+    seedCard: {
+        backgroundColor: '#fff',
+        borderRadius: 8,
+        padding: 5,
+        alignItems: 'center',
+        marginBottom: 6,
+    },
+    seedCardImg: {
+        width: 32,
+        height: 32,
+        borderRadius: 6,
+        overflow: 'hidden',
+        backgroundColor: 'rgba(45,79,30,0.08)',
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginBottom: 3,
+    },
+    seedCardImgEl: { width: 32, height: 32 },
+    seedCardEmoji: { fontSize: 18 },
+    seedCardName: {
+        fontSize: 9,
+        fontWeight: '600',
+        color: Colors.primaryGreen,
+        textAlign: 'center',
+        lineHeight: 12,
+        marginBottom: 2,
+    },
+    seedCardPackets: {
+        fontSize: 8,
+        color: Colors.mutedText,
+        textAlign: 'center',
+    },
+    seedCardPrice: {
+        fontSize: 9,
+        fontWeight: '700',
+        color: Colors.primaryGreen,
+        textAlign: 'center',
+        marginTop: 1,
+    },
+    seedCardDetail: {
+        fontSize: 7,
+        color: Colors.textLight ?? '#888',
+        textAlign: 'center',
+        marginTop: 2,
+    },
+
+    // ── (legacy row styles kept for any fallback reference) ─────────────────
     row: {
         flexDirection: 'row',
         alignItems: 'center',

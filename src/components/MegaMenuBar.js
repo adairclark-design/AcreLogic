@@ -33,7 +33,6 @@ export const MEGA_CATEGORIES = [
         subcategories: [
             { label: 'Lettuce',              filter: c => c.id.startsWith('lettuce_') },
             { label: 'Spinach & Chard',      filter: c => ['spinach_space','chard','chard_rainbow','perpetual_spinach','new_zealand_spinach','malabar_spinach'].includes(c.id) },
-            { label: 'Asian Greens',         filter: c => ['bok_choy','komatsuna','tatsoi_standard','mizuna_standard','asian_mix','yu_choy','chinese_cabbage'].includes(c.id) },
             { label: 'Chicory & Endive',     filter: c => ['belgian_endive','radicchio_rossa','fris_e','chicory_catalogna','endive_frisee'].includes(c.id) },
             { label: 'Wild & Specialty',     filter: c => ['sorrel_french','mache_vit','amaranth_greens','orach_red','purslane_golden','watercress_standard','claytonia','glasswort','sea_purslane','good_king_henry','agretti','dandelion_greens','celtuce','samphire'].includes(c.id) },
         ],
@@ -51,7 +50,7 @@ export const MEGA_CATEGORIES = [
             { label: 'Cauliflower',          filter: c => c.id.startsWith('cauliflower_') },
             { label: 'Kohlrabi',             filter: c => c.id.includes('kohlrabi') },
             { label: 'Brussels Sprouts',     filter: c => c.id === 'brussels_sprouts' },
-            { label: 'Asian Brassicas',      filter: c => c.id.startsWith('pak_choi') || c.id.startsWith('pac_choi') || c.id.includes('tatsoi') || c.id.includes('chinese_cabbage') || c.id === 'napa_cabbage' || c.id === 'bok_choy' || c.id === 'yu_choy' },
+            { label: 'Asian Greens & Choys', filter: c => c.subcategory === 'Asian Greens' || c.id.startsWith('pak_choi') || c.id.startsWith('pac_choi') || c.id.includes('tatsoi') || c.id.includes('bok_choy') || c.id === 'yu_choy' || c.id.includes('chinese_cabbage') || ['komatsuna','mizuna_standard','asian_mix'].includes(c.id) },
             { label: 'Forage & Cover',       filter: c => c.id === 'forage_rape' },
         ],
         filter: c => c.category === 'Brassica',
@@ -90,7 +89,7 @@ export const MEGA_CATEGORIES = [
         label: 'Tomatoes',
         emoji: '🍅',
         subcategories: [
-            { label: 'Slicing Tomatoes',     filter: c => ['tomato_heirloom_beefsteak','tomato_celebrity','tomato_early_girl'].includes(c.id) },
+            { label: 'Slicing Tomatoes',     filter: c => ['tomato_celebrity','tomato_early_girl'].includes(c.id) },
             { label: 'Cherry & Grape',       filter: c => ['cherry_tomato_sungold','tomato_yellow_pear','tomato_black_cherry','tomato_juliet','tomato_large_red_cherry'].includes(c.id) },
             { label: 'Heirloom',             filter: c => ['tomato_cherokee_purple','tomato_yellow_brandywine','tomato_green_zebra','tomato_black_krim','tomato_mortgage_lifter','tomato_heirloom_beefsteak'].includes(c.id) },
             { label: 'Paste & Sauce',        filter: c => ['tomato_roma','tomato_san_marzano','tomato_amish_paste'].includes(c.id) },
@@ -133,7 +132,7 @@ export const MEGA_CATEGORIES = [
             { label: 'Summer Squash',        filter: c => c.id.includes('pattypan') || c.id.includes('crookneck') || (c.id.includes('squash_lemon') && !c.id.startsWith('cucumber')) },
             { label: 'Winter Squash',        filter: c => c.category === 'Cucurbit' && (c.id.includes('butternut') || c.id.includes('kabocha') || c.id.includes('delicata') || c.id.includes('acorn') || c.id.includes('kuri') || c.id.includes('hubbard') || c.id.includes('spaghetti') || c.id.includes('dumpling') || c.id.includes('marina') || c.id.includes('galeux') || c.id.includes('queensland') || c.id.includes('tetsukabuto') || c.id.includes('crown_prince') || c.id.includes('black_futsu')) && !c.id.includes('pumpkin') },
             { label: 'Pumpkins',             filter: c => c.id.includes('pumpkin') || c.id === 'squash_cinderella' },
-            { label: 'Melons',               filter: c => (c.id.startsWith('melon_') || c.id.includes('cantaloupe') || c.id.includes('honeydew') || c.id.includes('crenshaw') || c.id.includes('galia') || c.id.includes('charentais') || c.id.includes('canary')) && !c.id.includes('watermelon') },
+            { label: 'Muskmelons/ Honeydews', filter: c => (c.id.startsWith('melon_') || c.id.includes('cantaloupe') || c.id.includes('honeydew') || c.id.includes('crenshaw') || c.id.includes('galia') || c.id.includes('charentais') || c.id.includes('canary')) && !c.id.includes('watermelon') },
             { label: 'Watermelons',          filter: c => c.id.startsWith('watermelon_') && c.category === 'Cucurbit' },
             { label: 'Gourds & Luffa',       filter: c => ['luffa_gourd','bitter_melon'].includes(c.id) || c.id.includes('gourd') },
         ],
@@ -198,12 +197,42 @@ export const MEGA_CATEGORIES = [
         emoji: '🍓',
         subcategories: [
             { label: 'Strawberries',         filter: c => c.id.startsWith('strawberry_') || c.id.includes('strawberry') },
-            { label: 'Cane Fruits',          filter: c => c.id.startsWith('raspberry_') || c.id.startsWith('blackberry_') || c.id === 'blackberry' },
-            { label: 'Bush Berries',         filter: c => ['blueberry','elderberry_standard','honeyberry_standard','aronia_chokeberry'].includes(c.id) || c.id.startsWith('currant_') },
-            { label: 'Goji & Sea Buckthorn', filter: c => ['goji_berry','sea_buckthorn'].includes(c.id) },
-            { label: 'Wild & Native',        filter: c => ['beach_plum','serviceberry','wolfberry','autumn_olive','cornelian_cherry'].includes(c.id) },
+            { label: 'Wild & Native',        filter: c => ['serviceberry','wolfberry','autumn_olive'].includes(c.id) },
         ],
         filter: c => c.category === 'Fruit',
+    },
+
+    // ── Fruit Trees ───────────────────────────────────────────────────────────
+    {
+        label: 'Fruit Trees',
+        emoji: '🌳',
+        subcategories: [
+            { label: 'Apples',          filter: c => c.id.startsWith('apple_') },
+            { label: 'Pears & Quince',  filter: c => c.id.startsWith('pear_') || c.id.startsWith('quince_') },
+            { label: 'Peaches & Nectarines', filter: c => c.id.startsWith('peach_') || c.id.startsWith('nectarine_') },
+            { label: 'Plums & Apricots', filter: c => c.id.startsWith('plum_') || c.id.startsWith('apricot_') },
+            { label: 'Cherries & Pluots', filter: c => c.id.startsWith('cherry_') || c.id.startsWith('pluot_') },
+            { label: 'Citrus',          filter: c => ['lemon_eureka','lemon_meyer','orange_navel','orange_valencia','mandarin_satsuma','lime_persian','grapefruit_ruby_red','kumquat_nagami'].includes(c.id) },
+            { label: 'Specialty Trees', filter: c => ['fig_brown_turkey','fig_chicago_hardy','persimmon_fuyu','persimmon_hachiya','mulberry_illinois','pawpaw_shenandoah','jujube_li'].includes(c.id) },
+            { label: 'Subtropical',     filter: c => ['avocado_hass','mango_tommy_atkins','olive_arbequina','pomegranate_wonderful','loquat_big_jim'].includes(c.id) },
+        ],
+        filter: c => c.category === 'Fruit Tree',
+    },
+
+    // ── Fruiting Shrubs ───────────────────────────────────────────────────────
+    {
+        label: 'Fruiting Shrubs',
+        emoji: '🫐',
+        subcategories: [
+            { label: 'Blueberries',              filter: c => c.subcategory === 'Blueberry' },
+            { label: 'Raspberries',              filter: c => c.subcategory === 'Raspberry' },
+            { label: 'Blackberries',             filter: c => c.subcategory === 'Blackberry' },
+            { label: 'Hybrid Cane Berries',      filter: c => c.subcategory === 'Hybrid Berry' },
+            { label: 'Currants & Gooseberries',  filter: c => c.subcategory === 'Currant' || c.subcategory === 'Gooseberry' },
+            { label: 'Elderberries & Honeyberries', filter: c => c.subcategory === 'Elderberry' || c.subcategory === 'Honeyberry' },
+            { label: 'Specialty Shrubs',         filter: c => c.subcategory === 'Specialty Shrub' },
+        ],
+        filter: c => c.category === 'Fruiting Shrub',
     },
 
     // ── Grains & Corn (+ Quinoa moved here from Specialty) ────────────────────

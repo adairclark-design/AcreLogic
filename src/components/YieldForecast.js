@@ -12,37 +12,42 @@
  * Flowers and Cover Crops are excluded from lbs math but noted separately.
  */
 import React from 'react';
-import { View, Text, ScrollView, StyleSheet } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, Platform, useWindowDimensions } from 'react-native';
 import { Colors, Typography, Spacing, Radius, Shadows } from '../theme';
 import { getRetailPrice, getRegionName } from '../services/cropPricing';
 
 function fmt(n) { return `$${n.toFixed(2)}`; }
 function fmtRange(lo, hi) { return `${lo}–${hi} lbs`; }
 
-// ─── Bar chart helpers ────────────────────────────────────────────────────────
+// ─── Compact yield chip (10-across grid) ─────────────────────────────────────
 
-function BarRow({ crop, maxYield, barColor, zipCode }) {
+function YieldChip({ crop, maxYield, zipCode, chipWidth }) {
     const pct = maxYield > 0 ? (crop.yieldHigh ?? 0) / maxYield : 0;
-    const barW = `${Math.max(4, Math.round(pct * 100))}%`;
+    const barW = `${Math.max(6, Math.round(pct * 100))}%`;
     const price = getRetailPrice(crop.cropId, crop.category, zipCode);
-    const valueLow  = price != null ? Math.round((crop.yieldLow  ?? 0) * price) : null;
     const valueHigh = price != null ? Math.round((crop.yieldHigh ?? 0) * price) : null;
-
+    const CAT_COLORS = {
+        'Greens':'#2E7D32','Brassica':'#388E3C','Root':'#E65100',
+        'Tuber':'#BF360C','Allium':'#6A1B9A','Legume':'#1565C0',
+        'Herb':'#33691E','Nightshade':'#880E4F','Cucurbit':'#00695C',
+        'Specialty':'#F57F17','Grain':'#F9A825','Fruit':'#C62828',
+    };
+    const accent = CAT_COLORS[crop.category] ?? '#2D4F1E';
     return (
-        <View style={styles.barRow}>
-            <Text style={styles.barCropName} numberOfLines={1}>
-                {crop.emoji ? `${crop.emoji}  ` : ''}{crop.cropName}
-                {crop.variety ? <Text style={styles.barVariety}> · {crop.variety}</Text> : null}
-            </Text>
-            <View style={styles.barTrack}>
-                <View style={[styles.barFill, { width: barW, backgroundColor: barColor }]} />
+        <View style={[styles.yChip, { borderColor: accent + '44', width: chipWidth }]}>
+            <Text style={styles.yChipEmoji}>{crop.emoji ?? '🌿'}</Text>
+            <Text style={[styles.yChipName, { color: accent }]} numberOfLines={2}>{crop.cropName}</Text>
+            {crop.variety ? (
+                <Text style={[styles.yChipName, { color: accent, fontSize: 8, opacity: 0.7, fontWeight: '400', marginTop: 0 }]} numberOfLines={1}>{crop.variety}</Text>
+            ) : null}
+            {/* Mini bar */}
+            <View style={styles.yChipTrack}>
+                <View style={[styles.yChipFill, { width: barW, backgroundColor: accent }]} />
             </View>
-            <View style={styles.barStats}>
-                <Text style={styles.barLbs}>{fmtRange(crop.yieldLow ?? 0, crop.yieldHigh ?? 0)}</Text>
-                {valueLow != null && (
-                    <Text style={styles.barValue}>{fmt(valueLow)}–{fmt(valueHigh)}</Text>
-                )}
-            </View>
+            <Text style={styles.yChipYield}>{crop.yieldLow ?? 0}–{crop.yieldHigh ?? 0} lbs</Text>
+            {valueHigh != null ? (
+                <Text style={[styles.yChipValue, { color: accent }]}>{fmt(valueHigh)}</Text>
+            ) : null}
         </View>
     );
 }
@@ -73,6 +78,12 @@ function TableRow({ crop, isAlt, zipCode }) {
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function YieldForecast({ crops, gardenProfile }) {
+    const { width } = useWindowDimensions();
+    const COLS     = width > 1100 ? 12 : width > 700 ? 8 : 5;
+    const GAP      = 5;
+    const HPAD     = 32;
+    const chipWidth = Math.floor((width - HPAD - GAP * (COLS - 1)) / COLS);
+
     // Extract zip from gardenProfile — try explicit fields first, then regex on user input / address
     const _extractZip = (profile) => {
         if (!profile) return null;
@@ -126,24 +137,26 @@ export default function YieldForecast({ crops, gardenProfile }) {
         return s + (p != null ? (c.yieldHigh ?? 0) * p : 0);
     }, 0);
 
-    // Sort by yieldHigh descending for bar chart
+    // Sort by yieldHigh descending for chip grid and table
     const sortedByYield = [...produceCrops].sort((a, b) => (b.yieldHigh ?? 0) - (a.yieldHigh ?? 0));
     const maxYield = sortedByYield[0]?.yieldHigh ?? 1;
-
-    // Category color palette for bar chart
-    const CAT_COLORS = {
-        'Greens': '#2E7D32', 'Brassica': '#388E3C', 'Root': '#E65100',
-        'Tuber': '#BF360C', 'Allium': '#6A1B9A', 'Legume': '#1565C0',
-        'Herb': '#33691E', 'Nightshade': '#880E4F', 'Cucurbit': '#00695C',
-        'Specialty': '#F57F17', 'Grain': '#F9A825', 'Fruit': '#C62828',
-    };
-    function barColor(cat) { return CAT_COLORS[cat] ?? Colors.primaryGreen; }
 
     return (
         <ScrollView
             showsVerticalScrollIndicator={false}
             contentContainerStyle={styles.container}
         >
+            {/* ── Disclaimer banner — prominent, top of section ── */}
+            <View style={styles.disclaimerCard}>
+                <Text style={styles.disclaimerTitle}>⚠️ Estimates Only</Text>
+                <Text style={styles.disclaimerBody}>
+                    These are rough projections, not guarantees. Actual harvest depends on soil
+                    quality, light, nutrients, pest pressure, water, and growing experience.
+                    Yields may be significantly more or less than shown. All figures should be
+                    used for planning purposes only.
+                </Text>
+            </View>
+
             {/* ── Hero metrics ── */}
             <View style={styles.hero}>
                 <View style={styles.heroStat}>
@@ -157,7 +170,7 @@ export default function YieldForecast({ crops, gardenProfile }) {
                 </View>
             </View>
 
-            {/* ── Hero subtext — clarifies what the numbers mean ── */}
+            {/* ── Hero subtext ── */}
             <View style={styles.heroNote}>
                 <Text style={styles.heroNoteText}>
                     Planting sized to your family's seasonal targets
@@ -174,18 +187,18 @@ export default function YieldForecast({ crops, gardenProfile }) {
                 </View>
             </View>
 
-            {/* ── Bar chart: yield by crop ── */}
+            {/* ── Yield chip grid: 10-across ── */}
             <View style={styles.section}>
                 <Text style={styles.sectionTitle}>Yield by Crop</Text>
-                <Text style={styles.sectionSub}>Sorted by projected harvest (high estimate)</Text>
-                <View style={[styles.card, Shadows.card]}>
+                <Text style={styles.sectionSub}>Tap to see retail value · sorted by projected harvest</Text>
+                <View style={styles.yChipGrid}>
                     {sortedByYield.map(c => (
-                        <BarRow
+                        <YieldChip
                             key={c.cropId}
                             crop={c}
                             maxYield={maxYield}
-                            barColor={barColor(c.category)}
                             zipCode={zipCode}
+                            chipWidth={chipWidth}
                         />
                     ))}
                 </View>
@@ -226,16 +239,6 @@ export default function YieldForecast({ crops, gardenProfile }) {
                     </Text>
                 </View>
             )}
-
-            {/* ── Disclaimer ── */}
-            <View style={styles.disclaimer}>
-                <Text style={styles.disclaimerText}>
-                    📊 These numbers represent your planting targets, not guaranteed harvest yields.
-                    "Seasonal goal" = lbs sized to your family's consumption needs (±20% range).
-                    Retail values use USDA avg prices by crop — actual prices vary by region, season, and market.
-                    True harvest depends on weather, soil quality, pest pressure, and growing experience.
-                </Text>
-            </View>
         </ScrollView>
     );
 }
@@ -323,47 +326,7 @@ const styles = StyleSheet.create({
         marginBottom: Spacing.sm,
     },
 
-    // ── Bar chart card ────────────────────────────────────────────────────────
-    card: {
-        backgroundColor: '#fff',
-        borderRadius: Radius.md,
-        padding: Spacing.md,
-        gap: 12,
-    },
-    barRow: { gap: 4 },
-    barCropName: {
-        fontSize: Typography.sm,
-        fontWeight: Typography.semiBold,
-        color: Colors.primaryGreen,
-    },
-    barVariety: {
-        fontSize: Typography.xs,
-        color: Colors.mutedText,
-        fontWeight: Typography.regular ?? '400',
-    },
-    barTrack: {
-        height: 10,
-        backgroundColor: 'rgba(45,79,30,0.1)',
-        borderRadius: Radius.full,
-        overflow: 'hidden',
-    },
-    barFill: {
-        height: '100%',
-        borderRadius: Radius.full,
-        opacity: 0.85,
-    },
-    barStats: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-    },
-    barLbs: { fontSize: Typography.xs, color: Colors.mutedText },
-    barValue: {
-        fontSize: Typography.xs,
-        color: Colors.burntOrange ?? '#BF360C',
-        fontWeight: Typography.semiBold,
-    },
-
-    // ── Table ─────────────────────────────────────────────────────────────────
+    // ── Table ────────────────────────────────────────────────────────────────────
     tableCard: {
         backgroundColor: '#fff',
         borderRadius: Radius.md,
@@ -402,6 +365,78 @@ const styles = StyleSheet.create({
     totalPrice: { flex: 1 },
     totalValue: { flex: 2, fontSize: Typography.sm, fontWeight: Typography.bold, color: Colors.primaryGreen, textAlign: 'right' },
 
+    // ── Disclaimer card (top) ─────────────────────────────────────────────────
+    disclaimerCard: {
+        backgroundColor: '#FFF8E1',
+        borderRadius: Radius.md,
+        borderLeftWidth: 4,
+        borderLeftColor: '#F9A825',
+        paddingVertical: 10,
+        paddingHorizontal: 14,
+        marginBottom: Spacing.md,
+    },
+    disclaimerTitle: {
+        fontSize: 12,
+        fontWeight: '800',
+        color: '#E65100',
+        marginBottom: 4,
+        letterSpacing: 0.3,
+    },
+    disclaimerBody: {
+        fontSize: 10,
+        color: '#795548',
+        lineHeight: 15,
+    },
+
+    // ── Yield chip grid ───────────────────────────────────────────────────────
+    yChipGrid: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 5,
+    },
+    yChip: {
+        backgroundColor: '#fff',
+        borderRadius: 8,
+        borderWidth: 1,
+        padding: 6,
+        alignItems: 'center',
+        ...Shadows.card,
+    },
+    yChipEmoji: { fontSize: 16, marginBottom: 2 },
+    yChipName: {
+        fontSize: 9,
+        fontWeight: '700',
+        textAlign: 'center',
+        lineHeight: 11,
+        marginBottom: 3,
+    },
+    yChipTrack: {
+        width: '100%',
+        height: 4,
+        backgroundColor: 'rgba(45,79,30,0.12)',
+        borderRadius: 2,
+        overflow: 'hidden',
+        marginBottom: 3,
+    },
+    yChipFill: {
+        height: '100%',
+        borderRadius: 2,
+        opacity: 0.8,
+    },
+    yChipYield: {
+        fontSize: 9,
+        color: '#555',
+        textAlign: 'center',
+        lineHeight: 11,
+    },
+    yChipValue: {
+        fontSize: 9,
+        fontWeight: '700',
+        textAlign: 'center',
+        lineHeight: 11,
+        marginTop: 1,
+    },
+
     // ── Notice ────────────────────────────────────────────────────────────────
     noticeCard: {
         backgroundColor: 'rgba(232,117,17,0.08)',
@@ -411,15 +446,9 @@ const styles = StyleSheet.create({
     },
     noticeText: { fontSize: Typography.xs, color: Colors.burntOrange ?? '#E65100' },
 
-    // ── Disclaimer ────────────────────────────────────────────────────────────
+    // ── Disclaimer (bottom - now removed/replaced by top card) ─────────────────
     disclaimer: { paddingBottom: Spacing.sm },
-    disclaimerText: {
-        fontSize: Typography.xs,
-        color: Colors.mutedText,
-        textAlign: 'center',
-        fontStyle: 'italic',
-        lineHeight: 18,
-    },
+    disclaimerText: { display: 'none' }, // kept for safety, actual display is disclaimerCard
 
     // ── Empty ─────────────────────────────────────────────────────────────────
     empty: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: Spacing.xl * 2 },

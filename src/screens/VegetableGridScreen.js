@@ -18,6 +18,11 @@ import cropDbRaw from '../data/crops.json';
 import CROP_IMAGES from '../data/cropImages';
 import MegaMenuBar from '../components/MegaMenuBar';
 import { formatCropDisplayName } from '../utils/cropDisplay';
+import { getCropEarliestActionOffset } from '../services/homeGardenCalculator';
+import GlobalNavBar from '../components/GlobalNavBar';
+import { loadPlanCrops, savePlanCrops } from '../services/persistence';
+import { useFocusEffect } from '@react-navigation/native';
+import { useCallback } from 'react';
 
 // ─── Responsive breakpoints ───────────────────────────────────────────────────
 function getBreakpoint(width) {
@@ -172,9 +177,17 @@ const CropCard = ({ crop, selected, onPress, onLongPress, cardWidth }) => {
 export default function VegetableGridScreen({ navigation, route }) {
     const farmProfile = route?.params?.farmProfile ?? null;
     const planId = route?.params?.planId ?? null;
-    // Restore previously selected crops when returning from workspace (back nav)
-    const restoredIds = route?.params?.selectedCropIds ?? [];
-    const [selectedCrops, setSelectedCrops] = useState(() => new Set(restoredIds));
+    
+    // Always trust the local persistence layer over route params as the single source of truth.
+    const [selectedCrops, setSelectedCrops] = useState(() => new Set(loadPlanCrops(planId) ?? []));
+
+    // Force re-synchronization when returning from a different phase so stale route params don't wipe memory.
+    useFocusEffect(useCallback(() => {
+        if (planId) {
+            const stored = loadPlanCrops(planId) ?? [];
+            setSelectedCrops(new Set(stored));
+        }
+    }, [planId]));
     const [filterFn, setFilterFn]           = useState(() => () => true);  // driven by MegaMenuBar
     const [contextMenuCrop, setContextMenuCrop] = useState(null);
     const [searchQuery, setSearchQuery] = useState('');
@@ -188,6 +201,13 @@ export default function VegetableGridScreen({ navigation, route }) {
         // Scroll to top on every mount (fixes "starts mid-list" issue)
         setTimeout(() => flatListRef.current?.scrollToOffset({ offset: 0, animated: false }), 50);
     }, []);
+
+    // Auto-save selections to localStorage so other tabs (Farm Layout, Planner) can reliably access them
+    React.useEffect(() => {
+        if (planId) {
+            savePlanCrops(planId, Array.from(selectedCrops));
+        }
+    }, [selectedCrops, planId]);
 
     // Reactive screen width — updates on resize & orientation change
     const { width } = useWindowDimensions();
@@ -218,27 +238,30 @@ export default function VegetableGridScreen({ navigation, route }) {
             c.name.toLowerCase().includes(searchQuery.trim().toLowerCase()) ||
             (c.variety ?? '').toLowerCase().includes(searchQuery.trim().toLowerCase())
         )
-        .sort((a, b) => (cropFrequency[b.id] ?? 0) - (cropFrequency[a.id] ?? 0) || a.name.localeCompare(b.name));
+        .sort((a, b) => {
+            const offsetA = getCropEarliestActionOffset(a);
+            const offsetB = getCropEarliestActionOffset(b);
+            if (offsetA !== offsetB) return offsetA - offsetB;
+            return (cropFrequency[b.id] ?? 0) - (cropFrequency[a.id] ?? 0) || a.name.localeCompare(b.name);
+        });
 
     const cardWidth = (width - Spacing.lg * 2 - Spacing.sm * (numColumns - 1)) / numColumns;
 
     return (
         <View style={styles.container}>
-            {/* Header */}
-            <View style={styles.header}>
-                <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
-                    <Text style={styles.backArrow}>‹</Text>
-                </TouchableOpacity>
-                <View style={styles.headerText}>
-                    <Text style={styles.stepLabel}>PHASE 2 OF 3</Text>
-                    <Text style={styles.heading}>Select Your Crops</Text>
-                </View>
-                {selectedCrops.size > 0 && (
-                    <View style={styles.selectionBadge}>
-                        <Text style={styles.selectionCount}>{selectedCrops.size}</Text>
-                    </View>
-                )}
-            </View>
+            <GlobalNavBar 
+                navigation={navigation} 
+                farmProfile={farmProfile} 
+                planId={planId} 
+                activeRoute="VegetableGrid" 
+                rightAction={
+                    selectedCrops.size > 0 ? (
+                        <View style={styles.selectionBadge}>
+                            <Text style={styles.selectionCount}>{selectedCrops.size}</Text>
+                        </View>
+                    ) : null
+                }
+            />
 
             {/* Subtitle */}
             <Text style={styles.subheading}>
@@ -308,17 +331,17 @@ export default function VegetableGridScreen({ navigation, route }) {
                         if (selectedCrops.size === 0) return;
                         bumpFrequency(Array.from(selectedCrops));
                         setCropFrequency(loadFrequency());
-                        // Always pass `bedSuccessions` param — even as {} on a fresh start.
-                        // BedWorkspace uses key-presence (not value) to decide whether to
-                        // restore from localStorage or start clean. This avoids flaky
-                        // location/frost-date comparisons.
-                        const previousBedSuccessions = route?.params?.bedSuccessions;
-                        navigation.navigate('BedWorkspace', {
-                            farmProfile,
-                            planId,
-                            selectedCropIds: Array.from(selectedCrops),
-                            bedSuccessions: previousBedSuccessions ?? {}, // {} = fresh, or threaded
-                        });
+                        // Carefully check if we launched from an active bed session!
+                        // If so, natively return to BedWorkspace with state intact instead of a disruptive pop to FarmDesigner.
+                        if (route?.params?.fromWorkspace) {
+                            navigation.navigate('BedWorkspace');
+                        } else {
+                            // Otherwise navigate natively back to Farm Layout grid.
+                            navigation.navigate('FarmDesigner', {
+                                farmProfile,
+                                planId,
+                            });
+                        }
                     }}
                     disabled={selectedCrops.size === 0}
                 >

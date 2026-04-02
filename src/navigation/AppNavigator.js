@@ -18,6 +18,8 @@ import FarmSatelliteScreen from '../screens/FarmSatelliteScreen';
 import BlockSetupWizard from '../screens/BlockSetupWizard';
 import BlockDetailScreen from '../screens/BlockDetailScreen';
 import ModeSelectScreen from '../screens/ModeSelectScreen';
+import RoleSelectScreen from '../screens/RoleSelectScreen';
+import FarmPlanListScreen from '../screens/FarmPlanListScreen';
 import FamilyPlannerScreen from '../screens/FamilyPlannerScreen';
 import GardenSpacePlannerScreen from '../screens/GardenSpacePlannerScreen';
 import PricingScreen from '../screens/PricingScreen';
@@ -26,6 +28,7 @@ import SeedOrderScreen from '../screens/SeedOrderScreen';
 import VisualBedLayoutScreen from '../screens/VisualBedLayoutScreen';
 import BedDesignerSetupScreen from '../screens/BedDesignerSetupScreen';
 import DashboardScreen from '../screens/DashboardScreen';
+import GardenHealthScreen from '../screens/GardenHealthScreen';
 
 const Stack = createStackNavigator();
 
@@ -72,6 +75,8 @@ export default function AppNavigator() {
                 }}
             >
                 <Stack.Screen name="Hero" component={HeroScreen} />
+                <Stack.Screen name="RoleSelector" component={RoleSelectScreen} />
+                <Stack.Screen name="FarmPlanList" component={FarmPlanListScreen} />
                 <Stack.Screen name="ModeSelector" component={ModeSelectScreen} />
                 <Stack.Screen name="FamilyPlanner" component={FamilyPlannerScreen} />
                 <Stack.Screen name="GardenSpacePlanner" component={GardenSpacePlannerScreen} />
@@ -94,7 +99,9 @@ export default function AppNavigator() {
                 <Stack.Screen name="VisualBedLayout" component={VisualBedLayoutScreen} />
                 <Stack.Screen name="BedDesignerSetup" component={BedDesignerSetupScreen} />
                 <Stack.Screen name="Dashboard" component={DashboardScreen} />
+                <Stack.Screen name="GardenHealth" component={GardenHealthScreen} />
             </Stack.Navigator>
         </NavigationContainer>
+
     );
 }

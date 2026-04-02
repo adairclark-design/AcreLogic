@@ -27,6 +27,7 @@ import {
     calculateBedsFromDimensions, generateBlockId,
     FAMILY_OPTIONS, GRID_POSITIONS,
 } from '../services/farmUtils';
+import HomeLogoButton from '../components/HomeLogoButton';
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
 const MAPBOX_TOKEN_KEY = 'acrelogic_mapbox_token';
@@ -451,6 +452,7 @@ export default function FarmSatelliteScreen({ navigation, route }) {
                     <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
                         <Text style={styles.backArrow}>‹</Text>
                     </TouchableOpacity>
+                    <HomeLogoButton navigation={navigation} />
                     <Text style={styles.heading}>Satellite Map</Text>
                 </View>
                 <View style={styles.nonWebNote}>
@@ -471,6 +473,7 @@ export default function FarmSatelliteScreen({ navigation, route }) {
                 <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
                     <Text style={styles.backArrow}>‹</Text>
                 </TouchableOpacity>
+                <HomeLogoButton navigation={navigation} />
                 <View style={{ flex: 1 }}>
                     <Text style={styles.stepLabel}>FARM DESIGNER · PRO</Text>
                     <Text style={styles.heading}>Satellite Layout</Text>

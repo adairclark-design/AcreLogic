@@ -244,15 +244,27 @@ function cropCardHTML(item, imgSrc) {
         facts.push('<div class="fact"><span class="fi">&#127807;</span><span class="fl">Method</span><span class="fv">' + (item.seedType === 'DS' ? 'Direct Sow' : 'Transplant') + '</span></div>');
     }
     if (item.indoorSeedDate) {
-        facts.push('<div class="fact"><span class="fi">&#128197;</span><span class="fl">Start seeds indoors</span><span class="fv hi">' + item.indoorSeedDate + '</span></div>');
+        var indoorVal = item.indoorSeedDate;
+        if (item.todayIndoorDate && item.todayIndoorDate !== item.indoorSeedDate) {
+            indoorVal += ' &middot; (' + item.todayIndoorDate + ' today)';
+        }
+        facts.push('<div class="fact"><span class="fi">&#128197;</span><span class="fl">Start seeds indoors</span><span class="fv hi">' + indoorVal + '</span></div>');
     } else if (item.seedStartWeeks) {
         facts.push('<div class="fact"><span class="fi">&#128197;</span><span class="fl">Start seeds</span><span class="fv">' + item.seedStartWeeks + ' wks before LF</span></div>');
     }
     if (item.transplantDate) {
-        facts.push('<div class="fact"><span class="fi">&#127828;</span><span class="fl">Transplant</span><span class="fv hi">' + item.transplantDate + '</span></div>');
+        var tpVal = item.transplantDate;
+        if (item.todayTransplantDate && item.todayTransplantDate !== item.transplantDate) {
+            tpVal += ' &middot; (' + item.todayTransplantDate + ' today)';
+        }
+        facts.push('<div class="fact"><span class="fi">&#127828;</span><span class="fl">Transplant</span><span class="fv hi">' + tpVal + '</span></div>');
     }
     if (item.directSowDate) {
-        facts.push('<div class="fact"><span class="fi">&#127807;</span><span class="fl">Sow date</span><span class="fv hi">' + item.directSowDate + '</span></div>');
+        var sowVal = item.directSowDate;
+        if (item.todayDirectSowDate && item.todayDirectSowDate !== item.directSowDate) {
+            sowVal += ' &middot; (' + item.todayDirectSowDate + ' today)';
+        }
+        facts.push('<div class="fact"><span class="fi">&#127807;</span><span class="fl">Sow date</span><span class="fv hi">' + sowVal + '</span></div>');
     }
     if (item.inRowSpacingIn) {
         facts.push('<div class="fact"><span class="fi">&#8596;</span><span class="fl">In-row spacing</span><span class="fv">' + item.inRowSpacingIn + '"</span></div>');

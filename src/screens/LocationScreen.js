@@ -16,8 +16,9 @@ import {
 import { LinearGradient } from '../components/LinearGradient';
 import { Colors, Typography, Spacing, Radius, Shadows } from '../theme';
 import { fetchFarmProfile } from '../services/climateService';
-import { createFarmPlan } from '../services/database';
-import { saveFarmProfile, savePlanId } from '../services/persistence';
+import { createFarmPlan as createDbFarmPlan } from '../services/database';
+import { saveFarmProfile, savePlanId, clearAllFarmData, createFarmPlan as createLocalPlan } from '../services/persistence';
+import HomeLogoButton from '../components/HomeLogoButton';
 
 const { width, height } = Dimensions.get('window');
 
@@ -40,10 +41,12 @@ const SiteProfileCard = ({ profile, visible }) => {
     }, [visible]);
 
     const rows = [
-        { label: 'Frost-Free Days', value: profile.frostFreeDays ? `${profile.frostFreeDays} Days` : '--', icon: '❄️' },
-        { label: 'Soil Type', value: profile.soilType ?? '--', icon: '🌱' },
-        { label: 'Elevation', value: profile.elevationFt ? `${profile.elevationFt} ft` : '--', icon: '⛰️' },
-        { label: 'Sun Exposure', value: profile.sunExposure ?? '--', icon: '☀️' },
+        { label: 'USDA Zone',       value: profile.usdaZone ? `Zone ${profile.usdaZone.toUpperCase()}` : '--', icon: '🌡️' },
+        { label: 'Last Frost',      value: profile.lastFrostDate  ? formatDate(profile.lastFrostDate)  : '--', icon: '❄️' },
+        { label: 'First Frost',     value: profile.firstFrostDate ? formatDate(profile.firstFrostDate) : '--', icon: '🍂' },
+        { label: 'Frost-Free Days', value: profile.frostFreeDays ? `${profile.frostFreeDays} days` : '--', icon: '☀️' },
+        { label: 'Soil Type',       value: (profile.soilType && profile.soilType !== 'Unknown') ? profile.soilType : '--', icon: '🌱' },
+        { label: 'Elevation',       value: profile.elevationFt ? `${profile.elevationFt} ft` : '--', icon: '⛰️' },
     ];
 
     return (
@@ -57,7 +60,7 @@ const SiteProfileCard = ({ profile, visible }) => {
             <View style={styles.profileCardHeader}>
                 <View style={styles.profilePulse} />
                 <Text style={styles.profileCardTitle}>Site Profile</Text>
-                <Text style={styles.profileCardSubtitle}>{profile.city}</Text>
+                <Text style={styles.profileCardSubtitle} numberOfLines={1}>{profile.address ?? ''}</Text>
             </View>
 
             {rows.map((row, i) => (
@@ -72,6 +75,13 @@ const SiteProfileCard = ({ profile, visible }) => {
         </Animated.View>
     );
 };
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+function formatDate(dateStr) {
+    if (!dateStr) return '--';
+    const d = new Date(`${dateStr}T00:00:00`);
+    return d.toLocaleDateString('en-US', { month: 'long', day: 'numeric' });
+}
 
 // ─── Main Screen ─────────────────────────────────────────────────────────────
 export default function LocationScreen({ navigation }) {
@@ -114,11 +124,24 @@ export default function LocationScreen({ navigation }) {
     };
 
     const handleContinue = async () => {
-        // Persist farmProfile for web refresh recovery
+        // Wipe any existing plan (blocks, bed data, successions) so the new
+        // farm plan starts from a completely clean slate.
+        clearAllFarmData();
+
+        // Persist the new farmProfile for web refresh recovery
         saveFarmProfile(farmProfile._raw);
+
+        // Derive a friendly plan name from the address/city
+        const cityName = farmProfile.address?.split(',')[0]?.trim() ?? 'My Farm';
+        const planName = `${cityName} Farm Plan`;
+
+        // Register plan in local persistence so FarmPlanList picks it up immediately
+        const localPlan = createLocalPlan(planName, farmProfile._raw);
+        const localPlanId = localPlan?.id ?? null;
+
         try {
-            const planId = await createFarmPlan({
-                name: 'My Farm',
+            const dbPlanId = await createDbFarmPlan({
+                name: planName,
                 address: farmProfile.address,
                 lat: farmProfile.lat,
                 lon: farmProfile.lon,
@@ -131,47 +154,53 @@ export default function LocationScreen({ navigation }) {
                 sun_exposure: farmProfile.sunExposure,
                 num_beds: 8,
             });
-            savePlanId(planId);
-            navigation.navigate('VegetableGrid', { farmProfile: farmProfile._raw, planId });
+            savePlanId(dbPlanId);
+            navigation.navigate('FarmDesigner', { farmProfile: farmProfile._raw, planId: localPlanId, planName });
         } catch (err) {
-            navigation.navigate('VegetableGrid', { farmProfile: farmProfile._raw });
+            navigation.navigate('FarmDesigner', { farmProfile: farmProfile._raw, planId: localPlanId, planName });
         }
     };
 
     return (
-        <KeyboardAvoidingView
-            style={[
-                { flex: 1, width: '100%' },
-                Platform.OS === 'web' && { minHeight: '100dvh' },
-            ]}
-            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        >
-            <ImageBackground
-                source={require('../../assets/greenhouse-rows.jpg')}
-                style={styles.bg}
-                resizeMode="cover"
-            >
-                <LinearGradient
-                    colors={['rgba(245,241,232,0.92)', 'rgba(210,180,140,0.88)', 'rgba(245,241,232,0.96)']}
-                    style={StyleSheet.absoluteFillObject}
-                />
+        <View style={styles.rootContainer}>
+            {/* Solid deep green background */}
+            <View style={StyleSheet.absoluteFillObject} />
 
-                <ScrollView
-                    contentContainerStyle={styles.scrollContent}
-                    keyboardShouldPersistTaps="handled"
-                    showsVerticalScrollIndicator={false}
-                    style={Platform.OS === 'web' ? { overflowY: 'scroll' } : undefined}
-                >
-                    <Animated.View style={[styles.content, { opacity: fadeAnim }]}>
-                        {/* Back arrow */}
-                        <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
-                            <Text style={styles.backArrow}>‹</Text>
-                            <Text style={styles.backText}>Back</Text>
-                        </TouchableOpacity>
+            {/* Scrollable content */}
+            <ScrollView
+                contentContainerStyle={styles.scrollContent}
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator={false}
+                style={styles.scrollView}
+                bounces
+            >
+                <Animated.View style={[styles.content, { opacity: fadeAnim }]}>
+                    {/* Back arrow */}
+                    <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
+                        <Text style={styles.backArrow}>‹</Text>
+                        <Text style={styles.backText}>Back</Text>
+                    </TouchableOpacity>
+
+                    {/* Centered card */}
+                    <View style={styles.card}>
+                        {/* Farm image — shrunk, brown border */}
+                        <View style={styles.imageFrame}>
+                            <ImageBackground
+                                source={require('../../assets/market-farm-hero.png')}
+                                style={styles.heroImage}
+                                resizeMode="cover"
+                                imageStyle={{ borderRadius: 10 }}
+                            >
+                                {/* Subtle gradient tint at bottom */}
+                                <LinearGradient
+                                    colors={['transparent', 'rgba(30,55,20,0.45)']}
+                                    style={StyleSheet.absoluteFillObject}
+                                />
+                            </ImageBackground>
+                        </View>
 
                         {/* Heading */}
                         <View style={styles.headingBlock}>
-                            <Text style={styles.stepLabel}>PHASE 1 OF 3</Text>
                             <Text style={styles.heading}>Where is your farm?</Text>
                             <Text style={styles.subheading}>
                                 We'll pull your local climate data to build an accurate growing calendar.
@@ -186,7 +215,7 @@ export default function LocationScreen({ navigation }) {
                                 placeholder="Enter farm address or zip code"
                                 placeholderTextColor={Colors.mutedText}
                                 value={address}
-                                onChangeText={(t) => { setAddress(t); setShowProfile(false); }}
+                                onChangeText={(t) => { setAddress(t); setFarmProfile(null); setError(null); }}
                                 onFocus={() => setInputFocused(true)}
                                 onBlur={() => setInputFocused(false)}
                                 onSubmitEditing={handleAnalyze}
@@ -214,41 +243,89 @@ export default function LocationScreen({ navigation }) {
                             </View>
                         )}
 
+                        {/* Site profile card — shown BEFORE continue so user can verify data */}
                         {farmProfile && <SiteProfileCard profile={farmProfile} visible={!!farmProfile} />}
 
                         {farmProfile && (
-                            <Animated.View style={{ opacity: fadeAnim }}>
-                                <TouchableOpacity
-                                    style={[styles.continueBtn, Shadows.button]}
-                                    onPress={handleContinue}
-                                >
-                                    <Text style={styles.continueBtnText}>Continue →</Text>
-                                </TouchableOpacity>
-                            </Animated.View>
+                            <TouchableOpacity
+                                style={[styles.continueBtn, Shadows.button]}
+                                onPress={handleContinue}
+                            >
+                                <Text style={styles.continueBtnText}>Continue →</Text>
+                            </TouchableOpacity>
                         )}
-                    </Animated.View>
-                </ScrollView>
-            </ImageBackground>
-        </KeyboardAvoidingView>
+                    </View>
+                </Animated.View>
+            </ScrollView>
+        </View>
     );
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-    bg: {
+    rootContainer: {
         flex: 1,
         width: '100%',
-        ...Platform.select({ web: { minHeight: '100dvh' } }),
+        backgroundColor: '#2D4F1E', // deep farm green
+        ...Platform.select({ web: { height: '100dvh' } }),
+    },
+    scrollView: {
+        flex: 1,
+        ...Platform.select({ web: { overflowY: 'auto', maxHeight: '100dvh' } }),
     },
     scrollContent: {
         flexGrow: 1,
-        paddingBottom: 40,
+        alignItems: 'center',
+        paddingVertical: 32,
+        paddingHorizontal: 16,
     },
     content: {
-        flex: 1,
-        paddingHorizontal: Spacing.lg,
-        paddingTop: 60,
+        width: '100%',
+        maxWidth: 540,
         gap: Spacing.lg,
+    },
+
+    // Main card
+    card: {
+        backgroundColor: '#fff',
+        borderRadius: 20,
+        overflow: 'hidden',
+        gap: Spacing.md,
+        paddingBottom: Spacing.lg,
+        ...Shadows.card,
+    },
+
+    // Hero image with brown border frame
+    imageFrame: {
+        margin: 14,
+        borderRadius: 12,
+        borderWidth: 4,
+        borderColor: '#7B4F2E', // warm brown
+        overflow: 'hidden',
+    },
+    heroImage: {
+        width: '100%',
+        height: 200,
+    },
+
+    // Heading — padded inside card
+    headingBlock: {
+        gap: Spacing.sm,
+        paddingHorizontal: Spacing.lg,
+    },
+
+    stickyFooter: {
+        position: 'absolute',
+        bottom: 0,
+        left: 0,
+        right: 0,
+        paddingHorizontal: Spacing.lg,
+        paddingBottom: Platform.OS === 'ios' ? 34 : 20,
+        paddingTop: 12,
+        backgroundColor: 'rgba(245,241,232,0.92)',
+        borderTopWidth: 1,
+        borderTopColor: 'rgba(45,79,30,0.08)',
+        ...Platform.select({ web: { backdropFilter: 'blur(8px)' } }),
     },
 
     // ── Nav ───────────────────────────────────────────────────────────────────
@@ -260,17 +337,16 @@ const styles = StyleSheet.create({
     },
     backArrow: {
         fontSize: 28,
-        color: Colors.primaryGreen,
+        color: Colors.cream,
         lineHeight: 30,
     },
     backText: {
         fontSize: Typography.base,
-        color: Colors.primaryGreen,
+        color: Colors.cream,
         fontWeight: Typography.medium,
     },
 
     // ── Heading ───────────────────────────────────────────────────────────────
-    headingBlock: { gap: Spacing.sm },
     stepLabel: {
         fontSize: Typography.xs,
         fontWeight: Typography.bold,
@@ -293,13 +369,14 @@ const styles = StyleSheet.create({
     inputWrapper: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: Colors.white,
+        backgroundColor: '#F5F5F0',
         borderRadius: Radius.md,
         borderWidth: 2,
         borderColor: 'transparent',
         paddingHorizontal: Spacing.md,
         paddingVertical: 6,
         gap: Spacing.sm,
+        marginHorizontal: Spacing.lg,
     },
     inputWrapperFocused: {
         borderColor: Colors.primaryGreen,
@@ -319,6 +396,7 @@ const styles = StyleSheet.create({
         paddingVertical: 10,
         paddingHorizontal: Spacing.lg,
         borderRadius: Radius.full,
+        marginHorizontal: Spacing.lg,
     },
     analyzeBtnText: {
         color: Colors.cream,
@@ -334,6 +412,7 @@ const styles = StyleSheet.create({
         overflow: 'hidden',
         borderWidth: 1,
         borderColor: 'rgba(45,79,30,0.15)',
+        marginHorizontal: Spacing.lg,
     },
     profileCardHeader: {
         backgroundColor: Colors.primaryGreen,
@@ -391,6 +470,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         gap: Spacing.sm,
         paddingVertical: Spacing.sm,
+        marginHorizontal: Spacing.lg,
     },
     loadingText: {
         fontSize: Typography.sm,
@@ -403,6 +483,7 @@ const styles = StyleSheet.create({
         padding: Spacing.md,
         borderWidth: 1,
         borderColor: Colors.burntOrange,
+        marginHorizontal: Spacing.lg,
     },
     errorText: {
         fontSize: Typography.sm,
@@ -416,6 +497,7 @@ const styles = StyleSheet.create({
         paddingVertical: 18,
         borderRadius: Radius.md,
         alignItems: 'center',
+        marginHorizontal: Spacing.lg,
     },
     continueBtnText: {
         color: Colors.cream,

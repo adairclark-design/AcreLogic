@@ -51,8 +51,15 @@ const DEFAULT_VARIANCE = { low: 0.70, high: 1.00 };
  * @param {object} pricingOverrides - { [crop_id]: { price_per_lb?, price_per_bunch? } }
  * @returns {Array} Array of yield estimate objects
  */
-export async function calculateBedYield(bedNumber, successions, farmProfile, pricingOverrides = {}) {
+export async function calculateBedYield(bedInfo, successions, farmProfile, pricingOverrides = {}) {
     const estimates = [];
+
+    // Reverse compatibility for integer calls
+    const bedNumber = typeof bedInfo === 'object' ? bedInfo.bed_number : bedInfo;
+    const globalId = typeof bedInfo === 'object' ? (bedInfo.global_id || bedNumber) : bedNumber;
+    const bedLabel = typeof bedInfo === 'object' ? (bedInfo.bed_label || `Bed ${bedNumber}`) : `Bed ${bedNumber}`;
+    const blockId = typeof bedInfo === 'object' ? bedInfo.block_id : null;
+    const blockName = typeof bedInfo === 'object' ? bedInfo.block_name : null;
 
     for (let i = 0; i < successions.length; i++) {
         const succ = successions[i];
@@ -96,8 +103,11 @@ export async function calculateBedYield(bedNumber, successions, farmProfile, pri
         const csaHouseholdsServed = Math.round(yieldLbs / csaLbsPerShare);
 
         estimates.push({
+            global_id: globalId,
             bed_number: bedNumber,
-            bed_label: `Bed ${bedNumber}`,
+            bed_label: bedLabel,
+            block_id: blockId,
+            block_name: blockName,
             succession_slot: i + 1,
             crop_id: crop.id,
             crop_name: crop.name,
@@ -131,6 +141,7 @@ export async function calculateBedYield(bedNumber, successions, farmProfile, pri
     return estimates;
 }
 
+
 /**
  * Calculate full-farm yield summary across all 8 beds.
  *
@@ -144,7 +155,7 @@ export async function calculateFarmYield(allBedSuccessions, farmProfile, pricing
 
     for (const bed of allBedSuccessions) {
         const bedEstimates = await calculateBedYield(
-            bed.bed_number,
+            bed, // Pass the entire bed object instead of just bed_number
             bed.successions,
             farmProfile,
             pricingOverrides
@@ -152,11 +163,11 @@ export async function calculateFarmYield(allBedSuccessions, farmProfile, pricing
         allEstimates.push(...bedEstimates);
     }
 
-    // Group by bed
+    // Group by bed (using global_id so blocks don't collide)
     const byBed = {};
     for (const est of allEstimates) {
-        if (!byBed[est.bed_number]) byBed[est.bed_number] = [];
-        byBed[est.bed_number].push(est);
+        if (!byBed[est.global_id]) byBed[est.global_id] = [];
+        byBed[est.global_id].push(est);
     }
 
     // Group by crop

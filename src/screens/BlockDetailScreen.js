@@ -11,17 +11,18 @@
 import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import {
     View, Text, StyleSheet, ScrollView, TouchableOpacity,
-    Modal, TextInput, Platform, Alert, Animated,
+    Modal, TextInput, Platform, Alert, Animated, Image,
     FlatList, ActivityIndicator,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { Colors, Typography, Spacing, Radius, Shadows } from '../theme';
-import { loadBlockBeds, saveBlockBeds, saveJournalEntry, loadJournalEntries } from '../services/persistence';
+import { loadBlockBeds, saveBlockBeds, saveJournalEntry, loadJournalEntries, loadPlanCrops } from '../services/persistence';
 import { blockSummaryLine } from '../services/farmUtils';
 import cropData from '../data/crops.json';
 import { getSuccessionCandidatesRanked } from '../services/successionEngine';
 import { addDays } from '../services/climateService';
 import CROP_IMAGES from '../data/cropImages';
+import HomeLogoButton from '../components/HomeLogoButton';
 
 const BLOCK_DETAIL_SCROLL_ID = 'block-detail-scrollview';
 
@@ -81,26 +82,6 @@ const BedRow = ({ block, bedNum, successions, shelterType, farmProfile, onPress,
     const bc = bedColor(bedNum);
     const hasCrops = successions && successions.length > 0;
 
-    const firstIn = hasCrops ? successions.reduce((m, s) => !s.start_date ? m : (!m || s.start_date < m ? s.start_date : m), null) : null;
-    const lastOut = hasCrops ? successions.reduce((m, s) => !s.end_date   ? m : (!m || s.end_date   > m ? s.end_date   : m), null) : null;
-    const frostDate = farmProfile?.first_frost_date ?? null;
-    const daysRem = (lastOut && frostDate) ? Math.max(0, Math.round((new Date(frostDate) - new Date(lastOut)) / 86400000)) : null;
-    const remClr = daysRem === null ? null : daysRem >= 45 ? '#2E7D32' : daysRem >= 15 ? '#E65100' : '#C62828';
-    const remBg  = daysRem === null ? null : daysRem >= 45 ? '#E8F5E9' : daysRem >= 15 ? '#FFF3E0' : '#FFEBEE';
-    const groups = [];
-    const used = new Set();
-    if (hasCrops) {
-        successions.forEach((s, i) => {
-            if (used.has(i)) return;
-            const g = [s]; used.add(i);
-            successions.forEach((s2, j) => {
-                if (i === j || used.has(j) || !s.start_date || !s2.start_date) return;
-                if (Math.abs(new Date(s.start_date) - new Date(s2.start_date)) / 86400000 <= 7) { g.push(s2); used.add(j); }
-            });
-            groups.push(g);
-        });
-    }
-
     return (
         <TouchableOpacity
             style={[styles.bedRow, { borderLeftColor: bc.text, borderLeftWidth: 3 }]}
@@ -119,56 +100,74 @@ const BedRow = ({ block, bedNum, successions, shelterType, farmProfile, onPress,
                 )}
             </View>
 
-            {/* Coverage bars or empty state */}
+            {/* Compact crop chips */}
             <View style={styles.bedRowContent}>
                 {hasCrops ? (
-                    <>
-                        {groups.map((group, gi) => (
-                            <View key={gi} style={styles.coverageStackGroup}>
-                                {group[0].start_date && (
-                                    <Text style={styles.stackDateLabel}>
-                                        {fmtShortDate(group[0].start_date)}{group[0].end_date ? ' – ' + fmtShortDate(group[0].end_date) : ''}
-                                    </Text>
-                                )}
-                                {group.map((s, si) => {
-                                    const frac = s.coverage ?? s.coverage_fraction ?? 1;
-                                    const cc = cropColor(s.crop_id);
-                                    const meta = cropMeta(s.crop_id);
-                                    return (
-                                        <View key={si} style={styles.coverageBarRow}>
-                                            <View style={[styles.coverageBarFill, { width: Math.round(frac * 100) + '%', backgroundColor: cc.bg }]}>
-                                                <Text style={[styles.coverageBarText, { color: cc.text }]} numberOfLines={1}>
-                                                    {meta?.emoji ?? '🌱'} {s.crop_name ?? s.name}{frac < 0.99 ? ' · ' + Math.round(frac * 100) + '%' : ''}
+                    <View style={styles.chipsWrap}>
+                        {(() => {
+                            const sorted = [...successions].sort((a, b) => (a.start_date || '2099').localeCompare(b.start_date || '2099'));
+                            const lanes = [];
+                            const laneOf = [];
+                            sorted.forEach((s) => {
+                                const startStr = s.start_date || '2099-01-01';
+                                let assignedLane = -1;
+                                for (let i = 0; i < lanes.length; i++) {
+                                    // If this crop starts on or after the end of the last crop in the lane
+                                    if (startStr >= lanes[i]) {
+                                        assignedLane = i;
+                                        lanes[i] = s.end_date || '2099-12-31';
+                                        break;
+                                    }
+                                }
+                                if (assignedLane === -1) {
+                                    assignedLane = lanes.length;
+                                    lanes.push(s.end_date || '2099-12-31');
+                                }
+                                laneOf.push(assignedLane);
+                            });
+
+                            const lanesList = Array.from({ length: lanes.length }, () => []);
+                            sorted.forEach((s, idx) => {
+                                lanesList[laneOf[idx]].push(s);
+                            });
+
+                            return lanesList.map((rowItems, rIdx) => (
+                                <View key={rIdx} style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4, paddingBottom: 2 }}>
+                                    {rowItems.map((s, si) => {
+                                        const meta = cropMeta(s.crop_id);
+                                        const frac = s.coverage ?? s.coverage_fraction ?? 1;
+                                        const fracLabel = frac >= 0.99 ? 'Full' : frac >= 0.74 ? '¾' : frac >= 0.49 ? '½' : '¼';
+                                        
+                                        let igd = null;
+                                        if (s.start_date && s.end_date) {
+                                            igd = Math.round((new Date(s.end_date + 'T12:00:00') - new Date(s.start_date + 'T12:00:00')) / 86400000);
+                                        } else {
+                                            igd = (meta?.dtm ?? s.dtm ?? 0) + (meta?.harvest_window_days ?? 14);
+                                        }
+
+                                        const startStr = s.start_date ? fmtShortDate(s.start_date) : null;
+                                        const endStr   = s.end_date   ? fmtShortDate(s.end_date)   : null;
+                                        const dateRange = startStr && endStr ? ` ${startStr}–${endStr}` : startStr ? ` from ${startStr}` : '';
+                                        const igdStr   = igd ? ` ${igd}IGD` : '';
+                                        const label    = `[${fracLabel}] ${s.crop_name ?? s.name ?? '—'}${igdStr}${dateRange}`;
+                                        const cc = cropColor(s.crop_id);
+                                        
+                                        return (
+                                            <View key={si} style={[styles.bedDiagramRow, { backgroundColor: cc.bg }]}>
+                                                <Text style={[styles.bedDiagramRowName, { color: cc.text }]}>
+                                                    {label}
                                                 </Text>
                                             </View>
-                                        </View>
-                                    );
-                                })}
-                            </View>
-                        ))}
-                        <Text style={styles.bedSubtext}>
-                            {successions.length} crop{successions.length > 1 ? 's' : ''} · {block.bedLengthFt}ft · tap to manage
-                        </Text>
-                    </>
+                                        );
+                                    })}
+                                </View>
+                            ));
+                        })()}
+                    </View>
                 ) : (
                     <Text style={styles.bedEmpty}>Empty — tap to plan</Text>
                 )}
             </View>
-
-            {/* IN / OUT / remaining strip */}
-            {hasCrops && (firstIn || lastOut) && (
-                <View style={styles.seasonStrip}>
-                    {firstIn && <Text style={styles.seasonItem}><Text style={styles.seasonLabel}>IN </Text>{fmtShortDate(firstIn)}</Text>}
-                    {lastOut && <Text style={styles.seasonItem}><Text style={styles.seasonLabel}> OUT </Text>{fmtShortDate(lastOut)}</Text>}
-                    {daysRem !== null && (
-                        <View style={[styles.seasonRemaining, { backgroundColor: remBg }]}>
-                            <Text style={[styles.seasonRemainingText, { color: remClr }]}>
-                                {daysRem > 0 ? '🟢 ' + daysRem + 'd' : '🔴 Full'}
-                            </Text>
-                        </View>
-                    )}
-                </View>
-            )}
 
             <Text style={styles.chevron}>›</Text>
         </TouchableOpacity>
@@ -176,19 +175,40 @@ const BedRow = ({ block, bedNum, successions, shelterType, farmProfile, onPress,
 };
 
 
+
 // ─── Crop Detail Modal ─────────────────────────────────────────────────────────
 // Shows crop info AND past field notes for this bed.
-const CropDetailModal = ({ visible, blockId, bedNum, bedLengthFt, successions, onClose, onSaveNote }) => {
+const CropDetailModal = ({
+    visible, blockId, bedNum, bedLengthFt,
+    successions, shelterType = 'none',
+    onClose, onSaveNote,
+    onAddCrop, onRemoveCrop, onSetShelter,
+    isPickerMode = false, onPickCrop,
+    selectedCropIds = []
+}) => {
     const [note, setNote] = useState('');
     const [saving, setSaving] = useState(false);
     const [saved, setSaved] = useState(false);
     const [savedNotes, setSavedNotes] = useState([]);
+    const [cropSearch, setCropSearch] = useState('');
+    const [pendingCrop, setPendingCrop] = useState(null);
 
-    // Load existing notes for this specific bed every time the modal opens
+    const filteredCrops = useMemo(() => {
+        const q = cropSearch.toLowerCase().trim();
+        let list = cropData.crops;
+        if (selectedCropIds && selectedCropIds.length > 0) {
+            list = list.filter(c => selectedCropIds.includes(c.id));
+        }
+        return q
+            ? list.filter(c => c.name.toLowerCase().includes(q))
+            : list;
+    }, [cropSearch, selectedCropIds]);
+
     React.useEffect(() => {
         if (!visible) return;
         setSaved(false);
         setNote('');
+        setCropSearch('');
         const bedTag = `${blockId} Bed ${bedNum}`;
         const all = loadJournalEntries();
         setSavedNotes(all.filter(e => e.bedTag === bedTag).slice(0, 5));
@@ -199,73 +219,158 @@ const CropDetailModal = ({ visible, blockId, bedNum, bedLengthFt, successions, o
         setSaving(true);
         const bedTag = `${blockId} Bed ${bedNum}`;
         const entry = saveJournalEntry({ bedTag, text: note.trim() });
-        // Immediately show the new note in the list
         setSavedNotes(prev => [entry, ...prev].slice(0, 5));
         setSaved(true);
         setNote('');
         setSaving(false);
         onSaveNote?.();
-        // Reset confirmation banner after 2s
         setTimeout(() => setSaved(false), 2000);
     };
 
+    const SHELTER_OPTS = [
+        { key: 'none',       label: '🌿 Open',       },
+        { key: 'rowCover',   label: '☔️ Row Cover', },
+        { key: 'greenhouse', label: '🏡 Greenhouse', },
+    ];
+
     return (
         <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-            {/* Backdrop and sheet are siblings so the backdrop cannot intercept events inside the sheet */}
             <View style={modStyles.modalContainer}>
                 <TouchableOpacity style={modStyles.backdrop} activeOpacity={1} onPress={onClose} />
                 <View style={modStyles.sheet}>
                     <View style={modStyles.handle} />
+
+                    {/* ─── Header ───────────────────────────────────────── */}
                     <Text style={modStyles.titleRow}>
                         Bed {bedNum}
                         <Text style={modStyles.titleSub}> · {bedLengthFt}ft</Text>
                     </Text>
 
-                    <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 320 }} keyboardShouldPersistTaps="handled">
-                        {(!successions || successions.length === 0) ? (
-                            <Text style={modStyles.emptyText}>No crops planned yet for this bed.</Text>
-                        ) : (
-                            successions.map((s, i) => {
-                                const meta = cropMeta(s.crop_id);
-                                return (
-                                    <View key={i} style={modStyles.successionCard}>
-                                        <View style={modStyles.successionHeader}>
-                                            <Text style={modStyles.successionEmoji}>{meta?.emoji ?? '🌱'}</Text>
-                                            <View style={{ flex: 1 }}>
-                                                <Text style={modStyles.successionName}>{s.crop_name ?? s.name}</Text>
-                                                <Text style={modStyles.successionVariety}>{meta?.variety ?? s.variety ?? ''}</Text>
-                                            </View>
-                                            {meta?.dtm && <Text style={modStyles.dtmBadge}>{meta.dtm}d</Text>}
-                                        </View>
-                                        {meta?.harvest_notes && (
-                                            <Text style={modStyles.harvestNote}>{meta.harvest_notes}</Text>
-                                        )}
-                                        {meta?.harvest_frequency && (
-                                            <Text style={modStyles.metaLine}>⏱ Harvest Frequency: {meta.harvest_frequency}</Text>
-                                        )}
-                                        {meta?.harvest_method && (
-                                            <Text style={modStyles.metaLine}>✂️ {meta.harvest_method}</Text>
-                                        )}
-                                    </View>
-                                );
-                            })
-                        )}
+                    {/* ─── Shelter toggle ─────────────────────────────── */}
+                    <View style={modStyles.shelterRow}>
+                        {SHELTER_OPTS.map(opt => (
+                            <TouchableOpacity
+                                key={opt.key}
+                                style={[modStyles.shelterBtn, shelterType === opt.key && modStyles.shelterBtnActive]}
+                                onPress={() => onSetShelter?.(opt.key)}
+                            >
+                                <Text style={[modStyles.shelterBtnText, shelterType === opt.key && modStyles.shelterBtnTextActive]}>
+                                    {opt.label}
+                                </Text>
+                            </TouchableOpacity>
+                        ))}
+                    </View>
 
-                        {/* Past notes for this bed */}
-                        {savedNotes.length > 0 && (
-                            <View style={modStyles.pastNotesSection}>
-                                <Text style={modStyles.noteLabel}>📓 Previous Notes</Text>
-                                {savedNotes.map(n => (
-                                    <View key={n.id} style={modStyles.pastNoteCard}>
-                                        <Text style={modStyles.pastNoteDate}>
-                                            {new Date(n.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
-                                        </Text>
-                                        <Text style={modStyles.pastNoteText}>{n.text}</Text>
-                                    </View>
-                                ))}
-                            </View>
-                        )}
-                    </ScrollView>
+                    {/* ─── Crop picker (isPickerMode) ─────────────────── */}
+                    {isPickerMode ? (
+                        <>
+                            <Text style={modStyles.noteLabel}>🌱 Choose a Crop</Text>
+                            <TextInput
+                                style={modStyles.noteInput}
+                                value={cropSearch}
+                                onChangeText={setCropSearch}
+                                placeholder="Search crops…"
+                                placeholderTextColor={Colors.mutedText}
+                            />
+                            <ScrollView style={{ maxHeight: 260 }} contentContainerStyle={modStyles.cropGrid}
+                                showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+                                {filteredCrops.map(crop => {
+                                    const img = CROP_IMAGES[crop.id];
+                                    return (
+                                        <TouchableOpacity
+                                            key={crop.id}
+                                            style={modStyles.cropCard}
+                                            onPress={() => setPendingCrop(crop)}
+                                        >
+                                            {img
+                                                ? <Image source={img} style={modStyles.cropImg} resizeMode="cover" />
+                                                : <Text style={{ fontSize: 28 }}>{crop.emoji ?? '🌱'}</Text>
+                                            }
+                                            <Text style={modStyles.cropCardName} numberOfLines={2}>{crop.name}</Text>
+                                        </TouchableOpacity>
+                                    );
+                                })}
+                            </ScrollView>
+                        </>
+                    ) : (
+                        /* ─── Normal view: successions list + notes ─── */
+                        <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 360 }}
+                            keyboardShouldPersistTaps="handled">
+
+                            {/* Successions */}
+                            {(!successions || successions.length === 0) ? (
+                                <Text style={modStyles.emptyText}>No crops planned yet for this bed.</Text>
+                            ) : (
+                                successions.map((s, i) => {
+                                    const meta = cropMeta(s.crop_id);
+                                    const frac = s.coverage ?? s.coverage_fraction ?? 1;
+                                    return (
+                                        <View key={i} style={modStyles.successionCard}>
+                                            <View style={modStyles.successionHeader}>
+                                                <Text style={modStyles.successionEmoji}>{meta?.emoji ?? '🌱'}</Text>
+                                                <View style={{ flex: 1 }}>
+                                                    <Text style={modStyles.successionName}>{s.crop_name ?? s.name}</Text>
+                                                    <Text style={modStyles.successionVariety}>{meta?.variety ?? s.variety ?? ''}</Text>
+                                                </View>
+                                                {meta?.dtm && <Text style={modStyles.dtmBadge}>{meta.dtm}d</Text>}
+                                                {/* Remove button */}
+                                                <TouchableOpacity
+                                                    style={modStyles.removeBtn}
+                                                    onPress={() => onRemoveCrop?.(i)}
+                                                >
+                                                    <Text style={modStyles.removeBtnText}>✕</Text>
+                                                </TouchableOpacity>
+                                            </View>
+
+                                            {/* ½ / Full coverage toggle */}
+                                            <View style={modStyles.coverageRow}>
+                                                <Text style={modStyles.coverageLabel}>Coverage:</Text>
+                                                {[{ v: 0.5, l: '½ Bed' }, { v: 1, l: 'Full' }].map(opt => (
+                                                    <TouchableOpacity
+                                                        key={opt.v}
+                                                        style={[modStyles.coverageBtn, Math.abs(frac - opt.v) < 0.1 && modStyles.coverageBtnActive]}
+                                                        onPress={() => {
+                                                            /* patch coverage inline via remove+re-add trick */
+                                                            onRemoveCrop?.(i);
+                                                            setTimeout(() => onAddCrop?.({ ...s, coverage: opt.v }), 50);
+                                                        }}
+                                                    >
+                                                        <Text style={[modStyles.coverageBtnText, Math.abs(frac - opt.v) < 0.1 && modStyles.coverageBtnTextActive]}>
+                                                            {opt.l}
+                                                        </Text>
+                                                    </TouchableOpacity>
+                                                ))}
+                                            </View>
+
+                                            {meta?.harvest_notes && (
+                                                <Text style={modStyles.harvestNote}>{meta.harvest_notes}</Text>
+                                            )}
+                                        </View>
+                                    );
+                                })
+                            )}
+
+                            {/* Add Crop button */}
+                            <TouchableOpacity style={modStyles.addCropBtn} onPress={onAddCrop}>
+                                <Text style={modStyles.addCropBtnText}>＋ Add Crop</Text>
+                            </TouchableOpacity>
+
+                            {/* Past notes */}
+                            {savedNotes.length > 0 && (
+                                <View style={modStyles.pastNotesSection}>
+                                    <Text style={modStyles.noteLabel}>📓 Previous Notes</Text>
+                                    {savedNotes.map(n => (
+                                        <View key={n.id} style={modStyles.pastNoteCard}>
+                                            <Text style={modStyles.pastNoteDate}>
+                                                {new Date(n.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                                            </Text>
+                                            <Text style={modStyles.pastNoteText}>{n.text}</Text>
+                                        </View>
+                                    ))}
+                                </View>
+                            )}
+                        </ScrollView>
+                    )}
 
                     {/* Save confirmation banner */}
                     {saved && (
@@ -274,32 +379,78 @@ const CropDetailModal = ({ visible, blockId, bedNum, bedLengthFt, successions, o
                         </View>
                     )}
 
-                    {/* Quick field note */}
-                    <View style={modStyles.noteSection}>
-                        <Text style={modStyles.noteLabel}>📓 Add Field Note</Text>
-                        <TextInput
-                            style={modStyles.noteInput}
-                            value={note}
-                            onChangeText={setNote}
-                            placeholder="Observations, pests, weather, soil…"
-                            placeholderTextColor={Colors.mutedText}
-                            multiline
-                            maxLength={400}
-                        />
-                        <TouchableOpacity
-                            style={[modStyles.saveBtn, (!note.trim() || saving) && modStyles.saveBtnDisabled]}
-                            onPress={handleSaveNote}
-                            disabled={!note.trim() || saving}
-                        >
-                            <Text style={modStyles.saveBtnText}>Save Note</Text>
-                        </TouchableOpacity>
-                    </View>
+                    {/* Quick field note (hidden in picker mode) */}
+                    {!isPickerMode && (
+                        <View style={modStyles.noteSection}>
+                            <Text style={modStyles.noteLabel}>📓 Add Field Note</Text>
+                            <TextInput
+                                style={modStyles.noteInput}
+                                value={note}
+                                onChangeText={setNote}
+                                placeholder="Observations, pests, weather, soil…"
+                                placeholderTextColor={Colors.mutedText}
+                                multiline
+                                maxLength={400}
+                            />
+                            <TouchableOpacity
+                                style={[modStyles.saveBtn, (!note.trim() || saving) && modStyles.saveBtnDisabled]}
+                                onPress={handleSaveNote}
+                                disabled={!note.trim() || saving}
+                            >
+                                <Text style={modStyles.saveBtnText}>Save Note</Text>
+                            </TouchableOpacity>
+                        </View>
+                    )}
 
                     <TouchableOpacity style={modStyles.closeBtn} onPress={onClose}>
                         <Text style={modStyles.closeBtnText}>Done</Text>
                     </TouchableOpacity>
                 </View>
             </View>
+
+            {/* Contextual Coverage Picker Modal */}
+            <Modal
+                visible={!!pendingCrop}
+                transparent
+                animationType="fade"
+                onRequestClose={() => setPendingCrop(null)}
+            >
+                <View style={modStyles.modalContainer}>
+                    <View style={[modStyles.sheet, { minHeight: 0, paddingBottom: 24, paddingHorizontal: 20 }]}>
+                        <Text style={[modStyles.titleRow, { textAlign: 'center', marginTop: 10 }]}>
+                            What bed % should {pendingCrop?.name} fill?
+                        </Text>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 20, gap: 10 }}>
+                            {[
+                                { value: 0.25, label: '¼' },
+                                { value: 0.5,  label: '½' },
+                                { value: 0.75, label: '¾' },
+                                { value: 1.0,  label: 'Full' },
+                            ].map(f => (
+                                <TouchableOpacity
+                                    key={f.value}
+                                    style={{ flex: 1, paddingVertical: 14, backgroundColor: '#F4F5F0', borderRadius: 8, borderWidth: 1, borderColor: '#D7D6CB', alignItems: 'center' }}
+                                    onPress={() => {
+                                        const c = pendingCrop;
+                                        setPendingCrop(null);
+                                        onPickCrop?.({
+                                            crop_id: c.id,
+                                            crop_name: c.name,
+                                            coverage: f.value,
+                                            start_date: null, end_date: null,
+                                        });
+                                    }}
+                                >
+                                    <Text style={{ fontSize: 16, fontWeight: '800', color: '#1B3B1A' }}>{f.label}</Text>
+                                </TouchableOpacity>
+                            ))}
+                        </View>
+                        <TouchableOpacity style={{ marginTop: 20, paddingVertical: 12, alignItems: 'center' }} onPress={() => setPendingCrop(null)}>
+                            <Text style={{ fontSize: 15, fontWeight: '600', color: '#9CA3AF' }}>Cancel</Text>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            </Modal>
         </Modal>
     );
 };
@@ -340,11 +491,46 @@ const modStyles = StyleSheet.create({
 
     closeBtn: { borderWidth: 1.5, borderColor: 'rgba(45,79,30,0.2)', borderRadius: Radius.sm, paddingVertical: 12, alignItems: 'center' },
     closeBtnText: { fontWeight: '700', color: Colors.mutedText },
+
+    // Shelter row
+    shelterRow: { flexDirection: 'row', gap: 6, marginBottom: 8 },
+    shelterBtn: { flex: 1, paddingVertical: 8, borderRadius: Radius.sm, borderWidth: 1.5, borderColor: 'rgba(45,79,30,0.18)', alignItems: 'center' },
+    shelterBtnActive: { backgroundColor: Colors.primaryGreen, borderColor: Colors.primaryGreen },
+    shelterBtnText: { fontSize: 10, fontWeight: '700', color: Colors.primaryGreen },
+    shelterBtnTextActive: { color: Colors.cream },
+
+    // Remove crop button
+    removeBtn: { width: 24, height: 24, borderRadius: 12, backgroundColor: 'rgba(183,28,28,0.1)', alignItems: 'center', justifyContent: 'center' },
+    removeBtnText: { fontSize: 11, fontWeight: '800', color: '#B71C1C' },
+
+    // Coverage toggle
+    coverageRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 },
+    coverageLabel: { fontSize: 10, color: Colors.mutedText, fontWeight: '600' },
+    coverageBtn: { paddingVertical: 3, paddingHorizontal: 8, borderRadius: Radius.full, borderWidth: 1.5, borderColor: 'rgba(45,79,30,0.18)' },
+    coverageBtnActive: { backgroundColor: Colors.primaryGreen, borderColor: Colors.primaryGreen },
+    coverageBtnText: { fontSize: 10, fontWeight: '700', color: Colors.primaryGreen },
+    coverageBtnTextActive: { color: Colors.cream },
+
+    // Add Crop button
+    addCropBtn: { marginTop: 8, borderWidth: 1.5, borderColor: Colors.primaryGreen, borderRadius: Radius.sm, paddingVertical: 10, alignItems: 'center' },
+    addCropBtnText: { fontSize: Typography.sm, fontWeight: '800', color: Colors.primaryGreen },
+
+    // Crop picker grid
+    cropGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingBottom: 8 },
+    cropCard: { width: 72, alignItems: 'center', padding: 6, borderRadius: Radius.sm, backgroundColor: 'rgba(45,79,30,0.05)', borderWidth: 1, borderColor: 'rgba(45,79,30,0.1)' },
+    cropImg: { width: 48, height: 48, borderRadius: 6, marginBottom: 3 },
+    cropCardName: { fontSize: 9, fontWeight: '700', color: Colors.primaryGreen, textAlign: 'center' },
 });
 
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 export default function BlockDetailScreen({ navigation, route }) {
-    const { block, farmProfile } = route?.params ?? {};
+    const { block, farmProfile, planId: routePlanId } = route?.params ?? {};
+    const planId = routePlanId ?? block?.planId;
+
+    const [selectedCropIds, setSelectedCropIds] = useState([]);
+    useFocusEffect(useCallback(() => {
+        setSelectedCropIds(loadPlanCrops(planId) ?? []);
+    }, [planId]));
     const [side, setSide] = useState('W');
     const [bedData, setBedData] = useState({}); // { [bedNum]: { successions, shelterType } }
     const [modalBed, setModalBed] = useState(null);
@@ -435,13 +621,14 @@ export default function BlockDetailScreen({ navigation, route }) {
                 <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
                     <Text style={styles.backArrow}>‹</Text>
                 </TouchableOpacity>
+                <HomeLogoButton navigation={navigation} />
                 <View style={{ flex: 1 }}>
                     <Text style={styles.stepLabel}>FARM DESIGNER</Text>
                     <Text style={styles.heading}>{block.name}</Text>
                 </View>
                 <TouchableOpacity
                     style={styles.editBtn}
-                    onPress={() => navigation.navigate('BlockSetupWizard', { block, farmProfile })}
+                    onPress={() => navigation.navigate('BlockSetupWizard', { block, farmProfile, planId, selectedCropIds })}
                 >
                     <Text style={styles.editBtnText}>Edit</Text>
                 </TouchableOpacity>
@@ -449,10 +636,16 @@ export default function BlockDetailScreen({ navigation, route }) {
 
             {/* Block summary */}
             <View style={styles.summaryBar}>
-                <Text style={styles.summaryText}>{blockSummaryLine(block)}</Text>
                 {block.familyAssignment && block.familyAssignment !== 'Mixed (no restriction)' && (
-                    <Text style={styles.familyBadge}>{block.familyAssignment}</Text>
+                    <Text style={styles.familyLabel}>{block.familyAssignment} — {block.name}</Text>
                 )}
+                <Text style={styles.summaryText}>{blockSummaryLine(block)}</Text>
+                <Text style={styles.summarySubText}>
+                    {block.bedWidthFt ?? 2.5}ft × {block.bedLengthFt ?? 100}ft beds
+                    {block.bedWidthFt && block.bedLengthFt && block.bedCount
+                        ? ` · ${((block.bedCount * (block.bedWidthFt ?? 2.5) * (block.bedLengthFt ?? 100)) / 43560).toFixed(3)} ac`
+                        : ''}
+                </Text>
             </View>
 
             {/* E / W side picker */}
@@ -490,9 +683,16 @@ export default function BlockDetailScreen({ navigation, route }) {
                         shelterType={getBedShelter(bedNum)}
                         farmProfile={farmProfile}
                         onPress={num => {
-                            const succs = getBedSuccessions(num);
-                            if (succs.length === 0) setPickerBed(num);
-                            else setModalBed(num);
+                            navigation.navigate('BedWorkspace', {
+                                block,
+                                farmProfile,
+                                planId,
+                                initialBed: num,
+                                singleBedMode: true,
+                                // Pass existing bed data so BedWorkspaceScreen can
+                                // load it from BlockDetail's persistence layer
+                                initialBedData: bedData,
+                            });
                         }}
                         onLongPress={handleLongPress}
                     />
@@ -536,6 +736,7 @@ export default function BlockDetailScreen({ navigation, route }) {
                     onRemoveCrop={() => {}}
                     onSetShelter={(s) => handleSetShelter(pickerBed, s)}
                     isPickerMode={true}
+                    selectedCropIds={selectedCropIds}
                     onPickCrop={(cropEntry) => { handleAddCrop(pickerBed, cropEntry); setPickerBed(null); }}
                 />
             )}
@@ -561,6 +762,8 @@ const styles = StyleSheet.create({
     summaryBar: { backgroundColor: 'rgba(45,79,30,0.06)', paddingHorizontal: Spacing.lg, paddingVertical: Spacing.sm, gap: 2 },
     summaryText: { fontSize: Typography.xs, color: Colors.primaryGreen, fontWeight: '700' },
     familyBadge: { fontSize: 9, fontWeight: '700', color: Colors.burntOrange },
+    familyLabel: { fontSize: 13, fontWeight: '900', color: Colors.burntOrange ?? '#C0622B', letterSpacing: 0.3 },
+    summarySubText: { fontSize: Typography.xs, color: Colors.mutedText, marginTop: 1 },
 
     sideRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: Spacing.lg, paddingVertical: Spacing.sm, gap: Spacing.sm },
     sideLabel: { fontSize: 10, fontWeight: '700', color: Colors.mutedText, width: 28 },
@@ -588,12 +791,28 @@ const styles = StyleSheet.create({
     bedNumBadge: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
     bedNumText: { fontSize: Typography.sm, fontWeight: '800' },
     bedRowContent: { flex: 1, gap: 3 },
+    chipsWrap: { flexDirection: 'column', gap: 4 }, // stacked vertically like Gantt chart
+    bedDiagramRow: {
+        flexDirection: 'column',
+        justifyContent: 'center', alignItems: 'flex-start',
+        paddingHorizontal: 8, paddingVertical: 4,
+        overflow: 'hidden', borderRadius:Radius.sm ?? 6, 
+    },
+    bedDiagramRowName: { fontSize: 10, fontWeight: '800', lineHeight: 14 },
+    successionChip: {
+        paddingHorizontal: 8, paddingVertical: 4,
+        borderRadius: Radius.full ?? 999,
+        borderWidth: 1,
+    },
+    successionChipText: { fontSize: 10, fontWeight: '700', letterSpacing: 0.1 },
     bedChipsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 4 },
     miniChip: { backgroundColor: 'rgba(45,79,30,0.08)', borderRadius: Radius.full, paddingVertical: 2, paddingHorizontal: 7 },
     miniChipText: { fontSize: 9, fontWeight: '700', color: Colors.primaryGreen },
     bedSubtext: { fontSize: 9, color: Colors.mutedText },
+    bedSuccessionLine: { fontSize: 9, color: Colors.primaryGreen, fontWeight: '700', lineHeight: 13 },
     bedEmpty: { fontSize: Typography.xs, color: Colors.mutedText, fontStyle: 'italic' },
     chevron: { fontSize: 18, color: Colors.mutedText },
 
     noBedsText: { fontSize: Typography.sm, color: Colors.mutedText, fontStyle: 'italic', textAlign: 'center', paddingVertical: 32 },
 });
+

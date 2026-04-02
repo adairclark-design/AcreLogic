@@ -30,6 +30,7 @@ import { Colors, Typography, Spacing, Radius, Shadows } from '../theme';
 import { saveBedLayout, loadBedLayout } from '../services/persistence';
 import { getBadCompanionWarning } from '../services/companionService';
 import CompanionAlertBanner from '../components/CompanionAlertBanner';
+import HomeLogoButton from '../components/HomeLogoButton';
 import CROP_IMAGES from '../data/cropImages';
 import CROPS_DATA from '../data/crops.json';
 
@@ -39,7 +40,7 @@ const ALL_CROPS = (CROPS_DATA.crops ?? []).filter(c => c.category !== 'Cover Cro
 const PX_PER_FT = 8;          // 8 canvas pixels per foot
 const MIN_ZOOM  = 0.6;
 const MAX_ZOOM  = 4.0;
-const UNDO_LIMIT = 10;
+const UNDO_LIMIT = 50;
 
 // Snap grid presets (feet). User scrolls through these in the sidebar.
 const SNAP_PRESETS = [
@@ -435,7 +436,7 @@ const cgo = StyleSheet.create({
 
 // ─── Add-Bed Sidebar ──────────────────────────────────────────────────────────
 // Fixed left panel on web/tablet with Create Bed form + selected bed actions.
-function AddBedSidebar({ onAdd, selectedBed, selectedCount = 1, onRotate, onDelete, onDeleteSelected, onAssignCrops, undoStack, onUndo, minGapFt, onMinGapChange, onReloadFromPlan }) {
+function AddBedSidebar({ onAdd, selectedBed, selectedCount = 1, onRotate, onDelete, onDeleteSelected, onAssignCrops, undoStack, onUndo, onClearAll, minGapFt, onMinGapChange, onReloadFromPlan }) {
     const [wFt, setWFt] = useState('4');
     const [hFt, setHFt] = useState('8');
     const [bedOri, setBedOri] = useState('NS');
@@ -524,6 +525,17 @@ function AddBedSidebar({ onAdd, selectedBed, selectedCount = 1, onRotate, onDele
             <TouchableOpacity style={[sb.actionBtn, !undoStack.length && sb.dim]} onPress={onUndo} disabled={!undoStack.length}>
                 <Text style={sb.actionTxt}>↩ Undo</Text>
             </TouchableOpacity>
+            {onClearAll && (
+                <TouchableOpacity
+                    style={[sb.actionBtn, sb.delBtn]}
+                    onPress={() => {
+                        if (window.confirm?.('Clear all beds from the canvas?')) onClearAll();
+                        else onClearAll(); // native fallback — always clear
+                    }}
+                >
+                    <Text style={[sb.actionTxt, { color: '#C62828' }]}>🗑 Clear Map</Text>
+                </TouchableOpacity>
+            )}
             {/* Reload from Farm Block plan — only shown when navigated from BedWorkspace */}
             {onReloadFromPlan && (
                 <>
@@ -550,7 +562,7 @@ function AddBedSidebar({ onAdd, selectedBed, selectedCount = 1, onRotate, onDele
                 ))}
             </View>
             <Text style={[sb.fieldLabel, { fontSize: 8, marginTop: 2 }]}>
-                ↑↓←→ nudge · Del delete · ⇧+click multi
+                ↑↓←→ nudge · Del delete · ⇧+click or drag to multi-select
             </Text>
         </View>
     );
@@ -816,36 +828,45 @@ function BedLayoutCanvas({ beds, selectedIds, onBedDrop, onBedClick, width, heig
         drag: null,
         panning: false,
         panStart: null,
+        marquee: null,          // { x1,y1,x2,y2 } in screen coords while dragging
         cropImages: {},
         spaceInfo: spaceInfo ?? null,
         snapFt: (snapFt !== undefined && snapFt !== null) ? snapFt : DEFAULT_SNAP_FT,
         minGapFt: minGapFt ?? 1,
-        minZoom: MIN_ZOOM,   // locked to auto-fit level in effect below
+        minZoom: MIN_ZOOM,
     });
 
-    // ── Sync props into stateRef ───────────────────────────────────────────────
+    // ── Effect 1: sync non-spatial props + redraw (NO zoom/pan reset) ──────────
+    // Fires when beds, selection, or snap settings change.
+    // Must NOT reset zoom/pan — that would undo the user's current view.
     useEffect(() => {
         stateRef.current.beds = beds;
         stateRef.current.selectedIds = selectedIds ?? [];
-        stateRef.current.spaceInfo = spaceInfo ?? null;
         stateRef.current.snapFt = (snapFt !== undefined && snapFt !== null) ? snapFt : DEFAULT_SNAP_FT;
         stateRef.current.minGapFt = minGapFt ?? 1;
-        // Auto-fit: lock zoom+pan so the boundary fills the canvas
+        redraw();
+    }, [beds, selectedIds, snapFt, minGapFt]);
+
+    // ── Effect 2: auto-fit zoom+pan only when space boundary or canvas size changes
+    // Fires when spaceInfo (garden dimensions) or the canvas pixel size changes.
+    // These are the only legitimate reasons to reset the viewport.
+    useEffect(() => {
+        stateRef.current.spaceInfo = spaceInfo ?? null;
         const si = stateRef.current.spaceInfo;
         if (si && si.wPx > 0 && si.hPx > 0 && width > 0 && height > 0) {
             const PAD = 28;
             const scaleX = (width  - PAD * 2) / si.wPx;
             const scaleY = (height - PAD * 2) / si.hPx;
             const z = Math.min(scaleX, scaleY);
-            stateRef.current.zoom = z;
-            stateRef.current.minZoom = z;  // zoom-out cannot go below auto-fit level
-            stateRef.current.pan  = {
+            stateRef.current.zoom    = z;
+            stateRef.current.minZoom = z;
+            stateRef.current.pan     = {
                 x: (width  - si.wPx * z) / 2,
                 y: (height - si.hPx * z) / 2,
             };
         }
         redraw();
-    }, [beds, selectedIds, spaceInfo, snapFt, minGapFt, width, height]);
+    }, [spaceInfo, width, height]);
 
     // ── Draw ──────────────────────────────────────────────────────────────────
     const redraw = useCallback(() => {
@@ -894,19 +915,53 @@ function BedLayoutCanvas({ beds, selectedIds, onBedDrop, onBedClick, width, heig
             ctx.fillText(si.label ?? '', 4 / zoom, hPx - 4 / zoom);
         }
 
-        // Grid dots
-        ctx.fillStyle = GRID_COLOR;
-        const gs = SNAP_PX;
-        const gStep = Math.max(gs, gs * Math.round(12 / zoom));
-        const sx = Math.floor(-pan.x / zoom / gStep) * gStep - gStep;
-        const sy = Math.floor(-pan.y / zoom / gStep) * gStep - gStep;
-        const ex = sx + width / zoom + gStep * 2;
-        const ey = sy + height / zoom + gStep * 2;
-        for (let x = sx; x < ex; x += gStep) {
-            for (let y = sy; y < ey; y += gStep) {
+        // ── Smart graph-paper grid — 3 zoom levels ──────────────────────────
+        // Each tier fades in as zoom increases so the grid feels alive and
+        // accurate without ever becoming cluttered.
+        {
+            const GRID_LEVELS = [
+                { ft: 10,   colorBase: 'rgba(45,79,30,{a})', minAlpha: 0.10, maxAlpha: 0.22, minZoom: 0   },
+                { ft: 1,    colorBase: 'rgba(45,79,30,{a})', minAlpha: 0.00, maxAlpha: 0.14, minZoom: 0.4 },
+                { ft: 0.25, colorBase: 'rgba(45,79,30,{a})', minAlpha: 0.00, maxAlpha: 0.10, minZoom: 1.8 },
+            ];
+
+            // Visible world-space extents
+            const wxMin = -pan.x / zoom;
+            const wyMin = -pan.y / zoom;
+            const wxMax = wxMin + width  / zoom;
+            const wyMax = wyMin + height / zoom;
+
+            for (const lvl of GRID_LEVELS) {
+                const stepPx = lvl.ft * PX_PER_FT;  // world pixels per grid cell
+
+                // Compute alpha: fade from 0→maxAlpha over one decade of zoom
+                const fadeRange = lvl.ft === 10 ? 0.1 : lvl.ft;  // zoom range over which it fades
+                const alpha = lvl.ft === 10
+                    ? lvl.maxAlpha  // 10ft always at fixed opacity
+                    : Math.min(lvl.maxAlpha, Math.max(0,
+                        (zoom - lvl.minZoom) / (lvl.minZoom * 1.5 || 1) * lvl.maxAlpha
+                      ));
+                if (alpha <= 0.005) continue;
+
+                ctx.strokeStyle = lvl.colorBase.replace('{a}', alpha.toFixed(3));
+                ctx.lineWidth   = lvl.ft === 10 ? 1.2 / zoom : 0.8 / zoom;
+
+                // Round start to step boundary
+                const xStart = Math.floor(wxMin / stepPx) * stepPx;
+                const yStart = Math.floor(wyMin / stepPx) * stepPx;
+
                 ctx.beginPath();
-                ctx.arc(x, y, 1.2, 0, Math.PI * 2);
-                ctx.fill();
+                // Vertical lines
+                for (let gx = xStart; gx <= wxMax + stepPx; gx += stepPx) {
+                    ctx.moveTo(gx, wyMin - stepPx);
+                    ctx.lineTo(gx, wyMax + stepPx);
+                }
+                // Horizontal lines
+                for (let gy = yStart; gy <= wyMax + stepPx; gy += stepPx) {
+                    ctx.moveTo(wxMin - stepPx, gy);
+                    ctx.lineTo(wxMax + stepPx, gy);
+                }
+                ctx.stroke();
             }
         }
 
@@ -1063,6 +1118,24 @@ function BedLayoutCanvas({ beds, selectedIds, onBedDrop, onBedClick, width, heig
         drawRuler(ctx, width, height, zoom);
 
         ctx.restore();
+
+        // ── Marquee selection rect (screen-space, drawn AFTER ctx.restore) ─────────
+        const mq = stateRef.current.marquee;
+        if (mq) {
+            const mx = Math.min(mq.x1, mq.x2);
+            const my = Math.min(mq.y1, mq.y2);
+            const mw = Math.abs(mq.x2 - mq.x1);
+            const mh = Math.abs(mq.y2 - mq.y1);
+            ctx.save();
+            ctx.fillStyle   = 'rgba(59,130,246,0.08)';
+            ctx.fillRect(mx, my, mw, mh);
+            ctx.strokeStyle = 'rgba(59,130,246,0.85)';
+            ctx.lineWidth   = 1.5;
+            ctx.setLineDash([5, 3]);
+            ctx.strokeRect(mx, my, mw, mh);
+            ctx.setLineDash([]);
+            ctx.restore();
+        }
     }, [width, height]);
 
     function drawCompass(ctx, x, y, zoom) {
@@ -1200,8 +1273,11 @@ function BedLayoutCanvas({ beds, selectedIds, onBedDrop, onBedClick, width, heig
                     origX: hit.x ?? 60,
                     origY: hit.y ?? 60,
                 };
+            } else if (!e.shiftKey) {
+                // No bed hit and no shift — start marquee selection rect
+                st.marquee = { x1: pos.x, y1: pos.y, x2: pos.x, y2: pos.y };
             } else {
-                // No bed hit — start canvas pan
+                // Shift+drag on empty canvas — still pan
                 st.panning = true;
                 st.panStart = { x: pos.x, y: pos.y, ox: st.pan.x, oy: st.pan.y };
             }
@@ -1218,6 +1294,11 @@ function BedLayoutCanvas({ beds, selectedIds, onBedDrop, onBedClick, width, heig
                 // Optimistic local update for smooth drag
                 const bed = st.beds.find(b => b.id === st.drag.bedId);
                 if (bed) { bed.x = newX; bed.y = newY; }
+                redraw();
+            } else if (st.marquee) {
+                // Update marquee rect
+                st.marquee.x2 = pos.x;
+                st.marquee.y2 = pos.y;
                 redraw();
             } else if (st.panning && st.panStart) {
                 // Canvas pan
@@ -1274,6 +1355,35 @@ function BedLayoutCanvas({ beds, selectedIds, onBedDrop, onBedClick, width, heig
                     onBedClick(st.drag.bedId, e.shiftKey || false);
                 }
                 st.drag = null;
+            } else if (st.marquee) {
+                // ── Marquee selection: find all beds whose visual AABB overlaps the rect ──
+                const m = st.marquee;
+                const moved = Math.abs(m.x2 - m.x1) > 6 || Math.abs(m.y2 - m.y1) > 6;
+                if (moved) {
+                    // Convert marquee screen coords to world coords
+                    const wx1 = (Math.min(m.x1, m.x2) - st.pan.x) / st.zoom;
+                    const wy1 = (Math.min(m.y1, m.y2) - st.pan.y) / st.zoom;
+                    const wx2 = (Math.max(m.x1, m.x2) - st.pan.x) / st.zoom;
+                    const wy2 = (Math.max(m.y1, m.y2) - st.pan.y) / st.zoom;
+                    const hitBeds = st.beds.filter(bed => {
+                        const { w, h } = bedPxVisual(bed);
+                        const { ox, oy } = visualOffset(bed);
+                        const bx1 = (bed.x ?? 0) + ox;
+                        const by1 = (bed.y ?? 0) + oy;
+                        const bx2 = bx1 + w;
+                        const by2 = by1 + h;
+                        return bx2 > wx1 && bx1 < wx2 && by2 > wy1 && by1 < wy2;
+                    });
+                    if (hitBeds.length > 0) {
+                        hitBeds.forEach((bed, i) => onBedClick(bed.id, i > 0)); // first clears, rest shift-adds
+                    } else {
+                        onBedClick(null, false); // nothing hit — deselect
+                    }
+                } else {
+                    onBedClick(null, false); // tiny scrub = deselect all
+                }
+                st.marquee = null;
+                redraw();
             } else {
                 // Panning ended (or tap on empty canvas)
                 const dt  = Date.now() - clickStart.t;
@@ -2019,6 +2129,7 @@ export default function VisualBedLayoutScreen({ navigation, route }) {
                 <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
                     <Text style={styles.backArrow}>‹</Text>
                 </TouchableOpacity>
+                <HomeLogoButton navigation={navigation} color="#FFF8F0" />
                 <View style={{ flex: 1 }}>
                     <Text style={styles.headerLabel}>FARM DESIGNER</Text>
                     <Text style={styles.headerTitle}>Visual Bed Layout</Text>
@@ -2038,6 +2149,7 @@ export default function VisualBedLayoutScreen({ navigation, route }) {
                         onDelete={deleteBed}
                         onDeleteSelected={deleteSelected}
                         onAssignCrops={() => setShowCellGrid(true)}
+                        onClearAll={clearAll}
                         undoStack={undoStack}
                         onUndo={undo}
                         snapFt={DEFAULT_SNAP_FT}

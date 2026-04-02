@@ -4,7 +4,7 @@
  * offline HTML shell fallback for navigation.
  */
 // Bump version on every deploy so stale caches are invalidated immediately.
-const CACHE_NAME = 'acrelogic-v3';
+const CACHE_NAME = 'acrelogic-v4';
 const SHELL_ASSETS = ['/', '/index.html', '/manifest.json', '/icon-192.png', '/icon-512.png'];
 const API_HOSTNAMES = ['acrelogic-climate-worker.adair-clark.workers.dev'];
 

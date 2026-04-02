@@ -20,6 +20,7 @@ const KEYS = {
     ROTATION_HISTORY:   'acrelogic_rotation_history',
     FARM_PROFILE: 'acrelogic_farm_profile',
     BED_SUCCESSIONS: 'acrelogic_bed_successions',
+    BED_SHELTERS: 'acrelogic_bed_shelters',
     PLAN_ID: 'acrelogic_plan_id',
     SAVED_AT: 'acrelogic_saved_at',
     BED_LAYOUT: 'acrelogic_bed_layout',
@@ -49,6 +50,16 @@ export function saveBedSuccessions(bedSuccessions) {
     }
 }
 
+export function saveBedShelters(bedShelters) {
+    if (!isWeb) return;
+    try {
+        localStorage.setItem(KEYS.BED_SHELTERS, JSON.stringify(bedShelters));
+        localStorage.setItem(KEYS.SAVED_AT, new Date().toISOString());
+    } catch (e) {
+        console.warn('[Persistence] Failed to save bedShelters:', e);
+    }
+}
+
 export function savePlanId(planId) {
     if (!isWeb) return;
     try {
@@ -65,12 +76,13 @@ export function loadSavedPlan() {
     try {
         const farmProfile = JSON.parse(localStorage.getItem(KEYS.FARM_PROFILE) ?? 'null');
         const bedSuccessions = JSON.parse(localStorage.getItem(KEYS.BED_SUCCESSIONS) ?? 'null');
+        const bedShelters = JSON.parse(localStorage.getItem(KEYS.BED_SHELTERS) ?? 'null');
         const planId = localStorage.getItem(KEYS.PLAN_ID);
         const savedAt = localStorage.getItem(KEYS.SAVED_AT);
 
         if (!farmProfile) return null;
 
-        return { farmProfile, bedSuccessions: bedSuccessions ?? {}, planId, savedAt };
+        return { farmProfile, bedSuccessions: bedSuccessions ?? {}, bedShelters: bedShelters ?? {}, planId, savedAt };
     } catch (e) {
         console.warn('[Persistence] Failed to load saved plan:', e);
         return null;
@@ -80,7 +92,33 @@ export function loadSavedPlan() {
 export function hasSavedPlan() {
     if (!isWeb) return false;
     try {
-        return !!localStorage.getItem(KEYS.FARM_PROFILE);
+        // Must have a farm profile
+        if (!localStorage.getItem(KEYS.FARM_PROFILE)) return false;
+
+        // Must have been saved within the last 30 days
+        const savedAt = localStorage.getItem(KEYS.SAVED_AT);
+        if (!savedAt) return false;
+        const ageMs = Date.now() - new Date(savedAt).getTime();
+        const thirtyDays = 30 * 24 * 60 * 60 * 1000;
+        if (ageMs > thirtyDays) return false;
+
+        // Must have meaningful data — at least one farm block OR at least one bed with a crop
+        const hasBlocks = (() => {
+            try {
+                const blocks = JSON.parse(localStorage.getItem('acrelogic_farm_blocks') ?? '[]');
+                return Array.isArray(blocks) && blocks.length > 0;
+            } catch { return false; }
+        })();
+
+        const hasBedCrops = (() => {
+            try {
+                const succs = JSON.parse(localStorage.getItem(KEYS.BED_SUCCESSIONS) ?? 'null');
+                if (!succs || typeof succs !== 'object') return false;
+                return Object.values(succs).some(arr => Array.isArray(arr) && arr.length > 0);
+            } catch { return false; }
+        })();
+
+        return hasBlocks || hasBedCrops;
     } catch {
         return false;
     }
@@ -88,14 +126,42 @@ export function hasSavedPlan() {
 
 // ─── Clear ────────────────────────────────────────────────────────────────────
 
+/**
+ * clearSavedPlan / clearAllFarmData
+ * ─────────────────────────────────
+ * Wipes ALL AcreLogic app data from localStorage:
+ *   • 8-bed workspace keys (farm profile, bed successions, plan id, etc.)
+ *   • Farm Designer blocks (acrelogic_farm_blocks)
+ *   • Per-block bed succession data (acrelogic_block_beds_*)
+ *   • Satellite polygon drawings (acrelogic_block_polygons)
+ *
+ * Called by "Start Fresh" on HeroScreen and "Reset" in FarmDesigner.
+ */
 export function clearSavedPlan() {
     if (!isWeb) return;
     try {
+        // Clear known fixed keys
         Object.values(KEYS).forEach(k => localStorage.removeItem(k));
+        // Clear Farm Designer block metadata
+        localStorage.removeItem('acrelogic_farm_blocks');
+        // Clear satellite polygon store
+        localStorage.removeItem('acrelogic_block_polygons');
+        // Clear Visual Bed Layout canvas
+        localStorage.removeItem('acrelogic_bed_layout');
+        // Clear all per-block bed succession keys (dynamic keys)
+        const blockBedKeys = [];
+        for (let i = 0; i < localStorage.length; i++) {
+            const k = localStorage.key(i);
+            if (k?.startsWith('acrelogic_block_beds_')) blockBedKeys.push(k);
+        }
+        blockBedKeys.forEach(k => localStorage.removeItem(k));
     } catch (e) {
-        console.warn('[Persistence] Failed to clear plan:', e);
+        console.warn('[Persistence] Failed to clear all farm data:', e);
     }
 }
+
+// Alias — identical, more descriptive name for use in FarmDesigner
+export const clearAllFarmData = clearSavedPlan;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -282,28 +348,47 @@ export function loadRotationHistory() {
  * @param {Object} bedSuccessions  — { [bedNum]: [{ crop_id, crop_name, category, start_date, end_date }] }
  * @param {number|string} year     — Season year (default = current year)
  */
-export function saveSeasonSnapshot(bedSuccessions, year) {
+export function saveSeasonSnapshot(bedSuccessions) {
     if (!isWeb) return;
-    const seasonYear = String(year ?? new Date().getFullYear());
     try {
         const history = loadRotationHistory();
-        const snapshot = {};
+        
+        // Scan all beds and bucket their successions by year
         for (const [bedNum, succs] of Object.entries(bedSuccessions)) {
             if (!Array.isArray(succs) || succs.length === 0) continue;
-            snapshot[bedNum] = {
-                successions: succs.map(s => ({
-                    crop_id:    s.crop_id    ?? null,
-                    crop_name:  s.crop_name  ?? null,
-                    category:   s.category   ?? null,   // e.g. 'Nightshade', 'Root', 'Legume'
-                    start_date: s.start_date ?? null,
-                    end_date:   s.end_date   ?? null,
-                })).filter(s => s.crop_id),
-                savedAt: new Date().toISOString(),
-            };
+            
+            for (const s of succs) {
+                if (!s.crop_id || !s.start_date) continue;
+                
+                // Which year(s) does this crop intersect?
+                const startYear = parseInt(s.start_date.split('-')[0], 10);
+                const endYear = s.end_date ? parseInt(s.end_date.split('-')[0], 10) : startYear;
+                
+                for (let y = startYear; y <= endYear; y++) {
+                    const yearStr = String(y);
+                    if (!history[yearStr]) history[yearStr] = {};
+                    if (!history[yearStr][bedNum]) {
+                        history[yearStr][bedNum] = { successions: [], savedAt: new Date().toISOString() };
+                    }
+                    
+                    // Deduplicate
+                    const existing = history[yearStr][bedNum].successions;
+                    if (!existing.some(e => e.crop_id === s.crop_id && e.start_date === s.start_date)) {
+                        existing.push({
+                            crop_id:    s.crop_id,
+                            crop_name:  s.crop_name,
+                            category:   s.category,
+                            start_date: s.start_date,
+                            end_date:   s.end_date,
+                        });
+                        history[yearStr][bedNum].savedAt = new Date().toISOString();
+                    }
+                }
+            }
         }
-        history[seasonYear] = snapshot;
+        
         localStorage.setItem(KEYS.ROTATION_HISTORY, JSON.stringify(history));
-        return snapshot;
+        return history;
     } catch (e) {
         console.warn('[Persistence] saveSeasonSnapshot failed:', e);
         return {};
@@ -453,5 +538,153 @@ export function saveBlockBeds(blockId, bedData) {
         localStorage.setItem(`acrelogic_block_beds_${blockId}`, JSON.stringify(bedData));
     } catch (e) {
         console.warn('[Persistence] saveBlockBeds failed:', e);
+    }
+}
+
+// ─── Named Farm Plans ─────────────────────────────────────────────────────────
+// A "farm plan" is a named container that groups blocks together.
+// Schema: { id, name, location, farmProfile, createdAt, updatedAt }
+// Blocks reference a plan via block.planId.
+//
+// Migration: any existing blocks without a planId are automatically moved into
+// a "Default Plan" the first time loadFarmPlans() is called.
+
+const FARM_PLANS_KEY = 'acrelogic_farm_plans';
+
+function _loadRawPlans() {
+    try {
+        const raw = localStorage.getItem(FARM_PLANS_KEY);
+        return raw ? JSON.parse(raw) : [];
+    } catch { return []; }
+}
+
+function _savePlans(plans) {
+    try {
+        localStorage.setItem(FARM_PLANS_KEY, JSON.stringify(plans));
+    } catch (e) {
+        console.warn('[Persistence] savePlans failed:', e);
+    }
+}
+
+/**
+ * Migrate any blocks that don't have a planId into a "Default Plan".
+ * Safe to call multiple times — only runs if unassigned blocks exist.
+ */
+export function migrateBlocksToDefaultPlan() {
+    if (!isWeb) return null;
+    const blocks = loadBlocks();
+    const unassigned = blocks.filter(b => !b.planId);
+    if (unassigned.length === 0) return null;
+
+    const plans = _loadRawPlans();
+    // Find or create "Default Plan"
+    let defaultPlan = plans.find(p => p.isDefault);
+    if (!defaultPlan) {
+        defaultPlan = {
+            id: `plan_default_${Date.now()}`,
+            name: 'Default Plan',
+            isDefault: true,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            farmProfile: JSON.parse(localStorage.getItem(KEYS.FARM_PROFILE) ?? 'null'),
+        };
+        plans.unshift(defaultPlan);
+        _savePlans(plans);
+    }
+
+    // Tag each unassigned block with the default planId
+    const updatedBlocks = blocks.map(b =>
+        b.planId ? b : { ...b, planId: defaultPlan.id, updatedAt: new Date().toISOString() }
+    );
+    _saveBlocks(updatedBlocks);
+    return defaultPlan;
+}
+
+export function loadFarmPlans() {
+    if (!isWeb) return [];
+    // Auto-migrate orphaned blocks on load
+    migrateBlocksToDefaultPlan();
+
+    const plans = _loadRawPlans();
+    const allBlocks = loadBlocks();
+
+    // Enrich each plan with block count + last-updated
+    return plans.map(plan => {
+        const planBlocks = allBlocks.filter(b => b.planId === plan.id);
+        const lastActivity = planBlocks.reduce((latest, b) => {
+            const t = b.updatedAt ?? b.createdAt ?? '';
+            return t > latest ? t : latest;
+        }, plan.updatedAt ?? '');
+        return {
+            ...plan,
+            blockCount: planBlocks.length,
+            lastActivity,
+        };
+    });
+}
+
+export function saveFarmPlan(plan) {
+    if (!isWeb) return plan;
+    const plans = _loadRawPlans();
+    const now = new Date().toISOString();
+    const idx = plans.findIndex(p => p.id === plan.id);
+    const updated = { ...plan, updatedAt: now };
+    if (idx >= 0) {
+        plans[idx] = updated;
+    } else {
+        plans.unshift({ ...updated, createdAt: now });
+    }
+    _savePlans(plans);
+    return updated;
+}
+
+export function deleteFarmPlan(planId) {
+    if (!isWeb) return;
+    // Delete all blocks in this plan and their bed data
+    const blocks = loadBlocks();
+    const planBlocks = blocks.filter(b => b.planId === planId);
+    planBlocks.forEach(b => {
+        try { localStorage.removeItem(`acrelogic_block_beds_${b.id}`); } catch {}
+    });
+    _saveBlocks(blocks.filter(b => b.planId !== planId));
+    // Remove the plan itself
+    _savePlans(_loadRawPlans().filter(p => p.id !== planId));
+}
+
+export function loadBlocksForPlan(planId) {
+    return loadBlocks().filter(b => b.planId === planId);
+}
+
+/** Create a new empty farm plan and return it */
+export function createFarmPlan(name, farmProfile) {
+    if (!isWeb) return null;
+    const plan = {
+        id: `plan_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+        name: name || 'New Farm Plan',
+        farmProfile: farmProfile ?? null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+    };
+    saveFarmPlan(plan);
+    return plan;
+}
+
+// ─── Selected Crops ────────────────────────────────────────────────────────
+// Transient state for selected crops inside a plan
+
+export function loadPlanCrops(planId) {
+    if (!isWeb || !planId) return [];
+    try {
+        const raw = localStorage.getItem(`acrelogic_plan_crops_${planId}`);
+        return raw ? JSON.parse(raw) : [];
+    } catch { return []; }
+}
+
+export function savePlanCrops(planId, cropIds) {
+    if (!isWeb || !planId) return;
+    try {
+        localStorage.setItem(`acrelogic_plan_crops_${planId}`, JSON.stringify(cropIds));
+    } catch (e) {
+        console.warn('[Persistence] savePlanCrops failed:', e);
     }
 }

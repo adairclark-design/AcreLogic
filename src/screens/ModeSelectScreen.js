@@ -14,13 +14,14 @@ import {
     Animated, ImageBackground, Platform, ScrollView,
 } from 'react-native';
 import { Colors, Typography, Spacing, Radius, Shadows } from '../theme';
+import HomeLogoButton from '../components/HomeLogoButton';
 
 const MODES = [
     {
         key: 'family',
         icon: '🌱',
         title: 'Feed My Family',
-        subtitle: 'Get a personalised planting list sized to feed your household — no guesswork.',
+        subtitle: 'For gardeners comfortable in the dirt who want to scale up for a growing family. No guesswork. No hassle.',
         badge: 'FREE',
         badgeColor: '#4CAF50',
         route: 'FamilyPlanner',
@@ -30,7 +31,7 @@ const MODES = [
         key: 'garden',
         icon: '🏡',
         title: 'Plan My Garden',
-        subtitle: 'Size raised beds or ground plots, calculate soil volume, and get a crop plan.',
+        subtitle: 'Helping you understand the space you have and letting the creativity flow.',
         badge: 'FREE',
         badgeColor: '#4CAF50',
         route: 'GardenSpacePlanner',
@@ -40,22 +41,13 @@ const MODES = [
         key: 'design',
         icon: '🗺️',
         title: 'Design My Garden',
-        subtitle: 'Drag-and-drop bed designer: set your space, drop beds, paint each cell with crops.',
+        subtitle: 'Mapping out specifics for beginners and lovers of organization.',
         badge: 'FREE',
         badgeColor: '#4CAF50',
         route: 'BedDesignerSetup',
         enabled: true,
     },
-    {
-        key: 'farm',
-        icon: '🚜',
-        title: 'Market Farm',
-        subtitle: 'Full planner suite with blocks, successions, revenue tracking, and more.',
-        badge: 'PREMIUM',
-        badgeColor: Colors.burntOrange,
-        route: 'Location',
-        enabled: true,
-    },
+
 ];
 
 // ─── Single Mode Card ─────────────────────────────────────────────────────────
@@ -117,6 +109,16 @@ export default function ModeSelectScreen({ navigation }) {
     }, []);
 
     const handleCardPress = (mode) => {
+        // When starting Feed My Family, wipe any saved state so the new plan starts fresh.
+        if (mode.key === 'family' && typeof localStorage !== 'undefined') {
+            [
+                'acrelogic_family_planner_selectedIds',
+                'acrelogic_family_planner_planResult',
+                'acrelogic_family_planner_excludedIds',
+                'acrelogic_family_planner_familySize',
+                'acrelogic_family_planner_gardenProfile',
+            ].forEach(key => { try { localStorage.removeItem(key); } catch {} });
+        }
         navigation.navigate(mode.route);
     };
 
@@ -124,11 +126,15 @@ export default function ModeSelectScreen({ navigation }) {
         <View style={styles.container}>
             {/* Green header band */}
             <View style={styles.header}>
-                <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
-                    <Text style={styles.backArrow}>‹</Text>
-                </TouchableOpacity>
+                {/* Back + centered logo row */}
+                <View style={styles.headerTopRow}>
+                    <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
+                        <Text style={styles.backArrow}>‹</Text>
+                    </TouchableOpacity>
+                    <HomeLogoButton navigation={navigation} />
+                    <View style={{ width: 36 }} />
+                </View>
                 <Animated.View style={{ opacity: headerFade, transform: [{ translateY: headerSlide }] }}>
-                    <Text style={styles.superLabel}>ACRELOGIC</Text>
                     <Text style={styles.headerTitle}>How can we help?</Text>
                     <Text style={styles.headerSub}>Choose the planning mode that fits your goal.</Text>
                 </Animated.View>
@@ -187,7 +193,13 @@ const styles = StyleSheet.create({
         paddingHorizontal: Spacing.lg,
         paddingBottom: Spacing.xl,
     },
-    backBtn: { padding: 4, marginBottom: Spacing.sm },
+    headerTopRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginBottom: Spacing.sm,
+    },
+    backBtn: { padding: 4, width: 36 },
     backArrow: { fontSize: 28, color: Colors.cream, lineHeight: 30 },
     superLabel: {
         fontSize: Typography.xs,

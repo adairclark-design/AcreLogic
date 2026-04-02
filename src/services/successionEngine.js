@@ -21,7 +21,9 @@ import {
     addDays,
     getSeasonClass,
     getRemainingFrostFreeDays,
+    getIdealStartDate,
 } from './climateService';
+import { getPeakCoverageInWindow } from './farmUtils';
 
 
 // ─── Safe Array Parser ────────────────────────────────────────────────────────
@@ -141,29 +143,55 @@ function repeatPenalty(crop, farmCropCount, diversityWeight) {
 export async function getSuccessionCandidatesRanked(bedState, farmProfile, options = {}) {
     const { successions = [] } = bedState;
     const { lat = 45.5, first_frost_date } = farmProfile;
-    const { forceSeasonClass, includeCovers = true, maxResults = 8, strategy, farmUsedCategories, farmCropCount } = options;
+    const { forceSeasonClass, includeCovers = true, maxResults = 8, strategy, farmUsedCategories, farmCropCount, shelterType = 'none' } = options;
 
     // Resolve strategy weights
     const strat = AUTOFILL_STRATEGIES.find(s => s.id === strategy) ?? DEFAULT_STRATEGY;
 
-    // Determine the next start date (day after last succession ends)
+    // Determine the next start date
+    // If the last planted crop didn't completely fill the bed, we should suggest planting NEXT TO IT
+    // in the exact same timeframe, rather than shifting purely to the chronological end.
     const lastSuccession = successions[successions.length - 1] ?? null;
-    const nextStartDate = lastSuccession?.end_date
-        ? addDays(lastSuccession.end_date, 1)
-        : farmProfile.last_frost_date; // Start from last frost if bed is empty
+    
+    // Evaluate spring offset based on shelter
+    let shelterSpringOffsetDays = 0;
+    if (shelterType === 'rowCover') shelterSpringOffsetDays = -14;
+    else if (shelterType === 'greenhouse') shelterSpringOffsetDays = -42;
+
+    let nextStartDate = addDays(farmProfile.last_frost_date, shelterSpringOffsetDays); // Start from effective last frost if bed is empty
+
+    if (lastSuccession) {
+        const currentPeak = getPeakCoverageInWindow(successions, lastSuccession.start_date, lastSuccession.end_date ?? '9999-12-31');
+        if (currentPeak < 0.99) {
+            nextStartDate = lastSuccession.start_date;
+        } else if (lastSuccession.end_date) {
+            // Do not add 1 day; butt crops exactly end-to-end to prevent 1-day timeline holes
+            nextStartDate = lastSuccession.end_date;
+        }
+    }
 
     // Remaining frost-free days from nextStartDate
-    const remainingDays = getRemainingFrostFreeDays(farmProfile, new Date(nextStartDate));
+    let remainingDays = getRemainingFrostFreeDays(farmProfile, new Date(nextStartDate));
+    if (shelterType === 'rowCover') remainingDays += 14;
+    else if (shelterType === 'greenhouse') remainingDays += 42;
 
     // Detect season class for this window
     const seasonClass = forceSeasonClass ?? getSeasonClass(nextStartDate, lat);
 
     // What seasons are viable? If warm window, warm+cool both might work
-    const viableSeasons = seasonClass === 'warm' ? ['warm', 'cool'] : ['cool'];
+    let viableSeasons = seasonClass === 'warm' ? ['warm', 'cool'] : ['cool'];
+
+    // Greenhouses functionally create a summer microclimate much earlier and later in the year
+    if (shelterType === 'greenhouse') {
+        viableSeasons = ['warm', 'cool'];
+    }
 
     // Get all agronomically eligible crops
     const excludeCategories = includeCovers ? [] : ['Cover Crop'];
-    const candidates = await getCropsForWindow(remainingDays, viableSeasons, excludeCategories);
+    // To ensure overwinter crops (which demand 120+ frost-free days) aren't brutally deleted by `getCropsForWindow` when queried in Fall with remainingDays <= 60,
+    // we fetch with a faux 365 days window if season is winding down. `scoreCrop.fits` math will eliminate non-hardy imposters.
+    const queryDays = remainingDays < 100 ? 365 : remainingDays;
+    const candidates = await getCropsForWindow(queryDays, viableSeasons, excludeCategories);
 
     // Score each candidate
     const previousCrop = lastSuccession
@@ -267,8 +295,29 @@ async function scoreCrop(crop, previousCrop, successions, farmProfile, nextStart
         reasons.push(`${remainingDays} days left — cover crop ideal`);
     }
 
+    // ── evaluate specific crop start dates ──────────────────────────────────────
+    let shelterSpringOffsetDays = 0;
+    if (options && options.shelterType) {
+        if (options.shelterType === 'rowCover') shelterSpringOffsetDays = -14;
+        else if (options.shelterType === 'greenhouse') shelterSpringOffsetDays = -42;
+    }
+    const effectiveLastFrost = addDays(farmProfile.last_frost_date, shelterSpringOffsetDays);
+
+    let idealStart = getIdealStartDate(crop, effectiveLastFrost);
+    let cropStartDate = nextStartDate;
+    if (idealStart && new Date(idealStart) > new Date(nextStartDate)) {
+        cropStartDate = idealStart;
+    }
+
+    let actualRemainingDays = getRemainingFrostFreeDays(farmProfile, new Date(cropStartDate));
+    // Re-add shelter offsets to actual timeline
+    if (options && options.shelterType) {
+        if (options.shelterType === 'rowCover') actualRemainingDays += 14;
+        else if (options.shelterType === 'greenhouse') actualRemainingDays += 42;
+    }
+
     // ── 4. Season class fit ─────────────────────────────────────────────────
-    const seasonClass = getSeasonClass(nextStartDate, farmProfile.lat ?? 45);
+    const seasonClass = getSeasonClass(cropStartDate, farmProfile.lat ?? 45);
     if (crop.season === seasonClass) {
         score += ROTATION_SCORES.cool_season_fit;
         reasons.push(`${seasonClass === 'cool' ? 'Cool' : 'Warm'} season match ✓`);
@@ -284,16 +333,38 @@ async function scoreCrop(crop, previousCrop, successions, farmProfile, nextStart
     }
 
     // ── 6. DTM fit scoring ──────────────────────────────────────────────────
+    
+    // Determine overwinter survivability from deep contextual hints to counteract database limitations
+    const isExplicitOverwinter = crop.overwinter_cover === true || 
+        (crop.frost_note && crop.frost_note.toLowerCase().includes('overwinter')) ||
+        (crop.notes && crop.notes.toLowerCase().includes('overwinter')) ||
+        (crop.description && crop.description.toLowerCase().includes('overwinter'));
+
+    const isMassiveHardyCrop = crop.dtm >= 180 && crop.hard_frost === true;
+    const canOverwinter = crop.feed_class === 'cover_crop' || isExplicitOverwinter || isMassiveHardyCrop;
+    
+    // Evaluate regular grace period
     const totalDaysNeeded = crop.dtm + (crop.harvest_window_days ?? 0);
-    if (totalDaysNeeded <= remainingDays * 0.85) {
+    const gracePeriod = crop.frost_tolerant ? 28 : 7;
+    
+    if (canOverwinter && actualRemainingDays <= 60) {
+        score += 20; // Massive scoring bonus to explicitly favor true overwinter crops in the fall
+        reasons.push(`Overwinter capability ✓`);
+    } else if (totalDaysNeeded <= actualRemainingDays * 0.85) {
         score += ROTATION_SCORES.max_dtm_fit;
-        reasons.push(`Fits well in ${remainingDays} remaining days ✓`);
-    } else if (totalDaysNeeded <= remainingDays) {
+        reasons.push(`Fits well in ${actualRemainingDays} remaining days ✓`);
+    } else if (totalDaysNeeded <= actualRemainingDays) {
         score += 4;
         warnings.push(`Tight window — single harvest only`);
-    } else if (crop.dtm <= remainingDays) {
+    } else if (crop.dtm <= actualRemainingDays) {
         score -= 5;
         warnings.push(`DTM fits but harvest window extends past frost`);
+    } else if (crop.dtm <= actualRemainingDays + gracePeriod) {
+        score -= 10;
+        warnings.push(`⚠️ Extends ${Math.max(1, crop.dtm - actualRemainingDays)} days past frost (grace period)`);
+    } else if (!canOverwinter && crop.dtm > actualRemainingDays + gracePeriod) {
+        score -= 100; // Brutal penalty for crops that absolutely will freeze and die
+        warnings.push(`Will not finish before deep freeze!`);
     }
 
     // ── 7. Interplanting synergy ────────────────────────────────────────────
@@ -305,11 +376,17 @@ async function scoreCrop(crop, previousCrop, successions, farmProfile, nextStart
 
     // Compute end date for this crop
     let endDate;
-    if (crop.overwinter_cover && crop.feed_class === 'cover_crop') {
-        const plantYear = new Date(nextStartDate).getFullYear();
-        endDate = `${plantYear + 1}-04-01`;
+    if (canOverwinter && actualRemainingDays <= 60) {
+        if (crop.feed_class === 'cover_crop') {
+            // Only trigger the hard overwinter jump for actual cover crops to cleanly terminate in spring
+            const plantYear = new Date(cropStartDate).getFullYear();
+            endDate = `${plantYear + 1}-04-01`;
+        } else {
+            // For biological overwinter crops (Garlic, Leeks, Salsify), trust their actual biological DTM
+            endDate = addDays(cropStartDate, (crop.dtm ?? 0) + (crop.harvest_window_days ?? 0));
+        }
     } else {
-        endDate = addDays(nextStartDate, (crop.dtm ?? 0) + (crop.harvest_window_days ?? 0));
+        endDate = addDays(cropStartDate, (crop.dtm ?? 0) + (crop.harvest_window_days ?? 0));
     }
 
     // ── 8. Strategy-weighted profit / diversity boost ──────────────────────────
@@ -328,17 +405,15 @@ async function scoreCrop(crop, previousCrop, successions, farmProfile, nextStart
         warnings.push(`Already in ${farmCropCount[crop.id]} other bed(s)`);
     }
 
-    const coverCropFits = crop.feed_class === 'cover_crop';
-
     return {
         crop,
         score,
         reasons,
         warnings,
-        start_date: nextStartDate,
+        start_date: cropStartDate,
         end_date: endDate,
-        remaining_days_after: coverCropFits ? 0 : Math.max(0, remainingDays - (crop.dtm + (crop.harvest_window_days ?? 0))),
-        fits: coverCropFits ? (score > 0) : (score > 0 && crop.dtm <= remainingDays),
+        remaining_days_after: canOverwinter ? 0 : Math.max(0, actualRemainingDays - (crop.dtm + (crop.harvest_window_days ?? 0))),
+        fits: canOverwinter ? (score >= 0) : (score > 0 && crop.dtm <= actualRemainingDays + gracePeriod),
         season_class: seasonClass,
     };
 }

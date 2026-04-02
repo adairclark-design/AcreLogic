@@ -81,6 +81,61 @@ export function generateBlockId() {
 }
 
 /**
+ * Calculates the maximum concurrent coverage fraction (0.0 to 1.0+) of all successions
+ * that overlap the given [startDate, endDate] window.
+ */
+export function getPeakCoverageInWindow(successions, startDate, endDate) {
+    if (!successions || successions.length === 0) return 0;
+    
+    // We only care about successions that overlap the [startDate, endDate] window
+    // Overlap condition: s.start_date < endDate && s.end_date > startDate
+    const overlapping = successions.filter(s => 
+        (s.start_date ?? '') < endDate && (s.end_date ?? '') > startDate
+    );
+    
+    if (overlapping.length === 0) return 0;
+    
+    // Collect all interesting dates within the window where coverage might change
+    const events = new Set([startDate, endDate]);
+    for (const s of overlapping) {
+        if (s.start_date && s.start_date >= startDate && s.start_date <= endDate) events.add(s.start_date);
+        if (s.end_date && s.end_date >= startDate && s.end_date <= endDate) events.add(s.end_date);
+    }
+    
+    const sortedDates = Array.from(events).sort();
+    let maxCoverage = 0;
+    
+    // For each segment between interesting dates, calculate total coverage
+    for (let i = 0; i < sortedDates.length - 1; i++) {
+        const segStart = sortedDates[i];
+        const segEnd = sortedDates[i+1];
+        if (segStart === segEnd) continue;
+        
+        let sum = 0;
+        for (const s of overlapping) {
+            // If the crop overlapping this specific segment
+            // A crop overlaps a segment if its start is <= segStart AND its end is >= segEnd
+            if ((s.start_date ?? '') <= segStart && (s.end_date ?? '9999-12-31') >= segEnd) {
+                sum += (s.coverage_fraction ?? 1.0);
+            }
+        }
+        maxCoverage = Math.max(maxCoverage, sum);
+    }
+    
+    if (sortedDates.length === 1) {
+         let sum = 0;
+         for (const s of overlapping) {
+             if ((s.start_date ?? '') <= sortedDates[0] && (s.end_date ?? '9999-12-31') >= sortedDates[0]) {
+                 sum += (s.coverage_fraction ?? 1.0);
+             }
+         }
+         maxCoverage = sum;
+    }
+    
+    return maxCoverage;
+}
+
+/**
  * Default grid positions — assign blocks to a named slot on a 3-column farm map.
  * Slots: ['NW','N','NE','W','Center','E','SW','S','SE']
  */
@@ -101,3 +156,31 @@ export const FAMILY_OPTIONS = [
     'Greens & Herbs',
     'Cover Crop / Fallow',
 ];
+
+/**
+ * Infer a generic geographic region based on the farm's frost-free days.
+ * Maps frost dates to regions: northeast, midwest, east, south, pacific_northwest.
+ * Used for filtering pest and disease relevance.
+ */
+export function inferZoneFromFrostDates(firstFrostDate, lastFrostDate) {
+    if (!firstFrostDate || !lastFrostDate) return 'all';
+    
+    try {
+        const d1 = new Date(firstFrostDate);
+        const d2 = new Date(lastFrostDate);
+        // Add one year to first frost if it's earlier in the year than last frost (e.g., Southern Hemisphere, though unlikely here)
+        if (d1 < d2) d1.setFullYear(d1.getFullYear() + 1);
+        
+        const frostFreeDays = Math.round((d1 - d2) / 86400000);
+        
+        // Very rough proxy for USDA hardiness zones mapping to regions used in our IPM data
+        if (frostFreeDays < 130) return 'northeast';
+        if (frostFreeDays >= 130 && frostFreeDays < 160) return 'midwest';
+        if (frostFreeDays >= 160 && frostFreeDays < 200) return 'east';
+        if (frostFreeDays >= 200 && frostFreeDays < 280) return 'south';
+        if (frostFreeDays >= 280) return 'pacific_northwest';
+    } catch (e) {
+        return 'all';
+    }
+    return 'all';
+}

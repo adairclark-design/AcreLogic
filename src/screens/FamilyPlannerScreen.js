@@ -25,7 +25,7 @@ import {
 } from 'react-native';
 import { Colors, Typography, Spacing, Radius, Shadows } from '../theme';
 import { checkFamilyGate, LIMITS, TIER, getActiveTier, HARD_FAMILY_CAP } from '../services/tierLimits';
-import { calculateGardenPlan } from '../services/homeGardenCalculator';
+import { calculateGardenPlan, getCropEarliestActionOffset } from '../services/homeGardenCalculator';
 import { fetchFarmProfile } from '../services/climateService';
 import UpgradeModal from '../components/UpgradeModal';
 import CROP_IMAGES from '../data/cropImages';
@@ -37,6 +37,7 @@ import SeedShoppingList from '../components/SeedShoppingList';
 import YieldForecast from '../components/YieldForecast';
 import { formatCropDisplayName, formatVarietyLabel } from '../utils/cropDisplay';
 import LocationStep from '../components/LocationStep';
+import HomeLogoButton from '../components/HomeLogoButton';
 
 // ─── Full PDF monthly cap ────────────────────────────────────────────────────
 const FULL_PDF_MONTHLY_LIMIT = 10;
@@ -269,18 +270,24 @@ function ReportCard({ item, cardWidth }) {
                     <FactRow icon="🗓" label="In-ground window" value={`${item.inGroundDays} days total`} />
                 ) : null}
                 {item.seedType ? (
-                    <FactRow icon="🌱" label="Starting method" value={item.seedType === 'DS' ? 'Direct Sow' : 'Transplant'} />
+                    <FactRow 
+                        icon="🌱" 
+                        label="Starting method" 
+                        value={item.recommendBuyStarts ? 'Buy Starts' : (item.seedType === 'DS' ? 'Direct Sow' : 'Start Indoors')} 
+                    />
                 ) : null}
-                {/* Calendar dates — Ideal vs Today scenario */}
+                {/* Calendar dates */}
                 {item.indoorSeedDate ? (
                     <>
                         <FactRow
                             icon="🗓"
                             label="Start seeds indoors"
                             value={
-                                item.todayIndoorDate && item.todayIndoorDate !== item.indoorSeedDate
-                                    ? `${item.indoorSeedDate}  ·  (${item.todayIndoorDate} if starting today)`
-                                    : item.indoorSeedDate
+                                item.recommendBuyStarts
+                                    ? `${item.indoorSeedDate}  ·  (Buy Starts)`
+                                    : (item.todayIndoorDate && item.todayIndoorDate !== item.indoorSeedDate
+                                        ? `${item.indoorSeedDate}  ·  (${item.todayIndoorDate})`
+                                        : item.indoorSeedDate)
                             }
                             highlight
                         />
@@ -289,9 +296,11 @@ function ReportCard({ item, cardWidth }) {
                                 icon="🌤"
                                 label="Transplant date"
                                 value={
-                                    item.todayTransplantDate && item.todayTransplantDate !== item.transplantDate
-                                        ? `${item.transplantDate}  ·  (${item.todayTransplantDate} if starting today)`
-                                        : item.transplantDate
+                                    item.recommendBuyStarts
+                                        ? `${item.transplantDate}  ·  (Buy Starts)`
+                                        : (item.todayTransplantDate && item.todayTransplantDate !== item.transplantDate
+                                            ? `${item.transplantDate}  ·  (${item.todayTransplantDate})`
+                                            : item.transplantDate)
                                 }
                                 highlight={!item.isLateStart}
                              />
@@ -309,7 +318,7 @@ function ReportCard({ item, cardWidth }) {
                         label="Direct sow date"
                         value={
                             item.todayDirectSowDate && item.todayDirectSowDate !== item.directSowDate
-                                ? `Ideal: ${item.directSowDate}  ·  (today is ${item.isLateStart ? 'past ideal — ' : ''}${item.todayDirectSowDate})`
+                                ? `${item.directSowDate}  ·  (${item.todayDirectSowDate})`
                                 : item.directSowDate
                         }
                         highlight={!item.isLateStart}
@@ -318,9 +327,25 @@ function ReportCard({ item, cardWidth }) {
                 {item.lateStartCaveat && !item.indoorSeedDate && item.directSowDate ? (
                     <FactRow icon="⏳" label="Note" value={item.lateStartCaveat} />
                 ) : null}
+                {/* Harvest window */}
+                {item.harvestWindowDisplay ? (
+                    <FactRow
+                        icon="🧺"
+                        label="Harvest window"
+                        value={
+                            item.todayHarvestWindowDisplay && item.todayHarvestWindowDisplay !== item.harvestWindowDisplay
+                                ? `${item.harvestWindowDisplay}  ·  (${item.todayHarvestWindowDisplay})`
+                                : item.harvestWindowDisplay
+                        }
+                        highlight={!item.isLateStart}
+                    />
+                ) : null}
                 {/* Spacing */}
                 {item.inRowSpacingIn ? (
                     <FactRow icon="↔️" label="In-row spacing" value={`${item.inRowSpacingIn}"`} />
+                ) : null}
+                {item.rowSpacingIn ? (
+                    <FactRow icon="↕️" label="Row spacing" value={`${item.rowSpacingIn}"`} />
                 ) : null}
                   {/* Harvest info */}
                 {item.harvestStyle ? (
@@ -356,13 +381,24 @@ function ReportCard({ item, cardWidth }) {
                             <>
                                 {/* Round 1 = the directSowDate itself */}
                                 <Text style={styles.successionRound}>
-                                    Round 1: {item.directSowDate ?? 'See sow date above'}
+                                    Round 1: {item.todayDirectSowDate && item.todayDirectSowDate !== item.directSowDate
+                                        ? `${item.directSowDate}  ·  (${item.todayDirectSowDate})`
+                                        : (item.directSowDate ?? 'See sow date above')}
                                 </Text>
-                                {item.successionDates.map(d => (
-                                    <Text key={d.round} style={styles.successionRound}>
-                                        Round {d.round}: {d.dateDisplay}
-                                    </Text>
-                                ))}
+                                {item.successionDates.map(d => {
+                                    let displayVal = d.dateDisplay;
+                                    if (item.isLateStart && item.todaySuccessionDates) {
+                                        const todayFallback = item.todaySuccessionDates.find(td => td.round === d.round);
+                                        displayVal = todayFallback && todayFallback.dateDisplay !== d.dateDisplay
+                                            ? `${d.dateDisplay}  ·  (${todayFallback.dateDisplay})`
+                                            : `${d.dateDisplay}  ·  (Too close to frost)`;
+                                    }
+                                    return (
+                                        <Text key={d.round} style={styles.successionRound}>
+                                            Round {d.round}: {displayVal}
+                                        </Text>
+                                    );
+                                })}
                             </>
                         ) : (
                             <Text style={styles.successionText}>{item.successionNote}</Text>
@@ -435,11 +471,20 @@ export default function FamilyPlannerScreen({ navigation }) {
     const cardWidth  = Math.floor((width - 48 - GAP * (numColumns - 1)) / numColumns);
 
     // ── Persistence keys ───────────────────────────────────────────────────
-    const STORAGE_KEY_FAMILY = 'acrelogic_family_planner_familySize';
-    const STORAGE_KEY_CROPS  = 'acrelogic_family_planner_selectedIds';
+    const STORAGE_KEY_FAMILY   = 'acrelogic_family_planner_familySize';
+    const STORAGE_KEY_CROPS    = 'acrelogic_family_planner_selectedIds';
+    const STORAGE_KEY_PLAN     = 'acrelogic_family_planner_planResult';
+    const STORAGE_KEY_EXCLUDED = 'acrelogic_family_planner_excludedIds';
+    const STORAGE_KEY_GARDEN   = 'acrelogic_family_planner_gardenProfile';
 
     // ── State ──────────────────────────────────────────────────────────────
-    const [step, setStep]               = useState(0); // 0 = location, 1 = crops, 2 = plan
+    // Smart re-entry: if a saved plan exists, start on step 2 (plan view)
+    const hasSavedPlan = (() => {
+        try {
+            return typeof localStorage !== 'undefined' && !!localStorage.getItem(STORAGE_KEY_PLAN);
+        } catch { return false; }
+    })();
+    const [step, setStep] = useState(hasSavedPlan ? 2 : 0);
     // familySize: restored from localStorage so it survives back-navigation
     const [familySize, setFamilySize]   = useState(() => {
         try {
@@ -459,9 +504,30 @@ export default function FamilyPlannerScreen({ navigation }) {
     const [searchQuery, setSearchQuery]     = useState('');
     const [upgradeModalVisible, setUpgradeModalVisible] = useState(false);
     const [upgradeBlockedBy, setUpgradeBlockedBy]       = useState(null);
-    const [gardenProfile, setGardenProfile] = useState(null); // location data
-    const [planResult, setPlanResult]       = useState(null);
-    const [viewMode, setViewMode]           = useState('cards'); // 'cards' | 'calendar'
+    const [newPlanModalVisible, setNewPlanModalVisible] = useState(false); // upsell intercept
+    const [gardenProfile, setGardenProfile] = useState(() => {
+        try {
+            const saved = typeof localStorage !== 'undefined' && localStorage.getItem(STORAGE_KEY_GARDEN);
+            return saved ? JSON.parse(saved) : null;
+        } catch { return null; }
+    });
+    const [planResult, setPlanResult] = useState(() => {
+        try {
+            const saved = typeof localStorage !== 'undefined' && localStorage.getItem(STORAGE_KEY_PLAN);
+            return saved ? JSON.parse(saved) : null;
+        } catch { return null; }
+    });
+    const [viewMode, setViewMode] = useState('calendar');
+    // Crops excluded from the plan by the user via the × button
+    const [excludedCropIds, setExcludedCropIds] = useState(() => {
+        try {
+            const saved = typeof localStorage !== 'undefined' && localStorage.getItem(STORAGE_KEY_EXCLUDED);
+            return saved ? new Set(JSON.parse(saved)) : new Set();
+        } catch { return new Set(); }
+    });
+    // Undo toast: { id, name } of the most recently deleted crop, or null
+    const [undoItem, setUndoItem] = useState(null);
+    const undoTimerRef = useRef(null);
     const [pdfRemaining, setPdfRemaining] = useState(() => {
         if (Platform.OS !== 'web') return FULL_PDF_MONTHLY_LIMIT;
         const u = getPdfUsage();
@@ -488,6 +554,45 @@ export default function FamilyPlannerScreen({ navigation }) {
             }
         } catch {}
     }, [selectedIds]);
+
+    // Persist planResult
+    useEffect(() => {
+        try {
+            if (typeof localStorage !== 'undefined') {
+                if (planResult) {
+                    localStorage.setItem(STORAGE_KEY_PLAN, JSON.stringify(planResult));
+                } else {
+                    localStorage.removeItem(STORAGE_KEY_PLAN);
+                }
+            }
+        } catch {}
+    }, [planResult]);
+
+    // Persist excludedCropIds
+    useEffect(() => {
+        try {
+            if (typeof localStorage !== 'undefined') {
+                if (excludedCropIds.size > 0) {
+                    localStorage.setItem(STORAGE_KEY_EXCLUDED, JSON.stringify([...excludedCropIds]));
+                } else {
+                    localStorage.removeItem(STORAGE_KEY_EXCLUDED);
+                }
+            }
+        } catch {}
+    }, [excludedCropIds]);
+
+    // Persist gardenProfile so Calendar shows real dates on re-entry
+    useEffect(() => {
+        try {
+            if (typeof localStorage !== 'undefined') {
+                if (gardenProfile) {
+                    localStorage.setItem(STORAGE_KEY_GARDEN, JSON.stringify(gardenProfile));
+                } else {
+                    localStorage.removeItem(STORAGE_KEY_GARDEN);
+                }
+            }
+        } catch {}
+    }, [gardenProfile]);
 
     // (Stripe ?paid=1 flow removed — Full PDF is now a subscriber benefit)
 
@@ -532,7 +637,13 @@ export default function FamilyPlannerScreen({ navigation }) {
 
     const filteredCrops = PLANTABLE_CROPS
         .filter(filterFn)
-        .filter(c => !searchQuery.trim() || c.name.toLowerCase().includes(searchQuery.toLowerCase()) || (c.variety ?? '').toLowerCase().includes(searchQuery.toLowerCase()));
+        .filter(c => !searchQuery.trim() || c.name.toLowerCase().includes(searchQuery.toLowerCase()) || (c.variety ?? '').toLowerCase().includes(searchQuery.toLowerCase()))
+        .sort((a, b) => {
+            const offsetA = getCropEarliestActionOffset(a);
+            const offsetB = getCropEarliestActionOffset(b);
+            if (offsetA !== offsetB) return offsetA - offsetB;
+            return a.name.localeCompare(b.name);
+        });
 
     // ── Family size stepper ────────────────────────────────────────────────
     const adjustFamily = (delta) => {
@@ -602,6 +713,47 @@ export default function FamilyPlannerScreen({ navigation }) {
         });
     };
 
+    // ── Delete crop from plan + undo ──────────────────────────────────
+    const deleteCropFromPlan = (cropId, cropName) => {
+        setExcludedCropIds(prev => new Set([...prev, cropId]));
+        setUndoItem({ id: cropId, name: cropName });
+        // Auto-dismiss undo toast after 4 seconds
+        if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+        undoTimerRef.current = setTimeout(() => setUndoItem(null), 4000);
+    };
+    const undoDelete = () => {
+        if (undoItem) {
+            setExcludedCropIds(prev => {
+                const next = new Set(prev);
+                next.delete(undoItem.id);
+                return next;
+            });
+            setUndoItem(null);
+            if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+        }
+    };
+
+    // ── Reset — wipe everything and start from scratch ────────────────────
+    const handleReset = () => {
+        try {
+            if (typeof localStorage !== 'undefined') {
+                localStorage.removeItem(STORAGE_KEY_FAMILY);
+                localStorage.removeItem(STORAGE_KEY_CROPS);
+                localStorage.removeItem(STORAGE_KEY_PLAN);
+                localStorage.removeItem(STORAGE_KEY_EXCLUDED);
+                localStorage.removeItem(STORAGE_KEY_GARDEN);
+            }
+        } catch {}
+        setSelectedIds(new Set());
+        setFamilySize(2);
+        setPlanResult(null);
+        setGardenProfile(null);
+        setViewMode('calendar');
+        setExcludedCropIds(new Set());
+        setUndoItem(null);
+        setStep(0);
+    };
+
     // ── Return to Step 1 ──────────────────────────────────────────────────
     const goBack = () => {
         if (step === 2) {
@@ -665,19 +817,22 @@ export default function FamilyPlannerScreen({ navigation }) {
                 <TouchableOpacity style={styles.backBtn} onPress={goBack}>
                     <Text style={styles.backArrow}>‹</Text>
                 </TouchableOpacity>
-                <View style={{ flex: 1 }}>
-                    <Text style={styles.stepLabel}>
-                        {step === 0 ? 'FEED MY FAMILY' : step === 1 ? 'STEP 1 OF 2' : 'STEP 2 OF 2'}
-                    </Text>
-                    <Text style={styles.heading}>
-                        {step === 0 ? 'Your Location' : step === 1 ? 'Feed My Family' : 'Your Planting Plan'}
-                    </Text>
-                </View>
-                {selectedIds.size > 0 && step === 1 && (
-                    <View style={styles.countBadge}>
-                        <Text style={styles.countBadgeText}>{selectedIds.size}</Text>
+                <HomeLogoButton navigation={navigation} />
+                <View style={styles.headerRight}>
+                    <View style={{ flex: 1 }}>
+                        <Text style={styles.stepLabel}>
+                            {step === 0 ? 'FEED MY FAMILY' : step === 1 ? 'STEP 1 OF 2' : 'STEP 2 OF 2'}
+                        </Text>
+                        <Text style={styles.heading}>
+                            {step === 0 ? 'Your Location' : step === 1 ? 'Feed My Family' : 'Your Planting Plan'}
+                        </Text>
                     </View>
-                )}
+                    {selectedIds.size > 0 && step === 1 && (
+                        <View style={styles.countBadge}>
+                            <Text style={styles.countBadgeText}>{selectedIds.size}</Text>
+                        </View>
+                    )}
+                </View>
             </View>
 
             {/* ── Animated body ── */}
@@ -733,7 +888,7 @@ export default function FamilyPlannerScreen({ navigation }) {
                                 style={styles.searchInput}
                                 value={searchQuery}
                                 onChangeText={setSearchQuery}
-                                placeholder="Search crops\u2026"
+                                placeholder="Search crops..."
                                 placeholderTextColor={Colors.mutedText}
                                 clearButtonMode="while-editing"
                             />
@@ -807,11 +962,18 @@ export default function FamilyPlannerScreen({ navigation }) {
                 {/* ════════ STEP 2 — REPORT ════════ */}
                 {step === 2 && planResult && (
                     <View style={{ flex: 1 }}>
-                        {/* Summary bar */}
+                        {/* Summary bar + Reset button */}
                         <View style={styles.summaryBar}>
-                            <SumStat label="Crops" value={planResult.supported.length} />
+                            <SumStat label="Crops" value={planResult.supported.filter(c => !excludedCropIds.has(c.cropId)).length} />
                             <View style={styles.summaryDivider} />
                             <SumStat label="Family of" value={planResult.familySize} />
+                            <View style={{ flex: 1 }} />
+                            <TouchableOpacity
+                                style={styles.resetBtn}
+                                onPress={() => setNewPlanModalVisible(true)}
+                            >
+                                <Text style={styles.resetBtnText}>↺ Start Over</Text>
+                            </TouchableOpacity>
                         </View>
 
 
@@ -878,16 +1040,16 @@ export default function FamilyPlannerScreen({ navigation }) {
                         {/* Cards / Calendar / Seed List / Yield Forecast based on view mode */}
                         {viewMode === 'calendar' ? (
                             <ActionCalendar
-                                crops={planResult.supported}
+                                crops={planResult.supported.filter(c => !excludedCropIds.has(c.cropId))}
                                 gardenProfile={gardenProfile?._raw ?? null}
                             />
                         ) : viewMode === 'seeds' ? (
-                            <SeedShoppingList crops={planResult.supported} />
+                            <SeedShoppingList crops={planResult.supported.filter(c => !excludedCropIds.has(c.cropId))} />
                         ) : viewMode === 'yield' ? (
-                            <YieldForecast crops={planResult.supported} gardenProfile={gardenProfile} />
+                            <YieldForecast crops={planResult.supported.filter(c => !excludedCropIds.has(c.cropId))} gardenProfile={gardenProfile} />
                         ) : (
                         (() => {
-                            const cards = planResult.supported;
+                            const cards = planResult.supported.filter(c => !excludedCropIds.has(c.cropId));
                             const rows = [];
                             for (let i = 0; i < cards.length; i += numColumns) {
                                 rows.push(cards.slice(i, i + numColumns));
@@ -933,6 +1095,17 @@ export default function FamilyPlannerScreen({ navigation }) {
                         })()
                         )}
 
+                        {/* ── Undo toast — appears for 4s after crop deletion ── */}
+                        {undoItem && (
+                            <View style={styles.undoToast}>
+                                <Text style={styles.undoToastText}>
+                                    Removed <Text style={{ fontWeight: '700' }}>{undoItem.name}</Text>
+                                </Text>
+                                <TouchableOpacity onPress={undoDelete} style={styles.undoBtn}>
+                                    <Text style={styles.undoBtnText}>Undo</Text>
+                                </TouchableOpacity>
+                            </View>
+                        )}
 
                         {/* Report footer — edit + dual export */}
                         <View style={styles.footer}>
@@ -992,12 +1165,71 @@ export default function FamilyPlannerScreen({ navigation }) {
                     setUpgradeModalVisible(false);
                     if (upgradeBlockedBy === 'csaSize') {
                         // Send them to Market Farm mode
-                        navigation.navigate('ModeSelect');
+                                navigation.navigate('ModeSelect');
                     } else {
                         navigation.navigate('Pricing');
                     }
                 }}
             />
+
+            {/* ── New Plan / Upsell Modal ── */}
+            {newPlanModalVisible && (
+                <View style={styles.newPlanScrim}>
+                    <View style={styles.newPlanSheet}>
+                        <Text style={styles.newPlanTitle}>Want a New Plan?</Text>
+                        <Text style={styles.newPlanSub}>
+                            Free accounts include one family garden plan. Here's what you can do:
+                        </Text>
+
+                        {/* Option 1 — Replace (free, destructive) */}
+                        <TouchableOpacity
+                            style={styles.newPlanOption}
+                            onPress={() => { setNewPlanModalVisible(false); handleReset(); }}
+                        >
+                            <Text style={styles.newPlanOptionIcon}>🔄</Text>
+                            <View style={{ flex: 1 }}>
+                                <Text style={styles.newPlanOptionTitle}>Replace Current Plan</Text>
+                                <Text style={styles.newPlanOptionSub}>Start fresh — your existing plan will be cleared.</Text>
+                            </View>
+                        </TouchableOpacity>
+
+                        {/* Option 2 — Market Farmer */}
+                        <TouchableOpacity
+                            style={styles.newPlanOption}
+                            onPress={() => { setNewPlanModalVisible(false); navigation.navigate('RoleSelect'); }}
+                        >
+                            <Text style={styles.newPlanOptionIcon}>🚜</Text>
+                            <View style={{ flex: 1 }}>
+                                <Text style={styles.newPlanOptionTitle}>Go to Market Farmer</Text>
+                                <Text style={styles.newPlanOptionSub}>Managing multiple plots or growing commercially? Built for you.</Text>
+                            </View>
+                        </TouchableOpacity>
+
+                        {/* Option 3 — Multi-Family Pro */}
+                        <TouchableOpacity
+                            style={[styles.newPlanOption, styles.newPlanOptionPro]}
+                            onPress={() => { setNewPlanModalVisible(false); navigation.navigate('Pricing'); }}
+                        >
+                            <Text style={styles.newPlanOptionIcon}>👨‍👩‍👧</Text>
+                            <View style={{ flex: 1 }}>
+                                <Text style={[styles.newPlanOptionTitle, { color: Colors.primaryGreen }]}>
+                                    Multi-Family Plans{'  '}<Text style={styles.proBadge}>PRO</Text>
+                                </Text>
+                                <Text style={styles.newPlanOptionSub}>
+                                    Save and share up to 5 garden plans — perfect for family, friends, or a neighborhood group.
+                                </Text>
+                            </View>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                            style={styles.newPlanCancel}
+                            onPress={() => setNewPlanModalVisible(false)}
+                        >
+                            <Text style={styles.newPlanCancelText}>Cancel</Text>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            )}
 
         </View>
     );
@@ -1044,6 +1276,7 @@ const styles = StyleSheet.create({
         alignItems: 'center', justifyContent: 'center',
     },
     countBadgeText: { color: Colors.white, fontSize: Typography.xs, fontWeight: Typography.bold },
+    headerRight: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
 
     // ── Body ──────────────────────────────────────────────────────────────────
     body: { flex: 1 },
@@ -1297,8 +1530,99 @@ const styles = StyleSheet.create({
         backgroundColor: Colors.primaryGreen,
         paddingVertical: Spacing.sm,
         paddingHorizontal: Spacing.md,
-        justifyContent: 'space-around',
         alignItems: 'center',
+    },
+    resetBtn: {
+        paddingVertical: 5,
+        paddingHorizontal: 10,
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.35)',
+        backgroundColor: 'rgba(255,255,255,0.12)',
+        marginLeft: 8,
+    },
+    resetBtnText: {
+        fontSize: 11,
+        fontWeight: '700',
+        color: Colors.cream,
+        opacity: 0.9,
+    },
+
+    // ── New Plan / Upsell Modal ────────────────────────────────────────────
+    newPlanScrim: {
+        position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+        backgroundColor: 'rgba(0,0,0,0.52)',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 999,
+        padding: 24,
+    },
+    newPlanSheet: {
+        backgroundColor: '#fff',
+        borderRadius: 18,
+        padding: 22,
+        width: '100%',
+        maxWidth: 440,
+    },
+    newPlanTitle: {
+        fontSize: Typography.lg,
+        fontWeight: Typography.bold,
+        color: Colors.primaryGreen,
+        marginBottom: 6,
+        textAlign: 'center',
+    },
+    newPlanSub: {
+        fontSize: Typography.sm,
+        color: Colors.mutedText,
+        textAlign: 'center',
+        marginBottom: 18,
+        lineHeight: 18,
+    },
+    newPlanOption: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        gap: 12,
+        padding: 14,
+        borderRadius: 12,
+        backgroundColor: '#F7F7F5',
+        marginBottom: 10,
+    },
+    newPlanOptionPro: {
+        borderWidth: 1.5,
+        borderColor: Colors.primaryGreen + '55',
+        backgroundColor: 'rgba(45,79,30,0.04)',
+    },
+    newPlanOptionIcon: { fontSize: 24, marginTop: 1 },
+    newPlanOptionTitle: {
+        fontSize: Typography.sm,
+        fontWeight: Typography.bold,
+        color: Colors.darkText,
+        marginBottom: 3,
+    },
+    newPlanOptionSub: {
+        fontSize: 12,
+        color: Colors.mutedText,
+        lineHeight: 16,
+    },
+    proBadge: {
+        fontSize: 10,
+        fontWeight: '800',
+        color: '#fff',
+        backgroundColor: Colors.primaryGreen,
+        borderRadius: 4,
+        paddingHorizontal: 5,
+        paddingVertical: 2,
+        overflow: 'hidden',
+    },
+    newPlanCancel: {
+        alignItems: 'center',
+        paddingVertical: 10,
+        marginTop: 4,
+    },
+    newPlanCancelText: {
+        fontSize: Typography.sm,
+        color: Colors.mutedText,
+        textDecorationLine: 'underline',
     },
     sumStat: { alignItems: 'center', flex: 1 },
     sumStatValue: {
@@ -1436,6 +1760,54 @@ const styles = StyleSheet.create({
 
 
     // ── Good Luck banner ──────────────────────────────────────────────────────
+    // ── Crop delete overlay button ────────────────────────────────────────
+    cropDeleteBtn: {
+        position: 'absolute',
+        top: 4,
+        right: 4,
+        width: 22,
+        height: 22,
+        borderRadius: 11,
+        backgroundColor: 'rgba(180,40,30,0.82)',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 10,
+    },
+    cropDeleteBtnText: {
+        color: '#fff',
+        fontSize: 14,
+        fontWeight: '700',
+        lineHeight: 18,
+    },
+    // ── Undo toast ─────────────────────────────────────────────────────────
+    undoToast: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: Colors.darkText,
+        borderRadius: 10,
+        paddingVertical: 10,
+        paddingHorizontal: 16,
+        marginHorizontal: Spacing.lg,
+        marginBottom: 6,
+        gap: 12,
+    },
+    undoToastText: {
+        flex: 1,
+        fontSize: Typography.sm,
+        color: '#fff',
+    },
+    undoBtn: {
+        paddingVertical: 4,
+        paddingHorizontal: 10,
+        borderRadius: 6,
+        backgroundColor: Colors.primaryGreen,
+    },
+    undoBtnText: {
+        fontSize: Typography.sm,
+        fontWeight: '700',
+        color: '#fff',
+    },
+
     goodLuck: {
         alignItems: 'center',
         paddingVertical: Spacing.xl,

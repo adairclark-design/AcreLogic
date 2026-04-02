@@ -17,10 +17,13 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
     View, Text, StyleSheet, ScrollView, TouchableOpacity,
-    ActivityIndicator, Platform, Clipboard,
+    ActivityIndicator, Platform, Clipboard, Image,
 } from 'react-native';
 import { Colors, Typography, Spacing, Radius, Shadows } from '../theme';
 import cropData from '../data/crops.json';
+import CROP_IMAGES from '../data/cropImages';
+import GlobalNavBar from '../components/GlobalNavBar';
+import { loadBlocks, loadBlockBeds } from '../services/persistence';
 
 const CROPS_MAP = Object.fromEntries(cropData.crops.map(c => [c.id, c]));
 
@@ -47,10 +50,17 @@ function daysDiff(isoDate) {
 
 /**
  * recommendPackets
- * Maps raw oz needed → human-friendly packet recommendation.
- * Packet sizes: ¼oz, ½oz, 1oz, ¼lb (4oz), ½lb (8oz)
+ * Maps raw oz or seed count needed → human-friendly packet recommendation.
  */
-function recommendPackets(totalOz) {
+function recommendPackets(item) {
+    if (item.reqType === 'seeds') {
+        const meta = CROPS_MAP[item.cropId];
+        const pktSize = meta?.seeds_per_packet || 100;
+        const pkts = Math.ceil(item.totalSeeds / pktSize);
+        return `${pkts} × ${pktSize}-seed pkt`;
+    }
+
+    const totalOz = item.totalOz;
     if (totalOz <= 0) return null;
     if (totalOz <= 0.2) return '1 × ¼oz packet';
     if (totalOz <= 0.5) return '1 × ½oz packet';
@@ -61,57 +71,73 @@ function recommendPackets(totalOz) {
     return `${Math.ceil(totalOz / 8)} × ½lb bags`;
 }
 
-function fmtOz(oz) {
+function fmtReq(item) {
+    if (item.reqType === 'seeds') return `${item.totalSeeds} seeds`;
+    const oz = item.totalOz;
     if (oz < 0.5) return `${Math.round(oz * 100) / 100}oz`;
     return `${Math.round(oz * 10) / 10}oz`;
 }
 
 // ─── Seed aggregation ─────────────────────────────────────────────────────────
 
-function computeSeedOz(succession, bedLengthFt = 30) {
+function computeSeedReq(succession, bedLengthFt = 30) {
     const meta = CROPS_MAP[succession.crop_id];
     if (!meta) return null;
+    
+    // Check coverage and evaluate total bed length used
     const fraction = succession.coverage_fraction ?? 1.0;
-    const rows = meta.rows_per_30in_bed ?? 4;
+    const rows = meta.rows_per_30in_bed ?? 1;
     const linearFt = bedLengthFt * rows * fraction;
-    const ozPer100ft = meta.seed_oz_per_100ft ?? 0;
-    if (!ozPer100ft) return null;
-    const rawOz = (linearFt / 100) * ozPer100ft;
+    
+    // Standard buffer math
     const buffer = 1 + (meta.loss_buffer_pct ?? 20) / 100;
-    return rawOz * buffer;
+
+    // Transplant or Seed Count explicitly (Feed My Family equivalence)
+    if (meta.seed_type === 'TP' || !meta.seed_oz_per_100ft) {
+        const spacingIn = meta.in_row_spacing_in || 12; // fallback
+        const plantCount = (linearFt * 12) / spacingIn;
+        const germRate = meta.germination_rate_pct ?? 0.8;
+        const totalSeedsNeeded = Math.ceil((plantCount * buffer) / germRate);
+        return { type: 'seeds', val: totalSeedsNeeded };
+    }
+
+    // Direct Seed (DS) ounces
+    const ozPer100ft = meta.seed_oz_per_100ft;
+    const rawOz = (linearFt / 100) * ozPer100ft;
+    return { type: 'oz', val: rawOz * buffer };
 }
 
-async function buildSeedList() {
+async function buildSeedList(planId) {
     try {
         if (typeof localStorage === 'undefined') return [];
         const seedMap = {};
 
-        // Source 1 — 8-Bed Workspace flat store
+        // Source 1 — 8-Bed Workspace flat store (Legacy / Default Dashboard)
         const flatRaw = localStorage.getItem('acrelogic_bed_successions');
         if (flatRaw) {
             try {
                 const flatData = JSON.parse(flatRaw);
                 for (const [bedNum, successions] of Object.entries(flatData)) {
                     if (Array.isArray(successions))
-                        accumulateSeeds(seedMap, successions, bedNum, '8-Bed Plan');
+                        accumulateSeeds(seedMap, successions, bedNum, '8-Bed Plan', 30);
                 }
             } catch {}
         }
 
         // Source 2 — Farm Designer per-block stores
-        for (let i = 0; i < localStorage.length; i++) {
-            const key = localStorage.key(i);
-            if (!key?.startsWith('acrelogic_block_beds_')) continue;
-            const shortName = key.replace('acrelogic_block_beds_', '').slice(0, 8);
-            try {
-                const raw = localStorage.getItem(key);
-                if (!raw) continue;
-                const blockData = JSON.parse(raw);
-                for (const [bedNum, successions] of Object.entries(blockData)) {
-                    if (Array.isArray(successions))
-                        accumulateSeeds(seedMap, successions, bedNum, `Block ${shortName}`);
+        const allBlocks = loadBlocks();
+        const activeBlocks = planId ? allBlocks.filter(b => b?.planId === planId) : allBlocks;
+        
+        for (const block of activeBlocks) {
+            const blockData = loadBlockBeds(block.id);
+            if (!blockData) continue;
+            const bedLengthFt = block.bedLengthFt || block.blockLengthFt || 30; // fallback per block
+            
+            for (const [bedNum, data] of Object.entries(blockData)) {
+                if (data && Array.isArray(data.successions)) {
+                    accumulateSeeds(seedMap, data.successions, bedNum, block.name || `Block ${block.id.slice(0, 4)}`, bedLengthFt);
                 }
-            } catch {}
+            }
         }
 
         return Object.values(seedMap).sort((a, b) =>
@@ -123,14 +149,14 @@ async function buildSeedList() {
     }
 }
 
-function accumulateSeeds(seedMap, successions, bedNum, sourceName) {
+function accumulateSeeds(seedMap, successions, bedNum, sourceName, bedLengthFt) {
     for (const s of successions) {
         if (!s.crop_id) continue;
         const meta = CROPS_MAP[s.crop_id];
         if (!meta) continue;
 
-        const oz = computeSeedOz(s, 30);
-        if (!oz || oz <= 0) continue;
+        const req = computeSeedReq(s, bedLengthFt);
+        if (!req || req.val <= 0) continue;
 
         if (!seedMap[s.crop_id]) {
             seedMap[s.crop_id] = {
@@ -140,7 +166,9 @@ function accumulateSeeds(seedMap, successions, bedNum, sourceName) {
                 emoji: meta.emoji,
                 category: meta.category,
                 seedType: meta.seed_type ?? 'DS',
+                reqType: req.type,
                 totalOz: 0,
+                totalSeeds: 0,
                 earliestBuyDate: null,
                 earliestDate: null,
                 plantingDays: [],
@@ -148,7 +176,8 @@ function accumulateSeeds(seedMap, successions, bedNum, sourceName) {
         }
 
         const entry = seedMap[s.crop_id];
-        entry.totalOz += oz;
+        if (req.type === 'oz') entry.totalOz += req.val;
+        else entry.totalSeeds += req.val;
 
         const weeksOut = meta.seed_type === 'TP' ? 6 : 2;
         const plantDate = s.start_date ? new Date(s.start_date + 'T12:00:00') : null;
@@ -165,7 +194,7 @@ function accumulateSeeds(seedMap, successions, bedNum, sourceName) {
             entry.plantingDays.push({
                 date: s.start_date,
                 buyDate: buyIso,
-                oz,
+                req: { type: req.type, val: req.val }, // raw requirement for this single block/bed combo
                 blockName: sourceName,
                 bedNum,
             });
@@ -194,15 +223,19 @@ function groupIntoWaves(seedList) {
 
 // ─── Copy formatter ───────────────────────────────────────────────────────────
 
-function formatOrderForCopy(waves, totalCrops, totalOzAll) {
+function formatOrderForCopy(waves, totalCrops, totalOzAll, totalSeedsAll) {
     const now = new Date().toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
-    const lines = [`=== SEED ORDER — ${now} ===`, `${totalCrops} crops · ${Math.round(totalOzAll * 10) / 10}oz total`, ''];
+    const ozStr = totalOzAll > 0 ? `${Math.round(totalOzAll * 10) / 10}oz` : '';
+    const seedStr = totalSeedsAll > 0 ? `${totalSeedsAll} seeds` : '';
+    const divider = (totalOzAll > 0 && totalSeedsAll > 0) ? ' + ' : '';
+    
+    const lines = [`=== SEED ORDER — ${now} ===`, `${totalCrops} crops · ${ozStr}${divider}${seedStr} total`, ''];
     for (const wave of waves) {
         lines.push(`ORDER WAVE — ${wave.monthLabel.toUpperCase()}`);
         for (const item of wave.items) {
-            const pkt = recommendPackets(item.totalOz) ?? '';
+            const pkt = recommendPackets(item) ?? '';
             const tp = item.seedType === 'TP' ? ' [TP]' : '';
-            lines.push(`• ${item.name}${item.variety ? ` (${item.variety})` : ''}${tp} — ${fmtOz(item.totalOz)} — ${pkt}`);
+            lines.push(`• ${item.name}${item.variety ? ` (${item.variety})` : ''}${tp} — ${fmtReq(item)} — ${pkt}`);
         }
         lines.push('');
     }
@@ -235,7 +268,7 @@ const WaveHeader = ({ label, waveNum, itemCount }) => (
 );
 
 const SeedRow = ({ item, expanded, onToggle }) => {
-    const packets = recommendPackets(item.totalOz);
+    const packets = recommendPackets(item);
     const daysUntilBuy = item.earliestBuyDate ? daysDiff(item.earliestBuyDate) : null;
     const isUrgent = daysUntilBuy !== null && daysUntilBuy <= 14;
 
@@ -245,7 +278,16 @@ const SeedRow = ({ item, expanded, onToggle }) => {
             onPress={onToggle}
             activeOpacity={0.8}
         >
-            <Text style={styles.seedEmoji}>{item.emoji}</Text>
+            {/* Crop image — falls back to emoji if not in CROP_IMAGES */}
+            {CROP_IMAGES[item.cropId] ? (
+                <Image
+                    source={CROP_IMAGES[item.cropId]}
+                    style={styles.seedImage}
+                    resizeMode="cover"
+                />
+            ) : (
+                <Text style={styles.seedEmoji}>{item.emoji}</Text>
+            )}
             <View style={styles.seedInfo}>
                 <View style={styles.seedTopRow}>
                     <Text style={styles.seedName}>{item.name}</Text>
@@ -256,9 +298,9 @@ const SeedRow = ({ item, expanded, onToggle }) => {
                 {item.variety && <Text style={styles.seedVariety}>{item.variety}</Text>}
 
                 <View style={styles.seedMetaRow}>
-                    {/* Oz needed */}
+                    {/* Requirement needed */}
                     <View style={styles.seedOzBadge}>
-                        <Text style={styles.seedOzText}>🌱 {fmtOz(item.totalOz)}</Text>
+                        <Text style={styles.seedOzText}>🌱 {fmtReq(item)}</Text>
                     </View>
                     {/* Packet recommendation */}
                     {packets && (
@@ -286,7 +328,9 @@ const SeedRow = ({ item, expanded, onToggle }) => {
                                 <View key={i} style={styles.breakdownRow}>
                                     <Text style={styles.breakdownDate}>{fmtDate(pd.date)}</Text>
                                     <Text style={styles.breakdownBlock}>{pd.blockName} · Bed {pd.bedNum}</Text>
-                                    <Text style={styles.breakdownOz}>{fmtOz(pd.oz)}</Text>
+                                    <Text style={styles.breakdownOz}>
+                                        {pd.req.type === 'seeds' ? `${pd.req.val} seeds` : fmtReq({reqType: 'oz', totalOz: pd.req.val})}
+                                    </Text>
                                 </View>
                             ))}
                     </View>
@@ -300,21 +344,22 @@ const SeedRow = ({ item, expanded, onToggle }) => {
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 
 export default function SeedOrderScreen({ navigation, route }) {
-    const { farmProfile } = route?.params ?? {};
+    const { farmProfile, planId } = route?.params ?? {};
     const [seedList, setSeedList] = useState([]);
     const [loading, setLoading] = useState(true);
     const [expandedId, setExpandedId] = useState(null);
     const [copied, setCopied] = useState(false);
 
     useEffect(() => {
-        buildSeedList().then(list => {
+        buildSeedList(planId).then(list => {
             setSeedList(list);
             setLoading(false);
         });
-    }, []);
+    }, [planId]);
 
     const totalCrops = seedList.length;
     const totalOzAll = seedList.reduce((s, r) => s + r.totalOz, 0);
+    const totalSeedsAll = seedList.reduce((s, r) => s + r.totalSeeds, 0);
     const waves = groupIntoWaves(seedList);
 
     const today = new Date().toISOString().slice(0, 10);
@@ -323,7 +368,7 @@ export default function SeedOrderScreen({ navigation, route }) {
     );
 
     const handleCopy = useCallback(() => {
-        const text = formatOrderForCopy(waves, totalCrops, totalOzAll);
+        const text = formatOrderForCopy(waves, totalCrops, totalOzAll, totalSeedsAll);
         if (Platform.OS === 'web') {
             navigator.clipboard?.writeText(text).catch(() => {});
         } else {
@@ -331,25 +376,23 @@ export default function SeedOrderScreen({ navigation, route }) {
         }
         setCopied(true);
         setTimeout(() => setCopied(false), 3000);
-    }, [waves, totalCrops, totalOzAll]);
+    }, [waves, totalCrops, totalOzAll, totalSeedsAll]);
 
     return (
         <View style={styles.container}>
-            {/* Header */}
-            <View style={styles.header}>
-                <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
-                    <Text style={styles.backArrow}>‹</Text>
-                </TouchableOpacity>
-                <View style={{ flex: 1 }}>
-                    <Text style={styles.stepLabel}>FARM TOOLS</Text>
-                    <Text style={styles.heading}>Seed Order List</Text>
-                </View>
-                {seedList.length > 0 && (
-                    <TouchableOpacity style={[styles.copyBtn, copied && styles.copyBtnDone]} onPress={handleCopy}>
-                        <Text style={styles.copyBtnText}>{copied ? '✓ Copied' : '📋 Copy'}</Text>
-                    </TouchableOpacity>
-                )}
-            </View>
+            <GlobalNavBar 
+                navigation={navigation} 
+                farmProfile={farmProfile} 
+                planId={planId} 
+                activeRoute="SeedOrder" 
+                rightAction={
+                    seedList.length > 0 ? (
+                        <TouchableOpacity style={[styles.copyBtn, copied && styles.copyBtnDone]} onPress={handleCopy}>
+                            <Text style={styles.copyBtnText}>{copied ? '✓ Copied' : '📋 Copy'}</Text>
+                        </TouchableOpacity>
+                    ) : null
+                }
+            />
 
             {/* Summary bar */}
             <View style={styles.summaryBar}>
@@ -357,9 +400,14 @@ export default function SeedOrderScreen({ navigation, route }) {
                     <Text style={styles.summaryChipNum}>{totalCrops}</Text>
                     <Text style={styles.summaryChipLabel}>Crops</Text>
                 </View>
-                <View style={styles.summaryChip}>
-                    <Text style={styles.summaryChipNum}>{Math.round(totalOzAll * 10) / 10}oz</Text>
-                    <Text style={styles.summaryChipLabel}>Total Seed</Text>
+                <View style={[styles.summaryChip, { flex: 1.5 }]}>
+                    <Text style={[styles.summaryChipNum, { fontSize: Typography.xs }]}>
+                        {totalOzAll > 0 ? `${Math.round(totalOzAll * 10) / 10}oz` : ''}
+                        {totalOzAll > 0 && totalSeedsAll > 0 ? ' / ' : ''}
+                        {totalSeedsAll > 0 ? `${totalSeedsAll} seeds` : ''}
+                        {totalOzAll === 0 && totalSeedsAll === 0 ? '0' : ''}
+                    </Text>
+                    <Text style={styles.summaryChipLabel}>Total Needed</Text>
                 </View>
                 <View style={styles.summaryChip}>
                     <Text style={styles.summaryChipNum}>{waves.length}</Text>
@@ -393,6 +441,7 @@ export default function SeedOrderScreen({ navigation, route }) {
                 <ScrollView
                     contentContainerStyle={styles.listContent}
                     showsVerticalScrollIndicator={false}
+                    style={Platform.OS === 'web' ? { overflowY: 'scroll' } : undefined}
                 >
                     {/* Need-soon banner */}
                     <NeedSoonBanner urgentItems={urgentItems} />
@@ -428,7 +477,11 @@ export default function SeedOrderScreen({ navigation, route }) {
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-    container: { flex: 1, backgroundColor: '#F0EDE6' },
+    container: {
+        flex: 1,
+        backgroundColor: '#F0EDE6',
+        ...Platform.select({ web: { maxHeight: '100vh', overflow: 'hidden' } }),
+    },
 
     header: {
         flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
@@ -490,35 +543,42 @@ const styles = StyleSheet.create({
 
     // ── Seed Row ──────────────────────────────────────────────────────────────
     seedRow: {
-        backgroundColor: '#FAFAF7', borderRadius: Radius.md, padding: Spacing.md,
-        flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.sm,
+        backgroundColor: '#FAFAF7', borderRadius: Radius.md, padding: 10,
+        flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.xs,
         borderWidth: 1, borderColor: 'rgba(45,79,30,0.1)',
     },
     seedRowUrgent: { borderColor: '#F59E0B', backgroundColor: '#FFFBF0' },
-    seedEmoji: { fontSize: 26, marginTop: 2 },
-    seedInfo: { flex: 1, gap: 4 },
-    seedTopRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
-    seedName: { fontSize: Typography.base, fontWeight: '800', color: Colors.primaryGreen, flex: 1 },
+    seedEmoji: { fontSize: 22, marginTop: 1 },
+    seedImage: {
+        width: 32,
+        height: 32,
+        borderRadius: 4,
+        marginTop: 2,
+        backgroundColor: 'rgba(45,79,30,0.06)',
+    },
+    seedInfo: { flex: 1, gap: 2 },
+    seedTopRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+    seedName: { fontSize: 14, fontWeight: '800', color: Colors.primaryGreen, flex: 1 },
     seedTypeBadge: {
         backgroundColor: 'rgba(45,79,30,0.12)', paddingHorizontal: 7,
         paddingVertical: 2, borderRadius: Radius.full,
     },
     seedTypeBadgeTP: { backgroundColor: 'rgba(100,60,200,0.13)' },
     seedTypeText: { fontSize: 9, fontWeight: '800', color: Colors.primaryGreen },
-    seedVariety: { fontSize: Typography.xs, color: Colors.mutedText },
-    seedMetaRow: { flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginTop: 2 },
+    seedVariety: { fontSize: 10, color: Colors.mutedText },
+    seedMetaRow: { flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginTop: 1 },
 
-    seedOzBadge: { backgroundColor: Colors.primaryGreen, paddingHorizontal: 8, paddingVertical: 3, borderRadius: Radius.full },
-    seedOzText: { fontSize: 10, fontWeight: '800', color: Colors.cream },
+    seedOzBadge: { backgroundColor: Colors.primaryGreen, paddingHorizontal: 6, paddingVertical: 2, borderRadius: Radius.sm },
+    seedOzText: { fontSize: 9, fontWeight: '800', color: Colors.cream },
 
     packetBadge: {
-        backgroundColor: 'rgba(255,165,0,0.12)', paddingHorizontal: 8,
-        paddingVertical: 3, borderRadius: Radius.full,
+        backgroundColor: 'rgba(255,165,0,0.12)', paddingHorizontal: 6,
+        paddingVertical: 2, borderRadius: Radius.sm,
         borderWidth: 1, borderColor: 'rgba(255,165,0,0.3)',
     },
-    packetText: { fontSize: 10, fontWeight: '700', color: '#92400E' },
+    packetText: { fontSize: 9, fontWeight: '700', color: '#92400E' },
 
-    seedBuyDate: { fontSize: 10, color: Colors.mutedText, fontWeight: '600', marginTop: 1 },
+    seedBuyDate: { fontSize: 9, color: Colors.mutedText, fontWeight: '600', marginTop: 1 },
     seedBuyDateUrgent: { color: '#B45309', fontWeight: '800' },
 
     chevron: { fontSize: 18, color: Colors.mutedText, marginTop: 2 },

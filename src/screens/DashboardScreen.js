@@ -27,6 +27,7 @@ import { loadSavedPlan } from '../services/persistence';
 import { generateFullCalendar } from '../services/calendarGenerator';
 import { getActiveCrops } from '../services/growthStageService';
 import CROP_IMAGES from '../data/cropImages';
+import HomeLogoButton from '../components/HomeLogoButton';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const ACTION_META = {
@@ -35,6 +36,7 @@ const ACTION_META = {
     transplant:   { icon: '🌿', color: '#FFF9C4', textColor: '#F57F17', label: 'Transplant' },
     harvest:      { icon: '✂️', color: '#FFCCBC', textColor: '#BF360C', label: 'Harvest' },
     cover_crop:   { icon: '🌾', color: '#F5CBA7', textColor: '#784212', label: 'Cover Crop' },
+    scout:        { icon: '🔎', color: '#E3F2FD', textColor: '#0D47A1', label: 'Scout' },
     DEFAULT:      { icon: '📋', color: '#E0E0E0', textColor: '#424242', label: 'Task' },
 };
 
@@ -123,7 +125,7 @@ function WeekTaskPill({ entry }) {
             <Text style={s.weekPillIcon}>{meta.icon}</Text>
             <View style={s.weekPillBody}>
                 <Text style={[s.weekPillLabel, { color: meta.textColor }]}>{meta.label}</Text>
-                <Text style={s.weekPillCrop} numberOfLines={1}>{entry.crop_name}</Text>
+                <Text style={s.weekPillCrop} numberOfLines={1}>{entry.scout_title ? entry.scout_title : entry.crop_name}</Text>
                 <Text style={s.weekPillDate}>{formatDayLabel(entry.entry_date)} · Bed {entry.bed_number}</Text>
             </View>
         </View>
@@ -137,7 +139,7 @@ function ComingUpRow({ entry }) {
         <View style={s.upRow}>
             <Text style={s.upIcon}>{meta.icon}</Text>
             <View style={s.upBody}>
-                <Text style={s.upCrop} numberOfLines={1}>{entry.crop_name}</Text>
+                <Text style={s.upCrop} numberOfLines={1}>{entry.scout_title ? entry.scout_title : entry.crop_name}</Text>
                 <Text style={s.upSub}>{meta.label} · Bed {entry.bed_number}</Text>
             </View>
             <Text style={s.upDate}>{formatShortDate(entry.entry_date)}</Text>
@@ -166,33 +168,88 @@ export default function DashboardScreen({ navigation, route }) {
     const fadeAnim = useRef(new Animated.Value(0)).current;
 
     useFocusEffect(useCallback(() => {
-        // If not passed as params, try loading from persistence
-        let fp = farmProfile;
-        let bs = bedSuccessions;
-        if (!fp || !bs) {
+        // ── Step 1: Get farm profile ─────────────────────────────────────────
+        // Try route params first, then fall back to localStorage
+        let fp = route?.params?.farmProfile ?? null;
+        if (!fp) {
             const saved = loadSavedPlan();
-            if (saved) {
-                fp = saved.farmProfile;
-                bs = saved.bedSuccessions;
-                setFarmProfile(fp);
-                setBedSuccessions(bs);
+            fp = saved?.farmProfile ?? null;
+        }
+        setFarmProfile(fp);
+
+        // ── Step 2: Aggregate successions from ALL data sources ───────────────
+        // Source A: 8-Bed Workspace flat store (acrelogic_bed_successions)
+        const merged = {};   // { [virtualBedKey]: [...successions] }
+        let virtualBedCounter = 1;
+
+        try {
+            // Source A: route params (passed from HeroScreen)
+            const paramSuccessions = route?.params?.bedSuccessions ?? null;
+            if (paramSuccessions && Object.keys(paramSuccessions).length > 0) {
+                for (const [num, succs] of Object.entries(paramSuccessions)) {
+                    if (Array.isArray(succs) && succs.length > 0) {
+                        merged[String(virtualBedCounter++)] = succs;
+                    }
+                }
             }
+
+            if (typeof localStorage !== 'undefined') {
+                // Source B: 8-bed workspace store (flat successions array)
+                const flatRaw = localStorage.getItem('acrelogic_bed_successions');
+                if (flatRaw) {
+                    const flatData = JSON.parse(flatRaw);
+                    for (const [, succs] of Object.entries(flatData)) {
+                        if (Array.isArray(succs) && succs.length > 0) {
+                            merged[String(virtualBedCounter++)] = succs;
+                        }
+                    }
+                }
+
+                // Source C: Farm Designer per-block bed stores
+                for (let i = 0; i < localStorage.length; i++) {
+                    const key = localStorage.key(i);
+                    if (!key?.startsWith('acrelogic_block_beds_')) continue;
+                    try {
+                        const raw = localStorage.getItem(key);
+                        if (!raw) continue;
+                        const blockData = JSON.parse(raw);
+                        for (const [, value] of Object.entries(blockData)) {
+                            // v1 shape: array of successions directly
+                            // v2 shape: { successions: [...], shelterType }
+                            const succs = Array.isArray(value)
+                                ? value
+                                : (value?.successions ?? []);
+                            if (succs.length > 0) {
+                                merged[String(virtualBedCounter++)] = succs;
+                            }
+                        }
+                    } catch { /* skip corrupt block */ }
+                }
+            }
+        } catch (e) {
+            console.warn('[Dashboard] Error reading successions:', e);
         }
 
-        if (!bs || Object.keys(bs).length === 0) {
+        setBedSuccessions(merged);
+
+        // ── Step 3: Nothing to show? ─────────────────────────────────────────
+        if (Object.keys(merged).length === 0) {
             setLoading(false);
+            setCalendarEntries([]);
+            setActiveCrops([]);
             return;
         }
 
+        // ── Step 4: Build calendar + active crops from merged data ────────────
         (async () => {
             try {
-                const allBeds = Object.entries(bs).map(([num, succs]) => ({
+                const allBeds = Object.entries(merged).map(([num, succs]) => ({
                     bed_number: parseInt(num),
                     successions: succs ?? [],
                 }));
                 const entries = await generateFullCalendar(allBeds, fp);
                 setCalendarEntries(entries);
-                setActiveCrops(getActiveCrops(bs, today()));
+                setActiveCrops(getActiveCrops(merged, today()));
             } catch (e) {
                 console.warn('[Dashboard] Calendar generation failed:', e);
             } finally {
@@ -223,6 +280,8 @@ export default function DashboardScreen({ navigation, route }) {
     const todayLabel = now.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
 
     // ── Render ────────────────────────────────────────────────────────────────
+    const hasAnyCrops = Object.keys(bedSuccessions ?? {}).length > 0;
+
     return (
         <View style={s.container}>
             {/* Header */}
@@ -230,18 +289,16 @@ export default function DashboardScreen({ navigation, route }) {
                 <TouchableOpacity style={s.backBtn} onPress={() => navigation.goBack()}>
                     <Text style={s.backArrow}>‹</Text>
                 </TouchableOpacity>
+                <HomeLogoButton navigation={navigation} />
                 <View style={s.headerText}>
                     <Text style={s.headerSub}>{todayLabel.toUpperCase()}</Text>
                     <Text style={s.headerTitle} numberOfLines={1}>{farmName}</Text>
                 </View>
                 <TouchableOpacity
                     style={s.workspaceBtn}
-                    onPress={() => navigation.navigate('BedWorkspace', {
-                        farmProfile,
-                        bedSuccessions,
-                    })}
+                    onPress={() => navigation.navigate('FarmDesigner', { farmProfile })}
                 >
-                    <Text style={s.workspaceBtnText}>Beds →</Text>
+                    <Text style={s.workspaceBtnText}>My Farm →</Text>
                 </TouchableOpacity>
             </View>
 
@@ -256,6 +313,23 @@ export default function DashboardScreen({ navigation, route }) {
                 {loading ? (
                     <View style={s.loadingWrap}>
                         <Text style={s.loadingText}>Loading your season…</Text>
+                    </View>
+                ) : !hasAnyCrops ? (
+                    /* ── Full empty state ─────────────────────────────────────── */
+                    <View style={s.fullEmpty}>
+                        <Text style={s.fullEmptyIcon}>🌾</Text>
+                        <Text style={s.fullEmptyTitle}>No crops planned yet</Text>
+                        <Text style={s.fullEmptyBody}>
+                            Head to Beds to start scheduling your successions.
+                            Once you've added crops, your dashboard will show this week's
+                            tasks, what's growing, and what's coming up.
+                        </Text>
+                        <TouchableOpacity
+                            style={s.fullEmptyBtn}
+                            onPress={() => navigation.navigate('ModeSelector')}
+                        >
+                            <Text style={s.fullEmptyBtnText}>Start Planning →</Text>
+                        </TouchableOpacity>
                     </View>
                 ) : (
                     <>
@@ -278,7 +352,7 @@ export default function DashboardScreen({ navigation, route }) {
                                 ))}
                             </View>
                         ) : (
-                            <EmptySection icon="🌱" message="No crops currently in-ground. Head to Bed Workspace to start planting!" />
+                            <EmptySection icon="🌱" message="No crops currently in-ground. Check your succession start dates!" />
                         )}
 
                         {/* ── Section 3: Coming Up ─────────────────────────── */}
@@ -291,10 +365,28 @@ export default function DashboardScreen({ navigation, route }) {
                             </>
                         )}
 
+                        {/* ── Section 4: Garden Health Hub ── */}
+                        <View style={{ marginHorizontal: Spacing.md, marginTop: Spacing.lg }}>
+                            <TouchableOpacity 
+                                style={{ backgroundColor: '#FCFCFA', padding: 16, borderRadius: Radius.md, borderWidth: 1, borderColor: 'rgba(45,79,30,0.1)', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', ...Shadows.card }}
+                                onPress={() => navigation.navigate('GardenHealth', { farmProfile, bedSuccessions })}
+                            >
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                                    <Text style={{ fontSize: 24 }}>🩺</Text>
+                                    <View>
+                                        <Text style={{ fontSize: 13, fontWeight: '800', color: Colors.primaryGreen }}>Garden Health Hub</Text>
+                                        <Text style={{ fontSize: 11, color: Colors.mutedText, marginTop: 2 }}>Pest & disease risks for active crops</Text>
+                                    </View>
+                                </View>
+                                <Text style={{ fontSize: 16, color: Colors.primaryGreen, fontWeight: '800' }}>→</Text>
+                            </TouchableOpacity>
+                        </View>
+
                         {/* ── Footer spacer ── */}
                         <View style={{ height: 40 }} />
                     </>
                 )}
+
             </Animated.ScrollView>
         </View>
     );
@@ -413,4 +505,18 @@ const s = StyleSheet.create({
     // Loading
     loadingWrap: { marginTop: 80, alignItems: 'center' },
     loadingText: { fontSize: 14, color: Colors.mutedText },
+
+    // Full empty state (no crops at all)
+    fullEmpty: {
+        flex: 1, alignItems: 'center', justifyContent: 'center',
+        paddingHorizontal: Spacing.xl, paddingTop: 60, gap: Spacing.md,
+    },
+    fullEmptyIcon: { fontSize: 56 },
+    fullEmptyTitle: { fontSize: 22, fontWeight: '800', color: Colors.primaryGreen, textAlign: 'center' },
+    fullEmptyBody: { fontSize: 14, color: Colors.mutedText, textAlign: 'center', lineHeight: 22 },
+    fullEmptyBtn: {
+        marginTop: Spacing.sm, backgroundColor: Colors.primaryGreen,
+        paddingVertical: 14, paddingHorizontal: 28, borderRadius: Radius.full,
+    },
+    fullEmptyBtnText: { color: Colors.cream, fontWeight: '800', fontSize: 15 },
 });

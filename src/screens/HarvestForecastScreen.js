@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import { Colors, Typography, Spacing, Radius, Shadows } from '../theme';
 import { calculateFarmYield, buildMonthlyForecast } from '../services/yieldCalculator';
+import HomeLogoButton from '../components/HomeLogoButton';
 
 const MONTH_COLORS = [
     '#C8E6C9', '#B2EBF2', '#FFF9C4', '#FFCCBC',
@@ -76,6 +77,7 @@ export default function HarvestForecastScreen({ navigation, route }) {
                 <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
                     <Text style={styles.backArrow}>‹</Text>
                 </TouchableOpacity>
+                <HomeLogoButton navigation={navigation} />
                 <View style={styles.headerText}>
                     <Text style={styles.stepLabel}>PLAN SUMMARY</Text>
                     <Text style={styles.heading}>Harvest Forecast</Text>

@@ -16,7 +16,7 @@
  */
 
 // ─── Hard CSA ceiling — above this is a commercial CSA, push to Market Farm ───
-export const HARD_FAMILY_CAP = 60;
+export const HARD_FAMILY_CAP = 35;
 
 // ─── Tier identifiers ─────────────────────────────────────────────────────────
 export const TIER = {
@@ -29,7 +29,7 @@ export const TIER = {
 export const LIMITS = {
     [TIER.FREE]: {
         // "Just Planting Info" flow
-        maxFamilyMembers:   4,      // > 4 → suggest upgrade
+        maxFamilyMembers:   HARD_FAMILY_CAP, // capped at 35 -> suggest Market Farm
         maxCropsSelected:   10,     // > 10 → suggest upgrade
 
         // "Build Garden Space" flow
@@ -46,7 +46,7 @@ export const LIMITS = {
 
     [TIER.BASIC]: {
         // Raised limits for a low-cost monthly subscriber
-        maxFamilyMembers:   10,
+        maxFamilyMembers:   HARD_FAMILY_CAP,
         maxCropsSelected:   25,
         maxAcrePlot:        1 / 4,   // 0.25 acres
         maxSqFtPlot:        10890,
@@ -241,12 +241,12 @@ export function getUpgradePrompt(blockedBy) {
     const prompts = {
         csaSize: {
             headline: 'Sounds like you\'re running a CSA! 🌱',
-            body: 'At 60+ people, Feed My Family isn\'t the right tool — you need Market Farm mode. It\'s built for commercial-scale planning, revenue tracking, and succession scheduling.',
+            body: `At ${HARD_FAMILY_CAP}+ people, Feed My Family isn\'t the right tool — you need Market Farm mode. It\'s built for commercial-scale planning, revenue tracking, and succession scheduling.`,
             cta: 'Switch to Market Farm',
         },
         familySize: {
             headline: 'Growing for a bigger family?',
-            body: 'Upgrade to Premium to plan for up to 60 people, plus unlock AI garden layout, succession scheduling, and full market tools.',
+            body: `Upgrade to Premium to plan for up to ${HARD_FAMILY_CAP} people, plus unlock AI garden layout, succession scheduling, and full market tools.`,
             cta: 'See Premium Plans',
         },
         cropCount: {

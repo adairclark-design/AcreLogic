@@ -55,6 +55,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import MegaMenuBar from '../components/MegaMenuBar';
 import SharedCropCard from '../components/SharedCropCard';
 import LocationStep from '../components/LocationStep';
+import HomeLogoButton from '../components/HomeLogoButton';
 
 const ALL_CROPS = CROPS_DATA.crops ?? [];
 const PLANTABLE_CROPS = ALL_CROPS; // Cover Crops included — visible under the "Cover Crops" MegaMenuBar tab
@@ -187,7 +188,11 @@ function ReportCard({ item }) {
                     <FactRow icon="🗓" label="In-ground window" value={`${item.inGroundDays} days total`} />
                 ) : null}
                 {item.seedType ? (
-                    <FactRow icon="🌱" label="Starting method" value={item.seedType === 'DS' ? 'Direct Sow' : 'Transplant'} />
+                    <FactRow 
+                        icon="🌱" 
+                        label="Starting method" 
+                        value={item.recommendBuyStarts ? 'Buy Starts' : (item.seedType === 'DS' ? 'Direct Sow' : 'Start Indoors')} 
+                    />
                 ) : null}
                 {/* Calendar dates — Ideal vs Today scenario */}
                 {item.indoorSeedDate ? (
@@ -197,7 +202,7 @@ function ReportCard({ item }) {
                             label="Start seeds indoors"
                             value={
                                 item.todayIndoorDate && item.todayIndoorDate !== item.indoorSeedDate
-                                    ? `${item.indoorSeedDate}  ·  (${item.todayIndoorDate} if starting today)`
+                                    ? `${item.indoorSeedDate}  ·  (${item.todayIndoorDate})`
                                     : item.indoorSeedDate
                             }
                             highlight
@@ -208,7 +213,7 @@ function ReportCard({ item }) {
                                 label="Transplant date"
                                 value={
                                     item.todayTransplantDate && item.todayTransplantDate !== item.transplantDate
-                                        ? `${item.transplantDate}  ·  (${item.todayTransplantDate} if starting today)`
+                                        ? `${item.transplantDate}  ·  (${item.todayTransplantDate})`
                                         : item.transplantDate
                                 }
                                 highlight={!item.isLateStart}
@@ -227,7 +232,7 @@ function ReportCard({ item }) {
                         label="Direct sow date"
                         value={
                             item.todayDirectSowDate && item.todayDirectSowDate !== item.directSowDate
-                                ? `Ideal: ${item.directSowDate}  ·  (${item.isLateStart ? 'past ideal — ' : ''}${item.todayDirectSowDate} if starting today)`
+                                ? `${item.directSowDate}  ·  (${item.todayDirectSowDate})`
                                 : item.directSowDate
                         }
                         highlight={!item.isLateStart}
@@ -238,6 +243,9 @@ function ReportCard({ item }) {
                 ) : null}
                 {item.inRowSpacingIn ? (
                     <FactRow icon="↔️" label="In-row spacing" value={`${item.inRowSpacingIn}"`} />
+                ) : null}
+                {item.rowSpacingIn ? (
+                    <FactRow icon="↕️" label="Row spacing" value={`${item.rowSpacingIn}"`} />
                 ) : null}
                 {item.harvestStyle ? (
                     <FactRow icon="✂️" label="Harvest" value={item.harvestStyle} />
@@ -776,6 +784,7 @@ export default function GardenSpacePlannerScreen({ navigation }) {
                 <TouchableOpacity style={styles.backBtn} onPress={handleBack}>
                     <Text style={styles.backArrow}>‹</Text>
                 </TouchableOpacity>
+                <HomeLogoButton navigation={navigation} />
                 <View style={{ flex: 1 }}>
                     <Text style={styles.stepLabel}>{HEADINGS[step].step}</Text>
                     <Text style={styles.heading}>{HEADINGS[step].title}</Text>
@@ -1366,10 +1375,6 @@ export default function GardenSpacePlannerScreen({ navigation }) {
                         {/* Summary bar */}
                         <View style={styles.summaryBar}>
                             <SummaryCell label="Crops" value={planResult.supported.length} />
-                            <View style={styles.sumDiv} />
-                            <SummaryCell label="Row-ft" value={planResult.totalLinearFt} />
-                            <View style={styles.sumDiv} />
-                            <SummaryCell label="Beds" value={spaceResult?.totalBeds ?? '—'} />
                             <View style={styles.sumDiv} />
                             <SummaryCell label="Family" value={familySize} />
                         </View>

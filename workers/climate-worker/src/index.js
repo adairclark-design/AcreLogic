@@ -174,8 +174,8 @@ async function handleFarmProfile(url, env, ctx) {
     lat = parseFloat(lat);
     lon = parseFloat(lon);
 
-    // Step 2: Cache key (1km grid)
-    const cacheKey = `fp_${lat.toFixed(2)}_${lon.toFixed(2)}`;
+    // Step 2: Cache key (1km grid) — fp3 busts stale zone-Unknown entries from fp2
+    const cacheKey = `fp3_${lat.toFixed(2)}_${lon.toFixed(2)}`;
     if (env.ACRELOGIC_CACHE) {
         const cached = await env.ACRELOGIC_CACHE.get(cacheKey);
         if (cached) {
@@ -184,12 +184,17 @@ async function handleFarmProfile(url, env, ctx) {
     }
 
     // Step 3: Fetch all data in parallel
+    let zipCode = null;
+    if (address && /^\d{5}$/.test(address.trim())) {
+        zipCode = address.trim();
+    }
+
     const [frostData, soilData, elevationData, solarData, zoneData] = await Promise.allSettled([
         getFrostDates(lat, lon),
         getSoilType(lat, lon),
         getElevation(lat, lon),
         getSolarClass(lat, lon),
-        getHardinessZone(lat, lon),
+        getHardinessZone(lat, lon, zipCode),
     ]);
 
     const frost = frostData.status === 'fulfilled' ? frostData.value : {};
@@ -223,8 +228,16 @@ async function handleFarmProfile(url, env, ctx) {
 
 // ─── Geocoding (Nominatim) ────────────────────────────────────────────────────
 async function geocodeAddress(address) {
-    const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(address)}&format=json&limit=1`;
-    const res = await fetch(url, {
+    const trimmed = address.trim();
+    const isUsZip = /^\d{5}$/.test(trimmed);
+
+    // For US zip codes, use the structured postalcode query with countrycodes=us
+    // This prevents Nominatim from returning foreign locations for US zips.
+    const queryUrl = isUsZip
+        ? `https://nominatim.openstreetmap.org/search?postalcode=${encodeURIComponent(trimmed)}&countrycodes=us&format=json&limit=1`
+        : `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(trimmed)}&format=json&limit=1`;
+
+    const res = await fetch(queryUrl, {
         headers: { 'User-Agent': 'AcreLogic/1.0 (farm planning app)' },
     });
     const data = await res.json();
@@ -234,7 +247,7 @@ async function geocodeAddress(address) {
 
 // ─── Frost Dates (Open-Meteo Historical) ─────────────────────────────────────
 async function getFrostDates(lat, lon) {
-    // Use last 10 years of historical daily min temp to compute average frost dates
+    // Use last 10 years of historical daily min temp to compute frost dates
     const currentYear = new Date().getFullYear();
     const startYear = currentYear - 10;
     const url = `https://archive-api.open-meteo.com/v1/archive?latitude=${lat}&longitude=${lon}&start_date=${startYear}-01-01&end_date=${currentYear - 1}-12-31&daily=temperature_2m_min&temperature_unit=fahrenheit&timezone=auto`;
@@ -250,36 +263,34 @@ async function getFrostDates(lat, lon) {
     const dates = data.daily.time;
 
     // For each year, find last spring frost (<= 32°F) and first fall frost (<= 32°F)
-    const yearlyFrostFreeDays = [];
     const yearlyLastFrost = [];
     const yearlyFirstFrost = [];
 
     for (let year = startYear; year < currentYear; year++) {
-        const yearDates = dates.filter(d => d.startsWith(`${year}`));
-        const yearTemps = yearDates.map((d, i) => ({ date: d, temp: temps[dates.indexOf(d)] }));
+        const yearIndices = [];
+        for (let i = 0; i < dates.length; i++) {
+            if (dates[i].startsWith(`${year}`)) yearIndices.push(i);
+        }
+        const yearData = yearIndices.map(i => ({ date: dates[i], temp: temps[i] }));
 
-        const springFrosts = yearTemps.filter(r => {
+        const springFrosts = yearData.filter(r => {
             const month = parseInt(r.date.split('-')[1]);
             return month <= 6 && r.temp !== null && r.temp <= 32;
         });
-        const fallFrosts = yearTemps.filter(r => {
+        const fallFrosts = yearData.filter(r => {
             const month = parseInt(r.date.split('-')[1]);
             return month >= 7 && r.temp !== null && r.temp <= 32;
         });
 
         if (springFrosts.length > 0 && fallFrosts.length > 0) {
-            const lastSpring = springFrosts[springFrosts.length - 1].date;
-            const firstFall = fallFrosts[0].date;
-            const diffDays = Math.round(
-                (new Date(firstFall) - new Date(lastSpring)) / (1000 * 60 * 60 * 24)
-            );
-            yearlyFrostFreeDays.push(diffDays);
-            yearlyLastFrost.push(lastSpring);
-            yearlyFirstFrost.push(firstFall);
+            yearlyLastFrost.push(springFrosts[springFrosts.length - 1].date);
+            yearlyFirstFrost.push(fallFrosts[0].date);
         }
+        // Years with NO spring frost are legitimately frost-free — skip them
+        // This prevents mild years from pulling the average too early
     }
 
-    if (yearlyFrostFreeDays.length === 0) {
+    if (yearlyLastFrost.length === 0) {
         // Frost-free region (tropical/mild) — return full year
         return {
             frost_free_days: 365,
@@ -288,42 +299,125 @@ async function getFrostDates(lat, lon) {
         };
     }
 
-    // Average across years
-    const avgFrostFreeDays = Math.round(
-        yearlyFrostFreeDays.reduce((s, v) => s + v, 0) / yearlyFrostFreeDays.length
+    // Use 75th percentile for last spring frost (conservative / safe-to-plant date)
+    // i.e. "by this date, 75% of years had their last frost" — safer than the mean
+    const p75LastFrost = percentileMonthDay(yearlyLastFrost, 0.75, currentYear);
+    // Use 25th percentile for first fall frost (conservative — earlier side)
+    const p25FirstFrost = percentileMonthDay(yearlyFirstFrost, 0.25, currentYear);
+
+    // Frost-free days from the percentile dates
+    const frostFreeDays = Math.round(
+        (new Date(`${p25FirstFrost}T00:00:00`) - new Date(`${p75LastFrost}T00:00:00`)) / (1000 * 60 * 60 * 24)
     );
 
-    // Average last frost date (use month/day average)
-    const avgLastFrost = averageMonthDay(yearlyLastFrost, currentYear);
-    const avgFirstFrost = averageMonthDay(yearlyFirstFrost, currentYear);
-
     return {
-        frost_free_days: avgFrostFreeDays,
-        last_frost_date: avgLastFrost,
-        first_frost_date: avgFirstFrost,
+        frost_free_days: Math.max(0, frostFreeDays),
+        last_frost_date: p75LastFrost,
+        first_frost_date: p25FirstFrost,
     };
 }
 
-function averageMonthDay(dateStrings, year) {
-    // Average month and day across multiple years
-    const monthDays = dateStrings.map(d => {
+/**
+ * Given an array of date strings (YYYY-MM-DD from different years),
+ * return a percentile date (using only month+day, mapped to a shared year).
+ *
+ * percentile = 0.75 → 75th percentile (conservative last-frost date)
+ */
+function percentileMonthDay(dateStrings, percentile, year) {
+    // Convert to day-of-year for sorting
+    const doys = dateStrings.map(d => {
         const parts = d.split('-');
-        return { month: parseInt(parts[1]), day: parseInt(parts[2]) };
+        const month = parseInt(parts[1]);
+        const day = parseInt(parts[2]);
+        // Approximate day-of-year (ignoring leap year differences, close enough)
+        return (month - 1) * 30.44 + day;
     });
-    const avgMonth = Math.round(monthDays.reduce((s, v) => s + v.month, 0) / monthDays.length);
-    const avgDay = Math.round(monthDays.reduce((s, v) => s + v.day, 0) / monthDays.length);
-    const m = String(avgMonth).padStart(2, '0');
-    const d = String(avgDay).padStart(2, '0');
-    return `${year}-${m}-${d}`;
+
+    doys.sort((a, b) => a - b);
+    const idx = Math.min(Math.floor(doys.length * percentile), doys.length - 1);
+    const targetDoy = doys[idx];
+
+    // Convert day-of-year back to month/day
+    const month = Math.min(12, Math.max(1, Math.ceil(targetDoy / 30.44)));
+    const day = Math.min(28, Math.max(1, Math.round(targetDoy - (month - 1) * 30.44)));
+    const m = String(month).padStart(2, '0');
+    const dd = String(day).padStart(2, '0');
+    return `${year}-${m}-${dd}`;
 }
 
 // ─── USDA Hardiness Zone ──────────────────────────────────────────────────────
-async function getHardinessZone(lat, lon) {
-    const url = `https://phzmapi.org/${lat}/${lon}.json`;
-    const res = await fetch(url);
-    if (!res.ok) return { zone: 'Unknown' };
+
+/**
+ * Approximate USDA hardiness zone from lat/lon using mean annual minimum temp.
+ * Uses a simplified model based on latitude bands. Better than returning 'Unknown'.
+ */
+function approximateZoneFromLatLon(lat, lon) {
+    // Very rough approximation based on US latitude/longitude bands
+    // Pacific coast (west of -115°) runs warmer than inland at same lat
+    const isPacificCoast = lon < -115;
+    const isSouthernUS = lat < 32;
+    const isDeepSouth = lat < 28;
+
+    if (isDeepSouth) return '10a';          // FL/TX gulf coast
+    if (isSouthernUS && isPacificCoast) return '9b'; // Southern CA
+    if (isSouthernUS) return '8b';           // TX/GA/SC
+    if (lat < 36 && isPacificCoast) return '9a'; // Central CA
+    if (lat < 36) return '7b';              // Mid-South (NC/TN/OK)
+    if (lat < 38 && isPacificCoast) return '9a';
+    if (lat < 38) return '6b';             // VA/KY/MO
+    if (lat < 40 && isPacificCoast) return '8b'; // OR coast
+    if (lat < 40) return '6a';             // OH/PA/NJ
+    if (lat < 42 && isPacificCoast) return '8a'; // OR/WA coast
+    if (lat < 42) return '5b';             // NY/MI/WI
+    if (lat < 44 && isPacificCoast) return '8a';
+    if (lat < 44) return '5a';             // VT/MN
+    if (lat < 46 && isPacificCoast) return '7b'; // WA coast
+    if (lat < 46) return '4b';             // Northern MN/ME
+    if (lat < 48 && isPacificCoast) return '7a'; // WA coast
+    if (lat < 48) return '4a';
+    return '3b';                            // Canada border areas
+}
+
+async function getZipCode(lat, lon) {
+    const url = `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json`;
+    const res = await fetch(url, { headers: { 'User-Agent': 'AcreLogic/1.0 (farm planning app)' } });
+    if (!res.ok) return null;
     const data = await res.json();
-    return { zone: data.zone ?? 'Unknown' };
+    return data?.address?.postcode?.split('-')[0] ?? null;
+}
+
+async function getHardinessZone(lat, lon, knownZip = null) {
+    let zipCode = knownZip;
+    if (!zipCode) {
+        zipCode = await getZipCode(lat, lon);
+    }
+
+    // Try phzmapi.org (free USDA hardiness zone API by zip code)
+    if (zipCode && /^\d{5}$/.test(zipCode)) {
+        try {
+            const url = `https://phzmapi.org/${zipCode}.json`;
+            const res = await fetch(url);
+            if (res.ok) {
+                const text = await res.text();
+                // phzmapi.org sometimes returns XML error pages — guard against that
+                if (text.trim().startsWith('{')) {
+                    const data = JSON.parse(text);
+                    if (data.zone && data.zone !== 'Unknown') {
+                        return { zone: data.zone };
+                    }
+                }
+            }
+        } catch (_) { }
+    }
+
+    // Fallback: derive zone from lat/lon using a simplified latitude model
+    // Only applies to locations within the continental US (lat 24-49, lon -125 to -66)
+    const isContiguousUS = lat >= 24 && lat <= 50 && lon >= -125 && lon <= -66;
+    if (isContiguousUS) {
+        return { zone: approximateZoneFromLatLon(lat, lon) };
+    }
+
+    return { zone: 'Unknown' };
 }
 
 // ─── USDA Web Soil Survey ─────────────────────────────────────────────────────

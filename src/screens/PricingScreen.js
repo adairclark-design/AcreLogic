@@ -19,6 +19,7 @@ import {
     useWindowDimensions,
 } from 'react-native';
 import { Colors, Typography, Spacing, Radius, Shadows } from '../theme';
+import HomeLogoButton from '../components/HomeLogoButton';
 
 // ─── Stripe Payment Links ─────────────────────────────────────────────────────
 const STRIPE_BASIC_URL       = 'https://buy.stripe.com/test_9B66oH5b18Rr3Mcgpt0sU04';
@@ -378,6 +379,7 @@ export default function PricingScreen({ navigation }) {
                 <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
                     <Text style={styles.backArrow}>‹</Text>
                 </TouchableOpacity>
+                <HomeLogoButton navigation={navigation} />
                 <Animated.View style={[styles.headerContent, { opacity: headerFade, transform: [{ translateY: headerSlide }] }]}>
                     <Text style={styles.superLabel}>ACRELOGIC</Text>
                     <Text style={styles.headerTitle}>Choose Your Plan</Text>

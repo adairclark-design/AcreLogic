@@ -22,6 +22,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { Colors, Typography, Spacing, Radius, Shadows } from '../theme';
 import { loadBlocks, saveBlock } from '../services/persistence';
 import { totalPlantedSqFt } from '../services/farmUtils';
+import HomeLogoButton from '../components/HomeLogoButton';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const PX_PER_FT = 3;        // baseline: 3 canvas pixels per real foot
@@ -535,6 +536,7 @@ export default function FarmCanvasScreen({ navigation, route }) {
                 <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
                     <Text style={styles.backArrow}>‹</Text>
                 </TouchableOpacity>
+                <HomeLogoButton navigation={navigation} />
                 <View style={{ flex: 1 }}>
                     <Text style={styles.stepLabel}>FARM DESIGNER</Text>
                     <Text style={styles.heading}>Visual Layout</Text>

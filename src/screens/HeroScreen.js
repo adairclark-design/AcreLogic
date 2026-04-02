@@ -6,7 +6,7 @@ import {
     TouchableOpacity,
     Dimensions,
     Animated,
-    ImageBackground,
+    Image,
     StatusBar,
     Platform,
 } from 'react-native';
@@ -38,53 +38,24 @@ export default function HeroScreen({ navigation }) {
     const slideAnim = useRef(new Animated.Value(40)).current;
     const buttonScale = useRef(new Animated.Value(1)).current;
 
-    const [savedPlan, setSavedPlan] = useState(null);
-    const [saveLabel, setSaveLabel] = useState(null);
-
     useEffect(() => {
-        // On web, check for a previously saved plan
-        if (Platform.OS === 'web' && hasSavedPlan()) {
-            const plan = loadSavedPlan();
-            if (plan) {
-                setSavedPlan(plan);
-                setSaveLabel(savedAgoLabel());
-            }
-        }
-
         Animated.parallel([
             Animated.timing(fadeAnim, { toValue: 1, duration: 1200, useNativeDriver: true }),
             Animated.spring(slideAnim, { toValue: 0, tension: 40, friction: 8, useNativeDriver: true }),
         ]).start();
     }, []);
 
-    const handlePressIn = () => {
-        Animated.spring(buttonScale, { toValue: 0.96, useNativeDriver: true }).start();
-    };
-    const handlePressOut = () => {
-        Animated.spring(buttonScale, { toValue: 1, friction: 3, useNativeDriver: true }).start();
-    };
-
-    const handleContinue = () => {
-        if (!savedPlan) return;
-        const { farmProfile, bedSuccessions, planId } = savedPlan;
-        // Jump straight to BedWorkspace with the restored data
-        navigation.navigate('BedWorkspace', {
-            farmProfile,
-            planId: planId ?? null,
-            bedSuccessions,
-        });
-    };
-
-    const handleViewDashboard = () => {
-        if (!savedPlan) return;
-        const { farmProfile, bedSuccessions } = savedPlan;
-        navigation.navigate('Dashboard', { farmProfile, bedSuccessions });
-    };
-
-    const handleStartFresh = () => {
+    const handleStartNewPlan = () => {
+        // Always wipe existing data so the new plan starts fresh
         clearSavedPlan();
-        setSavedPlan(null);
-        navigation.navigate('ModeSelector');
+        navigation.navigate('RoleSelector');
+    };
+
+    const handleLogIn = () => {
+        // No automatic jumping! The user wants to see the full flow every time.
+        // Therefore, we just proceed to the RoleSelector where they can click "Market Farm".
+        // Localstorage is preserved so their existing Farm layout loads when they reach the farm sheet.
+        navigation.navigate('RoleSelector');
     };
 
     return (
@@ -92,105 +63,74 @@ export default function HeroScreen({ navigation }) {
             <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
 
             {/* Background hero image */}
-            <ImageBackground
-                source={require('../../assets/hero-garden.jpg')}
+            <Image
+                source={require('../../assets/hero-garden-v3.png')}
                 style={styles.bg}
                 resizeMode="cover"
+            />
+
+            {/* Top vignette */}
+            <LinearGradient
+                colors={['rgba(20,38,12,0.82)', 'rgba(20,38,12,0.0)']}
+                style={styles.vignetteTop}
+            />
+
+            {/* Bottom vignette */}
+            <LinearGradient
+                colors={['rgba(20,38,12,0.0)', 'rgba(20,38,12,0.88)']}
+                style={styles.vignetteBottom}
+            />
+
+            {/* Content */}
+            <Animated.View
+                style={[
+                    styles.content,
+                    { opacity: fadeAnim, transform: [{ translateY: slideAnim }] },
+                ]}
             >
-                {/* Top vignette */}
-                <LinearGradient
-                    colors={['rgba(20,38,12,0.82)', 'rgba(20,38,12,0.0)']}
-                    style={styles.vignetteTop}
-                />
+                {/* Logo — upper area */}
+                <View style={styles.logoArea}>
+                    <AcreLogicLogo />
+                </View>
 
-                {/* Bottom vignette */}
-                <LinearGradient
-                    colors={['rgba(20,38,12,0.0)', 'rgba(20,38,12,0.88)']}
-                    style={styles.vignetteBottom}
-                />
+                {/* CTA area — lower area */}
+                <View style={styles.ctaArea}>
 
-                {/* Content */}
-                <Animated.View
-                    style={[
-                        styles.content,
-                        { opacity: fadeAnim, transform: [{ translateY: slideAnim }] },
-                    ]}
-                >
-                    {/* Logo — upper area */}
-                    <View style={styles.logoArea}>
-                        <AcreLogicLogo />
-                    </View>
+                    {/* ── Begin / entry CTA ── */}
+                    <Animated.View style={[styles.ctaStack, { transform: [{ scale: buttonScale }] }]}>
+                        {/* Primary: Start New Plan */}
+                        <TouchableOpacity
+                            style={[styles.createAccountBtn, Shadows.button]}
+                            onPress={handleStartNewPlan}
+                            onPressIn={() => Animated.spring(buttonScale, { toValue: 0.96, useNativeDriver: true }).start()}
+                            onPressOut={() => Animated.spring(buttonScale, { toValue: 1, friction: 3, useNativeDriver: true }).start()}
+                            activeOpacity={0.9}
+                        >
+                            <Text style={styles.createAccountText}>START NEW PLAN</Text>
+                        </TouchableOpacity>
 
-                    {/* CTA area — lower area */}
-                    <View style={styles.ctaArea}>
+                        {/* Secondary: Log In */}
+                        <TouchableOpacity
+                            style={styles.loginBtn}
+                            onPress={handleLogIn}
+                            activeOpacity={0.75}
+                        >
+                            <Text style={styles.loginBtnText}>LOG IN</Text>
+                        </TouchableOpacity>
+                    </Animated.View>
 
-                        {/* ── Continue saved plan banner ── */}
-                        {savedPlan && (
-                            <View style={[styles.savedBanner, Shadows.card]}>
-                                <View style={styles.savedBannerContent}>
-                                    <Text style={styles.savedBannerTitle}>Plan in Progress</Text>
-                                    <Text style={styles.savedBannerFarm} numberOfLines={1}>
-                                        {savedPlan.farmProfile?.farmName ?? savedPlan.farmProfile?.address ?? 'Your Farm'}
-                                    </Text>
-                                    {saveLabel && (
-                                        <Text style={styles.savedBannerTime}>{saveLabel}</Text>
-                                    )}
-                                </View>
-                                <View style={styles.savedBannerActions}>
-                                     <TouchableOpacity
-                                        style={styles.dashboardBtn}
-                                        onPress={handleViewDashboard}
-                                        activeOpacity={0.85}
-                                    >
-                                        <Text style={styles.dashboardBtnText}>📊 Dashboard</Text>
-                                    </TouchableOpacity>
-                                    <TouchableOpacity
-                                        style={styles.continueBtn}
-                                        onPress={handleContinue}
-                                        activeOpacity={0.85}
-                                    >
-                                        <Text style={styles.continueBtnText}>Beds →</Text>
-                                    </TouchableOpacity>
-                                    <TouchableOpacity
-                                        style={styles.discardBtn}
-                                        onPress={handleStartFresh}
-                                        activeOpacity={0.75}
-                                    >
-                                        <Text style={styles.discardBtnText}>Start Fresh</Text>
-                                    </TouchableOpacity>
-                                </View>
-                            </View>
-                        )}
-
-                        {/* ── Begin button ── */}
-                        <Animated.View style={{ transform: [{ scale: buttonScale }] }}>
-                            <TouchableOpacity
-                                style={[styles.beginButton, Shadows.button]}
-                                onPress={() => navigation.navigate('ModeSelector')}
-                                onPressIn={handlePressIn}
-                                onPressOut={handlePressOut}
-                                activeOpacity={0.9}
-                            >
-                                <Text style={styles.beginButtonText}>
-                                    {savedPlan ? 'START NEW PLAN' : 'BEGIN HERE'}
-                                </Text>
-                            </TouchableOpacity>
-                        </Animated.View>
-
-
-                    </View>
-                </Animated.View>
-            </ImageBackground>
+                </View>
+            </Animated.View>
         </View>
     );
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-    container: { flex: 1, backgroundColor: Colors.primaryGreen },
-    bg: { flex: 1, width, height },
-    vignetteTop: { position: 'absolute', top: 0, left: 0, right: 0, height: height * 0.38, zIndex: 1 },
-    vignetteBottom: { position: 'absolute', bottom: 0, left: 0, right: 0, height: height * 0.52, zIndex: 1 },
+    container: { flex: 1, backgroundColor: Colors.primaryGreen, ...Platform.select({ web: { height: '100dvh' } }) },
+    bg: { position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, width: '100%', height: '100%' },
+    vignetteTop: { position: 'absolute', top: 0, left: 0, right: 0, height: '38%', zIndex: 1 },
+    vignetteBottom: { position: 'absolute', bottom: 0, left: 0, right: 0, height: '52%', zIndex: 1 },
     content: {
         flex: 1, zIndex: 2, justifyContent: 'space-between',
         paddingTop: 60, paddingBottom: 64, paddingHorizontal: Spacing.xl,
@@ -210,46 +150,30 @@ const styles = StyleSheet.create({
     // ── CTA ───────────────────────────────────────────────────────────────────
     ctaArea: { alignItems: 'center', gap: Spacing.md },
 
-    // ── Saved Plan Banner ──────────────────────────────────────────────────────
-    savedBanner: {
-        width: '100%',
-        backgroundColor: 'rgba(245,240,225,0.97)',
-        borderRadius: Radius.lg,
-        padding: Spacing.md,
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: Spacing.sm,
-        borderWidth: 1,
-        borderColor: 'rgba(45,79,30,0.15)',
-    },
-    savedBannerContent: { flex: 1, gap: 2 },
-    savedBannerTitle: { fontSize: 10, fontWeight: Typography.bold, color: Colors.primaryGreen, letterSpacing: 1, textTransform: 'uppercase' },
-    savedBannerFarm: { fontSize: Typography.sm, fontWeight: Typography.semiBold, color: Colors.darkText },
-    savedBannerTime: { fontSize: 10, color: Colors.mutedText },
-    savedBannerActions: { gap: Spacing.xs },
-    continueBtn: {
-        backgroundColor: Colors.primaryGreen,
-        paddingVertical: 8, paddingHorizontal: 14,
-        borderRadius: Radius.sm, alignItems: 'center',
-    },
-    continueBtnText: { color: Colors.cream, fontSize: Typography.xs, fontWeight: Typography.bold },
-    dashboardBtn: {
-        backgroundColor: 'rgba(45,79,30,0.12)',
-        paddingVertical: 8, paddingHorizontal: 12,
-        borderRadius: Radius.sm, alignItems: 'center',
-        borderWidth: 1.5, borderColor: 'rgba(45,79,30,0.2)',
-    },
-    dashboardBtnText: { color: Colors.primaryGreen, fontSize: Typography.xs, fontWeight: Typography.bold },
-    discardBtn: { alignItems: 'center', paddingVertical: 4 },
-    discardBtnText: { fontSize: 10, color: Colors.mutedText, textDecorationLine: 'underline' },
+    // ── CTA Stack ────────────────────────────────────────────────────────────
+    ctaStack: { alignItems: 'center', gap: Spacing.md, width: '100%' },
 
-    // ── Begin Button ──────────────────────────────────────────────────────────
-    beginButton: {
-        backgroundColor: Colors.primaryGreen, paddingVertical: 18, paddingHorizontal: 64,
-        borderRadius: 15, borderWidth: 1.5, borderColor: 'rgba(245,245,220,0.25)',
+    createAccountBtn: {
+        backgroundColor: Colors.primaryGreen,
+        paddingVertical: 18, paddingHorizontal: 52,
+        borderRadius: 15, borderWidth: 1.5,
+        borderColor: 'rgba(245,245,220,0.25)',
         alignItems: 'center', minWidth: width * 0.72,
     },
-    beginButtonText: { color: Colors.cream, fontSize: Typography.md, fontWeight: Typography.bold, letterSpacing: 3.5 },
+    createAccountText: {
+        color: Colors.cream, fontSize: Typography.md,
+        fontWeight: Typography.bold, letterSpacing: 2.5,
+    },
 
+    loginBtn: {
+        paddingVertical: 12, paddingHorizontal: 32,
+        borderRadius: 12, borderWidth: 1.5,
+        borderColor: 'rgba(245,245,220,0.35)',
+        alignItems: 'center', minWidth: width * 0.72,
+    },
+    loginBtnText: {
+        color: 'rgba(245,245,220,0.88)', fontSize: Typography.sm,
+        fontWeight: '700', letterSpacing: 2,
+    },
 
 });

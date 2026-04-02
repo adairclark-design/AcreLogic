@@ -18,6 +18,7 @@ import { getCropsForWindow } from '../services/database';
 import { loadRotationHistory } from '../services/persistence';
 import { getSuccessionCandidatesRanked } from '../services/successionEngine';
 import BedNoteModal from '../components/BedNoteModal';
+import HomeLogoButton from '../components/HomeLogoButton';
 
 // SCREEN_W still used for crop card sizing
 const SCREEN_W = Dimensions.get('window').width;
@@ -316,11 +317,8 @@ export default function BedMapScreen({ navigation, route }) {
     }, [availableCrops, handleBedPress]);
 
     const handleSaveAndBack = useCallback(() => {
-        navigation.navigate('BedWorkspace', {
+        navigation.navigate('FarmDesigner', {
             farmProfile,
-            bedSuccessions,
-            planId: route?.params?.planId,
-            selectedCropIds: route?.params?.selectedCropIds ?? [],
         });
     }, [bedSuccessions, farmProfile, navigation, route]);
 
@@ -339,6 +337,7 @@ export default function BedMapScreen({ navigation, route }) {
                 <TouchableOpacity style={styles.backBtn} onPress={handleSaveAndBack}>
                     <Text style={styles.backArrow}>‹</Text>
                 </TouchableOpacity>
+                <HomeLogoButton navigation={navigation} />
                 <View style={styles.headerText}>
                     <Text style={styles.stepLabel}>FARM MAP</Text>
                     <Text style={styles.heading}>Visual Field Designer</Text>

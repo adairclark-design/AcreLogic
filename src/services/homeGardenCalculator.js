@@ -17,6 +17,7 @@ import {
     getSeedStartDate,
     addDays,
     formatDateDisplay,
+    getIdealOffsetDays,
 } from './climateService';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -106,6 +107,9 @@ const GERMINATION_RATE_OVERRIDES = {
     snap_peas_cascadia:        0.82,
 };
 
+/**
+    // Offsets are now centralized in climateService.js
+
 /** Return the germination rate for a given crop.
  *
  * Priority (most specific wins):
@@ -119,6 +123,42 @@ function germinationRate(crop) {
         ?? GERMINATION_RATE_OVERRIDES[crop.id]
         ?? GERMINATION_RATES[crop.category]
         ?? DEFAULTS.LOSS_BUFFER;
+}
+
+/**
+ * startMethod
+ * ───────────
+ * Three-tier seeding method classification:
+ *
+ *  'indoor_essential'    — Must start indoors. No realistic DS option.
+ *                          All Nightshade crops (peppers, eggplant, tomatoes).
+ *
+ *  'indoor_recommended'  — CAN direct-seed, but strongly benefits from indoor
+ *                          start due to long DTM or frost sensitivity.
+ *                          Cucurbits, specific long-DTM herbs (parsley, celery),
+ *                          and warm crops with min_frost_free_days ≥ 90.
+ *
+ *  'direct_sow'          — Best sown direct (short DTM, cold-tolerant, or
+ *                          tap roots that hate transplanting).
+ *
+ * Sources: OSU Extension EC 871, Johnny's Seeds starting calendars.
+ */
+const INDOOR_RECOMMENDED_HERB_IDS = new Set([
+    'parsley_curled', 'parsley_flat_leaf', 'parsley_italian',
+    'celery_utah', 'celeriac_giant_prague',
+    'lemon_verbena', 'stevia_standard', 'marjoram_standard', 'ashwagandha_standard',
+]);
+
+function startMethod(crop) {
+    const cat    = crop.category ?? '';
+    const dtm    = crop.dtm ?? 0;
+    const minFFD = crop.min_frost_free_days ?? 0;
+
+    if (cat === 'Nightshade') return 'indoor_essential';
+    if (cat === 'Cucurbit')   return 'indoor_recommended';
+    if (INDOOR_RECOMMENDED_HERB_IDS.has(crop.id)) return 'indoor_recommended';
+    if (crop.season === 'warm' && (dtm >= 70 || minFFD >= 90)) return 'indoor_recommended';
+    return 'direct_sow';
 }
 
 // ─── 1. PLANTS NEEDED CALCULATOR ─────────────────────────────────────────────
@@ -139,7 +179,7 @@ function germinationRate(crop) {
  * @param {number} familySize   — Number of people (1–20)
  * @returns {object}
  */
-export function calculatePlantsNeeded(crop, familySize, gardenProfile = null) {
+export function calculatePlantsNeeded(crop, familySize, gardenProfile = null, overrideTargetLbs = null) {
     const consumption = HOME_CONSUMPTION[crop.id];
 
     // ── Flowers & cover crops use a different path ──
@@ -157,7 +197,9 @@ export function calculatePlantsNeeded(crop, familySize, gardenProfile = null) {
         };
     }
 
-    const targetLbs = consumption.lbs_per_person_season * familySize;
+    const targetLbs = overrideTargetLbs !== null 
+        ? overrideTargetLbs 
+        : consumption.lbs_per_person_season * familySize;
 
     // Yield from crops.json is per 100 linear feet — scale to what we need
     const yieldPer100ft = crop.yield_lbs_per_100ft ?? 0;
@@ -280,6 +322,8 @@ export function calculatePlantsNeeded(crop, familySize, gardenProfile = null) {
     let transplantDateRaw   = null;
     let harvestStartDateRaw = null;   // sowDate/transplantDate + DTM days
     let harvestEndDateRaw   = null;   // harvestStart + harvestWindowDays
+    let harvestWindowDisplay = null;
+    let todayHarvestWindowDisplay = null;
     const lastFrost    = gardenProfile?.last_frost_date ?? null;
     const frostFreeDays = gardenProfile?.frost_free_days ?? null;
     const todayStr = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
@@ -287,7 +331,10 @@ export function calculatePlantsNeeded(crop, familySize, gardenProfile = null) {
     if (lastFrost) {
         if (crop.seed_type === 'TP') {
             // Transplant crop: start seeds indoors X weeks before last frost
+            const tpOffset = getIdealOffsetDays(crop);
             const weeksBeforeTP = crop.seed_start_weeks_before_transplant;
+            let recommendBuyStarts = false;
+
             if (weeksBeforeTP) {
                 const rawIndoor = getSeedStartDate(lastFrost, weeksBeforeTP);
                 indoorSeedDate    = formatDateDisplay(rawIndoor);
@@ -296,38 +343,70 @@ export function calculatePlantsNeeded(crop, familySize, gardenProfile = null) {
                 todayIndoorDate = formatDateDisplay(addDays(todayStr, 0));
                 const todayTPDate = addDays(todayStr, weeksBeforeTP * 7);
                 todayTransplantDate = formatDateDisplay(todayTPDate);
-                // Is today's scenario later than ideal?
-                const idealTPDate = addDays(lastFrost, crop.season === 'warm' ? 14 : 0);
-                isLateStart = todayTPDate > idealTPDate;
+                // Is today's scenario later than ideal transplant date?
+                const idealTPDate = addDays(lastFrost, tpOffset);
+                isLateStart = new Date(todayTPDate) > new Date(idealTPDate);
+
+                // Threshold: if today is within 21 days (3 weeks) of the ideal transplant date (or past it), warn to buy starts
+                const daysUntilIdealTP = Math.round((new Date(idealTPDate) - new Date(todayStr)) / (1000 * 60 * 60 * 24));
+                if (daysUntilIdealTP <= 21) {
+                    recommendBuyStarts = true;
+                }
             }
-            // Transplant date = last frost date (or +2 weeks for heat-lovers)
-            const warmCrop = crop.season === 'warm';
-            const rawTP = warmCrop ? addDays(lastFrost, 14) : lastFrost;
+            // Transplant date = last frost + soil-temp offset for warm crops
+            const rawTP = addDays(lastFrost, tpOffset);
             transplantDate    = formatDateDisplay(rawTP);
             transplantDateRaw = typeof rawTP === 'string' ? rawTP : rawTP;
             // Harvest window starts DTM days after transplant
             if (crop.dtm) {
                 harvestStartDateRaw = addDays(transplantDateRaw, crop.dtm);
+                let hsDisplay = formatDateDisplay(harvestStartDateRaw);
+                let heDisplay = '';
+                
+                let tpDayForToday = addDays(todayStr, weeksBeforeTP ? weeksBeforeTP * 7 : 0);
+                let todayHSRaw = addDays(tpDayForToday, crop.dtm);
+                let todayHsDisplay = formatDateDisplay(todayHSRaw);
+                let todayHeDisplay = '';
+
                 if (crop.harvest_window_days) {
                     harvestEndDateRaw = addDays(harvestStartDateRaw, crop.harvest_window_days);
+                    heDisplay = `–${formatDateDisplay(harvestEndDateRaw)}`;
+                    
+                    let todayHERaw = addDays(todayHSRaw, crop.harvest_window_days);
+                    todayHeDisplay = `–${formatDateDisplay(todayHERaw)}`;
                 }
+                harvestWindowDisplay = `${hsDisplay}${heDisplay}`;
+                todayHarvestWindowDisplay = `${todayHsDisplay}${todayHeDisplay}`;
             }
         } else {
             // Direct sow crop
-            const warmCrop = crop.season === 'warm';
-            const rawDS = warmCrop ? addDays(lastFrost, 0) : addDays(lastFrost, -28);
+            const dsOffset = getIdealOffsetDays(crop);
+            const rawDS = addDays(lastFrost, dsOffset);
             directSowDate    = formatDateDisplay(rawDS);
             directSowDateRaw = typeof rawDS === 'string' ? rawDS : rawDS;
             // "Today" scenario for direct sow: sow today
             todayDirectSowDate = formatDateDisplay(addDays(todayStr, 0));
-            const idealDS = warmCrop ? new Date(lastFrost) : addDays(lastFrost, -28);
+            const idealDS = addDays(lastFrost, dsOffset);
             isLateStart = new Date(todayStr) > new Date(idealDS);
             // Harvest window starts DTM days after direct sow
             if (crop.dtm) {
                 harvestStartDateRaw = addDays(directSowDateRaw, crop.dtm);
+                let hsDisplay = formatDateDisplay(harvestStartDateRaw);
+                let heDisplay = '';
+
+                let todayHSRaw = addDays(todayStr, crop.dtm);
+                let todayHsDisplay = formatDateDisplay(todayHSRaw);
+                let todayHeDisplay = '';
+
                 if (crop.harvest_window_days) {
                     harvestEndDateRaw = addDays(harvestStartDateRaw, crop.harvest_window_days);
+                    heDisplay = `–${formatDateDisplay(harvestEndDateRaw)}`;
+                    
+                    let todayHERaw = addDays(todayHSRaw, crop.harvest_window_days);
+                    todayHeDisplay = `–${formatDateDisplay(todayHERaw)}`;
                 }
+                harvestWindowDisplay = `${hsDisplay}${heDisplay}`;
+                todayHarvestWindowDisplay = `${todayHsDisplay}${todayHeDisplay}`;
             }
         }
     }
@@ -336,15 +415,24 @@ export function calculatePlantsNeeded(crop, familySize, gardenProfile = null) {
     // needsSuccession is already calculated above; here we turn the generic
     // "sow every 2-3 weeks" into explicit Round 2, Round 3... dates.
     let successionDates = [];  // [{ round, dateRaw, dateDisplay }]
-    if (needsSuccession && directSowDateRaw && gardenProfile?.first_frost_date) {
+    let todaySuccessionDates = []; // Shifted fallback array
+    
+    // Determine the baseline starting date
+    const anchorSowRaw = crop.seed_type === 'TP' ? indoorSeedDateRaw : directSowDateRaw;
+    
+    if (needsSuccession && anchorSowRaw && gardenProfile?.first_frost_date) {
         const interval    = crop.harvest_window_days ?? 14;  // days between rounds
         const dtm         = crop.dtm ?? 30;
-        const firstFrost  = gardenProfile.first_frost_date;  // "YYYY-MM-DD"
+        const tpWeeks     = crop.seed_start_weeks_before_transplant ?? 0;
+        const firstFrost  = gardenProfile.first_frost_date;  // \"YYYY-MM-DD\"
 
         for (let round = 2; round <= 8; round++) {
-            const sowRaw      = addDays(directSowDateRaw, (round - 1) * interval);
-            const maturityRaw = addDays(sowRaw, dtm);
-            // ISO strings compare lexicographically — "2026-10-30" > "2026-10-15"
+            const sowRaw      = addDays(anchorSowRaw, (round - 1) * interval);
+            const maturityRaw = crop.seed_type === 'TP'
+                ? addDays(sowRaw, (tpWeeks * 7) + dtm)
+                : addDays(sowRaw, dtm);
+                
+            // ISO strings compare lexicographically — \"2026-10-30\" > \"2026-10-15\"
             const sow10 = typeof sowRaw === 'string' ? sowRaw.substring(0, 10) : sowRaw;
             const mat10 = typeof maturityRaw === 'string' ? maturityRaw.substring(0, 10) : maturityRaw;
             if (mat10 > firstFrost) break;
@@ -354,15 +442,42 @@ export function calculatePlantsNeeded(crop, familySize, gardenProfile = null) {
                 dateDisplay: formatDateDisplay(sow10),
             });
         }
+
+        if (isLateStart) {
+            for (let round = 2; round <= 8; round++) {
+                const sowRaw      = addDays(todayStr, (round - 1) * interval);
+                const maturityRaw = crop.seed_type === 'TP'
+                    ? addDays(sowRaw, (tpWeeks * 7) + dtm)
+                    : addDays(sowRaw, dtm);
+                    
+                const sow10 = typeof sowRaw === 'string' ? sowRaw.substring(0, 10) : sowRaw;
+                const mat10 = typeof maturityRaw === 'string' ? maturityRaw.substring(0, 10) : maturityRaw;
+                if (mat10 > firstFrost) break;
+                todaySuccessionDates.push({
+                    round,
+                    dateRaw:     sow10,
+                    dateDisplay: formatDateDisplay(sow10),
+                });
+            }
+        }
     }
 
     // Late-start caveat — triggered if today's dates are past the ideal window
+    const recommendBuyStartsVal = typeof recommendBuyStarts !== 'undefined' ? recommendBuyStarts : false;
     if (isLateStart) {
-        const isTimePressed = crop.min_frost_free_days >= 90 || crop.season === 'warm' || crop.dtm >= 80;
-        if (isTimePressed) {
-            lateStartCaveat = 'Starting later may reduce yield or prevent full ripening — still worth trying.';
+        if (recommendBuyStartsVal) {
+            if (!crop.late_transplant_tolerant) {
+                lateStartCaveat = 'Strongly suggest purchasing starts. Starting from seed now will likely fail to produce a harvest.';
+            } else {
+                lateStartCaveat = 'Starting seeds late may reduce yield or cause delays. Purchasing starts is recommended to stay on schedule.';
+            }
         } else {
-            lateStartCaveat = 'Starting later than ideal is fine for this crop — expect a shifted harvest.';
+            const isTimePressed = crop.min_frost_free_days >= 90 || crop.season === 'warm' || crop.dtm >= 80;
+            if (isTimePressed) {
+                lateStartCaveat = 'Starting later may reduce yield or prevent full ripening — still worth trying.';
+            } else {
+                lateStartCaveat = 'Starting later than ideal is fine for this crop — expect a shifted harvest.';
+            }
         }
     }
 
@@ -373,7 +488,9 @@ export function calculatePlantsNeeded(crop, familySize, gardenProfile = null) {
         emoji: crop.emoji,
         isSupported: true,
         isFlower: false,
-        category: crop.category,   // needed by SeedShoppingList
+        category: crop.category,   // needed by SeedShoppingList + ActionCalendar
+        germRate,                   // germination rate (0–1) — used by ActionCalendar for seeds/cell
+        startMethod: startMethod(crop), // 'direct_sow' | 'indoor_recommended' | 'indoor_essential'
 
         // Core numbers
         familySize,
@@ -401,6 +518,7 @@ export function calculatePlantsNeeded(crop, familySize, gardenProfile = null) {
         notes: crop.notes,
         needsSuccession,                        // true = bolt-prone, succession-plant
         successionDates,                        // [{round, dateRaw, dateDisplay}] — exact sow dates
+        todaySuccessionDates,                   // shifted dates starting from today
         successionNote,                         // human-readable succession callout
 
         // Computed calendar dates (null if no gardenProfile)
@@ -412,6 +530,7 @@ export function calculatePlantsNeeded(crop, familySize, gardenProfile = null) {
         todayTransplantDate,
         todayDirectSowDate,
         isLateStart,
+        recommendBuyStarts: typeof recommendBuyStarts !== 'undefined' ? recommendBuyStarts : false,
         lateStartCaveat,
         // Raw ISO date strings for ActionCalendar sorting/grouping
         indoorSeedDateRaw,
@@ -419,6 +538,8 @@ export function calculatePlantsNeeded(crop, familySize, gardenProfile = null) {
         transplantDateRaw,
         harvestStartDateRaw,
         harvestEndDateRaw,
+        harvestWindowDisplay,
+        todayHarvestWindowDisplay,
 
         // Yield expectation range
         yieldLow,
@@ -697,6 +818,108 @@ export function calculateBedsInSpace({
 // ─── 4. FULL GARDEN PLAN ─────────────────────────────────────────────────────
 
 /**
+ * getCropEarliestActionOffset
+ * ───────────────────────────
+ * Returns the number of days relative to last frost that a crop's first action occurs
+ * (either indoor seeding or direct sowing). Useful for chronologically sorting the crop catalog.
+ * Negative = before last frost; Positive = after last frost.
+ */
+export function getCropEarliestActionOffset(crop) {
+    if (crop.seed_type === 'TP') {
+        const tpOffset = getIdealOffsetDays(crop);
+        const weeksBefore = crop.seed_start_weeks_before_transplant || 4;
+        return tpOffset - (weeksBefore * 7);
+    } else {
+        return getIdealOffsetDays(crop);
+    }
+}
+
+/**
+ * getClusterKey
+ * ────────────────
+ * Normalizes crop names into generic crop clusters to pool yield requirements together.
+ */
+function getClusterKey(crop) {
+    if (crop.isFlower) return crop.id; // Flowers don't currently pool lbs
+
+    const name = (crop.name || '').toLowerCase();
+    
+    // Explicit groupings to catch things that share a culinary identity
+    if (name.includes('tomato')) return 'tomato';
+    if (name.includes('pepper')) return 'pepper';
+    if (name.includes('squash') || name.includes('pumpkin')) return 'squash';
+    if (name.includes('bean') && !name.includes('soybean')) return 'bean';
+    if (name.includes('pea') && !name.includes('cowpea') && !name.includes('pigeon')) return 'pea';
+    if (name.includes('potato') && !name.includes('sweet')) return 'potato';
+    if (name.includes('cabbage')) return 'cabbage';
+    if (name.includes('lettuce')) return 'lettuce';
+    if (name.includes('onion') || name.includes('shallot')) return 'onion';
+    if (name.includes('melon') || name.includes('cantaloupe')) return 'melon';
+    if (name.includes('cucumber')) return 'cucumber';
+    if (name.includes('carrot')) return 'carrot';
+    if (name.includes('radish')) return 'radish';
+    if (name.includes('spinach')) return 'spinach';
+
+    // Fallback: Just return the exact name lowercased
+    return name;
+}
+
+/**
+ * calculateClusterTargets
+ * ───────────────────────
+ * Pre-processes selected crops to apportion household targets proportionally
+ * across varieties in the same cluster.
+ */
+function calculateClusterTargets(selectedCrops, familySize) {
+    // 1. Group crops by cluster key
+    const clusters = {};
+    for (const crop of selectedCrops) {
+        const key = getClusterKey(crop);
+        if (!clusters[key]) clusters[key] = [];
+        clusters[key].push(crop);
+    }
+
+    const overrideTargets = {};
+
+    // 2. Process each cluster
+    for (const cropGroup of Object.values(clusters)) {
+        if (cropGroup.length === 1) continue; // Only one variety, use raw standalone target.
+
+        // Filter to crops that actually have a weight-based consumption target
+        const activeCrops = cropGroup.filter(c => {
+            const consumption = HOME_CONSUMPTION[c.id];
+            return consumption && consumption.lbs_per_person_season != null;
+        });
+
+        if (activeCrops.length <= 1) continue;
+
+        // Find the maximum base yield in the cluster
+        let maxBaseLbs = 0;
+        let totalBaseSum = 0;
+        for (const crop of activeCrops) {
+            const baseLbs = HOME_CONSUMPTION[crop.id].lbs_per_person_season;
+            if (baseLbs > maxBaseLbs) maxBaseLbs = baseLbs;
+            totalBaseSum += baseLbs;
+        }
+
+        // The maximum base limit for the family
+        const familyClusterLimit = maxBaseLbs * familySize;
+
+        // Proportionally distribute that limit
+        if (totalBaseSum > 0) {
+            for (const crop of activeCrops) {
+                const baseLbs = HOME_CONSUMPTION[crop.id].lbs_per_person_season;
+                const proportion = baseLbs / totalBaseSum;
+                const apportionedTarget = Math.round(familyClusterLimit * proportion);
+                overrideTargets[crop.id] = apportionedTarget;
+            }
+        }
+    }
+
+    return overrideTargets;
+}
+
+/**
  * calculateGardenPlan
  * ────────────────────
  * Combines plantsNeeded calculations for a list of crops to produce a
@@ -712,7 +935,19 @@ export function calculateBedsInSpace({
  * }}
  */
 export function calculateGardenPlan(selectedCrops, familySize, gardenProfile = null) {
-    const items = selectedCrops.map(crop => calculatePlantsNeeded(crop, familySize, gardenProfile));
+    const overrideTargets = calculateClusterTargets(selectedCrops, familySize);
+
+    const sortedCrops = [...selectedCrops].sort((a, b) => {
+        const offsetA = getCropEarliestActionOffset(a);
+        const offsetB = getCropEarliestActionOffset(b);
+        if (offsetA !== offsetB) return offsetA - offsetB;
+        return a.name.localeCompare(b.name);
+    });
+
+    const items = sortedCrops.map(crop => {
+        const override = overrideTargets[crop.id] ?? null;
+        return calculatePlantsNeeded(crop, familySize, gardenProfile, override);
+    });
     const supported = items.filter(i => i.isSupported);
     const unsupported = items.filter(i => !i.isSupported).map(i => i.cropName);
 
