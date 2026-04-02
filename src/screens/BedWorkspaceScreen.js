@@ -1286,13 +1286,13 @@ const SuccessionDrawer = ({ visible, bedNumber, blockName, currentSuccessions, a
                         {/* Table header */}
                         <View style={fpStyles.tableHeader}>
                             <Text style={[fpStyles.tableHeaderCell, { flex: 2, textAlign: 'left' }]}>CROP NAME</Text>
-                            <Text style={[fpStyles.tableHeaderCell, { flex: 2, textAlign: 'left' }]}>CROP NAME</Text>
-                            <Text style={[fpStyles.tableHeaderCell, { flex: 0.8 }]}>DTM</Text>
-                            <Text style={[fpStyles.tableHeaderCell, { flex: 0.8 }]}>IGD</Text>
-                            <Text style={[fpStyles.tableHeaderCell, { flex: 1.2 }]}>IDEAL TP/DS DATES</Text>
-                            <Text style={[fpStyles.tableHeaderCell, { flex: 1.5 }]}>NEW TP/DS DATES</Text>
-                            <Text style={[fpStyles.tableHeaderCell, { flex: 0.8 }]}>RPB</Text>
-                            <Text style={[fpStyles.tableHeaderCell, { flex: 0.8 }]}>IRS</Text>
+                            <Text style={[fpStyles.tableHeaderCell, { flex: 1.8, textAlign: 'left' }]}>CROP NAME</Text>
+                            <Text style={[fpStyles.tableHeaderCell, { flex: 0.6 }]}>DTM</Text>
+                            <Text style={[fpStyles.tableHeaderCell, { flex: 0.6 }]}>IGD</Text>
+                            <Text style={[fpStyles.tableHeaderCell, { flex: 1.2 }]}>IDEAL TP/DS</Text>
+                            <Text style={[fpStyles.tableHeaderCell, { flex: 2.3 }]}>NEW TP/DS</Text>
+                            <Text style={[fpStyles.tableHeaderCell, { flex: 0.5 }]}>RPB</Text>
+                            <Text style={[fpStyles.tableHeaderCell, { flex: 0.5 }]}>IRS</Text>
                         </View>
 
                         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 24 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={true}>
@@ -1380,7 +1380,7 @@ const SuccessionDrawer = ({ visible, bedNumber, blockName, currentSuccessions, a
                                         }}
                                         activeOpacity={bedFull ? 0.5 : 0.75}
                                     >
-                                        <View style={{ flex: 2 }}>
+                                        <View style={{ flex: 1.8 }}>
                                             <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                                                 {maxSeverity && (
                                                     <View style={[fpStyles.severityDotTable, { backgroundColor: maxSeverity === 'high' ? '#C62828' : maxSeverity === 'medium' ? '#E65100' : '#2E7D32' }]} />
@@ -1400,12 +1400,12 @@ const SuccessionDrawer = ({ visible, bedNumber, blockName, currentSuccessions, a
                                                 </Text>
                                             )}
                                         </View>
-                                        <Text style={[fpStyles.tableCell, { flex: 0.8 }]}>{dtm}</Text>
-                                        <Text style={[fpStyles.tableCell, { flex: 0.8 }]}>{igd > 0 ? igd : '—'}</Text>
-                                        <Text style={[fpStyles.tableCell, { flex: 1.2, fontSize: 10 }]}>{idealPlantDate}</Text>
-                                        <Text style={[fpStyles.tableCell, { flex: 1.5, fontSize: 10, color: '#1B5E20', fontWeight: '500' }]}>{gapDatesStr}</Text>
-                                        <Text style={[fpStyles.tableCell, { flex: 0.8 }]}>{rpb}</Text>
-                                        <Text style={[fpStyles.tableCell, { flex: 0.8 }]}>{irs}</Text>
+                                        <Text style={[fpStyles.tableCell, { flex: 0.6 }]}>{dtm}</Text>
+                                        <Text style={[fpStyles.tableCell, { flex: 0.6 }]}>{igd > 0 ? igd : '—'}</Text>
+                                        <Text style={[fpStyles.tableCell, { flex: 1.2, fontSize: 12 }]}>{idealPlantDate}</Text>
+                                        <Text style={[fpStyles.tableCell, { flex: 2.3, fontSize: 12, color: '#1B5E20', fontWeight: '500' }]}>{gapDatesStr}</Text>
+                                        <Text style={[fpStyles.tableCell, { flex: 0.5 }]}>{rpb}</Text>
+                                        <Text style={[fpStyles.tableCell, { flex: 0.5 }]}>{irs}</Text>
                                     </TouchableOpacity>
                                 );
                             })
@@ -1770,7 +1770,7 @@ const SuccessionDrawer = ({ visible, bedNumber, blockName, currentSuccessions, a
                                         }}
                                         activeOpacity={bedFull ? 1 : 0.75}
                                     >
-                                        <View style={[styles.cropListCell, { flex: 1.2 }]}>
+                                        <View style={[styles.cropListCell, { flex: 1.8 }]}>
                                             <Text style={styles.cropListName} numberOfLines={1}>
                                                 {remainingCoverage >= 0.99 ? '[Full] ' : ''}{item.crop.name}
                                             </Text>
@@ -1781,11 +1781,11 @@ const SuccessionDrawer = ({ visible, bedNumber, blockName, currentSuccessions, a
                                                 </Text>
                                             )}
                                         </View>
-                                        <Text style={[styles.cropListCell, { flex: 0.8 }]}>{item.crop.dtm > 0 ? `${item.crop.dtm}d` : 'CC'}</Text>
-                                        <Text style={[styles.cropListCell, { flex: 0.8 }]}>{igd > 0 ? `${igd}d` : '—'}</Text>
-                                        <Text style={[styles.cropListCell, { flex: 1.2, fontSize: 9 }]}>{idealPlantDate}</Text>
-                                        <Text style={[styles.cropListCell, { flex: 1.5, fontSize: 9, color: '#1B5E20', fontWeight: '500' }]}>{gapDatesStr}</Text>
-                                        <Text style={[styles.cropListCell, { flex: 0.8 }]}>{rpb}</Text>
+                                        <Text style={[styles.cropListCell, { flex: 0.6 }]}>{item.crop.dtm > 0 ? `${item.crop.dtm}d` : 'CC'}</Text>
+                                        <Text style={[styles.cropListCell, { flex: 0.6 }]}>{igd > 0 ? `${igd}d` : '—'}</Text>
+                                        <Text style={[styles.cropListCell, { flex: 1.2, fontSize: 11 }]}>{idealPlantDate}</Text>
+                                        <Text style={[styles.cropListCell, { flex: 2.3, fontSize: 11, color: '#1B5E20', fontWeight: '500' }]}>{gapDatesStr}</Text>
+                                        <Text style={[styles.cropListCell, { flex: 0.5 }]}>{rpb}</Text>
                                         <Text style={[styles.cropListCell, {
                                             color: bedFull ? '#BF360C' : Colors.mutedText,
                                             fontWeight: '700',
@@ -3348,7 +3348,7 @@ const fpStyles = StyleSheet.create({
     },
     tableHeaderCell: {
         flex: 1,
-        fontSize: 8,
+        fontSize: 10,
         fontWeight: '800',
         color: '#73796D',
         letterSpacing: 0.8,
@@ -3359,7 +3359,7 @@ const fpStyles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         paddingHorizontal: 12,
-        paddingVertical: 7,
+        paddingVertical: 4,
         gap: 4,
         borderBottomWidth: 1,
         borderBottomColor: 'rgba(195,200,187,0.2)',
@@ -3382,25 +3382,25 @@ const fpStyles = StyleSheet.create({
         opacity: 0.4,
     },
     tableWinterNote: {
-        fontSize: 8,
+        fontSize: 10,
         color: '#C62828',
         marginTop: 2,
         fontWeight: '600',
     },
     tableCropName: {
-        fontSize: 11,
+        fontSize: 13,
         fontWeight: '700',
         color: '#173809',
     },
     tableCell: {
         flex: 1,
-        fontSize: 11,
+        fontSize: 13,
         color: '#43493E',
         textAlign: 'center',
         fontWeight: '500',
     },
     tableConflictNote: {
-        fontSize: 9,
+        fontSize: 11,
         color: '#BF360C',
         marginTop: 1,
     },
@@ -3965,8 +3965,8 @@ const styles = StyleSheet.create({
 
     // ── Compact crop list ────────────────────────────────────────────────────
     cropListHeader: { flexDirection: 'row', paddingHorizontal: Spacing.sm, paddingVertical: 5, borderBottomWidth: 1, borderBottomColor: 'rgba(45,79,30,0.12)', backgroundColor: 'rgba(45,79,30,0.04)' },
-    cropListHeaderCell: { flex: 1, fontSize: 8, fontWeight: '800', color: Colors.primaryGreen, textTransform: 'uppercase', textAlign: 'center' },
-    cropListRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: Spacing.sm, paddingVertical: 9, borderBottomWidth: 1, borderBottomColor: 'rgba(45,79,30,0.07)', backgroundColor: '#FAFAF7' },
+    cropListHeaderCell: { flex: 1, fontSize: 10, fontWeight: '800', color: Colors.primaryGreen, textTransform: 'uppercase', textAlign: 'center' },
+    cropListRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: Spacing.sm, paddingVertical: 5, borderBottomWidth: 1, borderBottomColor: 'rgba(45,79,30,0.07)', backgroundColor: '#FAFAF7' },
     cropListRowDim: { opacity: 0.5 },
     cropListRowConflict: { backgroundColor: '#FFF8E7' },
     cropListRowExpanded: { backgroundColor: 'rgba(45,79,30,0.06)', borderBottomWidth: 0 },
@@ -3977,15 +3977,15 @@ const styles = StyleSheet.create({
         backgroundColor: '#FFF5F5',
     },
     cropListWinterLabel: {
-        fontSize: 8,
+        fontSize: 10,
         color: '#C62828',
         fontWeight: '700',
         marginTop: 2,
-        lineHeight: 11,
+        lineHeight: 12,
     },
-    cropListCell: { flex: 1, fontSize: 10, color: Colors.darkText, fontWeight: '600', textAlign: 'center' },
-    cropListName: { fontSize: 11, fontWeight: '800', color: Colors.primaryGreen },
-    cropListVariety: { fontSize: 9, color: Colors.mutedText },
+    cropListCell: { flex: 1, fontSize: 12, color: Colors.darkText, fontWeight: '600', textAlign: 'center' },
+    cropListName: { fontSize: 13, fontWeight: '800', color: Colors.primaryGreen },
+    cropListVariety: { fontSize: 11, color: Colors.mutedText },
 
     // ── Inline coverage dropdown ─────────────────────────────────────────────
     inlineCoverageWrap: {
