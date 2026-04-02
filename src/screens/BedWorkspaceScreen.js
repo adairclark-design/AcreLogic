@@ -599,10 +599,13 @@ const SuccessionDrawer = ({ visible, bedNumber, blockName, currentSuccessions, a
         if (!currentSuccessions || currentSuccessions.length === 0) return 1.0;
         
         let checkStart, checkEnd;
-        if (fillRemainingDtm != null) {
-             const lastCrop = currentSuccessions[currentSuccessions.length - 1];
-             checkStart = lastCrop.start_date; 
-             checkEnd = lastCrop.end_date ?? '9999-12-31';
+        if (targetGap) {
+            checkStart = targetGap.start_date;
+            checkEnd = targetGap.end_date ?? '9999-12-31';
+        } else if (fillRemainingDtm != null) {
+            const lastCrop = currentSuccessions[currentSuccessions.length - 1];
+            checkStart = lastCrop.start_date; 
+            checkEnd = lastCrop.end_date ?? '9999-12-31';
         } else {
              return 1.0; 
         }
