@@ -20,6 +20,7 @@ import { getSuccessionCandidatesRanked, autoGenerateSuccessions, AUTOFILL_STRATE
 import { saveBedAssignment, getBedSuccessions, getCropById } from '../services/database';
 import { saveBedSuccessions, saveBedShelters, saveSeasonSnapshot, getPriorYearBedCrops, loadRotationHistory, loadSavedPlan, saveFarmProfile, saveBlockBeds, loadBlockBeds, loadPlanCrops } from '../services/persistence';
 import { checkBedCompanions, checkBlockNeighborWarnings } from '../services/companionService';
+import { getIdealStartDate } from "../services/climateService";
 import { inferZoneFromFrostDates, getPeakCoverageInWindow } from '../services/farmUtils';
 import cropData from '../data/crops.json';
 import { useFocusEffect } from '@react-navigation/native';
@@ -433,6 +434,21 @@ const SuccessionDrawer = ({ visible, bedNumber, blockName, currentSuccessions, a
     const [selectedDiagramCrop, setSelectedDiagramCrop] = React.useState(null);
     const [editingIdx, setEditingIdx] = React.useState(null); // index of current-plan row being edited
     const [watchForExpanded, setWatchForExpanded] = React.useState(false); // pest/disease panel
+
+    const gapDatesStr = React.useMemo(() => {
+        if (currentSuccessions && currentSuccessions.length > 0) {
+            const endDates = Array.from(new Set(currentSuccessions.map(c => c.end_date).filter(Boolean)));
+            endDates.sort((a,b) => new Date(a) - new Date(b));
+            return endDates.map(dStr => {
+                const d = new Date(dStr + 'T12:00:00');
+                d.setDate(d.getDate() + 1);
+                return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+            }).join(', ');
+        } else if (farmProfile?.last_frost_date) {
+            return new Date(farmProfile.last_frost_date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        }
+        return '—';
+    }, [currentSuccessions, farmProfile]);
     // targetGap is now lifted to BedWorkspaceScreen state
 
     // Auto-clear target gap when the selected timeframe becomes fully planted
@@ -1270,11 +1286,13 @@ const SuccessionDrawer = ({ visible, bedNumber, blockName, currentSuccessions, a
                         {/* Table header */}
                         <View style={fpStyles.tableHeader}>
                             <Text style={[fpStyles.tableHeaderCell, { flex: 2, textAlign: 'left' }]}>CROP NAME</Text>
-                            <Text style={fpStyles.tableHeaderCell}>DTM</Text>
-                            <Text style={fpStyles.tableHeaderCell}>IGD</Text>
-                            <Text style={[fpStyles.tableHeaderCell, { flex: 1.4 }]}>TP/DS DATE</Text>
-                            <Text style={fpStyles.tableHeaderCell}>RPB</Text>
-                            <Text style={fpStyles.tableHeaderCell}>IRS</Text>
+                            <Text style={[fpStyles.tableHeaderCell, { flex: 2, textAlign: 'left' }]}>CROP NAME</Text>
+                            <Text style={[fpStyles.tableHeaderCell, { flex: 0.8 }]}>DTM</Text>
+                            <Text style={[fpStyles.tableHeaderCell, { flex: 0.8 }]}>IGD</Text>
+                            <Text style={[fpStyles.tableHeaderCell, { flex: 1.2 }]}>IDEAL TP/DS DATES</Text>
+                            <Text style={[fpStyles.tableHeaderCell, { flex: 1.5 }]}>NEW TP/DS DATES</Text>
+                            <Text style={[fpStyles.tableHeaderCell, { flex: 0.8 }]}>RPB</Text>
+                            <Text style={[fpStyles.tableHeaderCell, { flex: 0.8 }]}>IRS</Text>
                         </View>
 
                         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 24 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={true}>
@@ -1301,9 +1319,12 @@ const SuccessionDrawer = ({ visible, bedNumber, blockName, currentSuccessions, a
                                     ? Math.round((new Date(item.end_date) - new Date(item.start_date)) / 86400000)
                                     : (item.crop.dtm ?? 0) + (item.crop.harvest_window_days ?? 0);
                                 const method = item.crop.seed_type ?? (item.crop.dtm < 40 ? 'DS' : 'TP');
-                                const plantDate = item.start_date
-                                    ? `${method} ${new Date(item.start_date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
+                                
+                                const idealIso = getIdealStartDate(item.crop, farmProfile?.last_frost_date);
+                                const idealPlantDate = idealIso 
+                                    ? `${method} ${new Date(idealIso + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
                                     : '—';
+                                
                                 const rpb = item.crop.rows_per_30in_bed ?? '—';
                                 const irs = item.crop.in_row_spacing_in ? `${item.crop.in_row_spacing_in}"` : '—';
                                 const rawFits = item.fits ?? true;
@@ -1379,11 +1400,12 @@ const SuccessionDrawer = ({ visible, bedNumber, blockName, currentSuccessions, a
                                                 </Text>
                                             )}
                                         </View>
-                                        <Text style={fpStyles.tableCell}>{dtm}</Text>
-                                        <Text style={fpStyles.tableCell}>{igd > 0 ? igd : '—'}</Text>
-                                        <Text style={[fpStyles.tableCell, { flex: 1.4, fontSize: 10 }]}>{plantDate}</Text>
-                                        <Text style={fpStyles.tableCell}>{rpb}</Text>
-                                        <Text style={fpStyles.tableCell}>{irs}</Text>
+                                        <Text style={[fpStyles.tableCell, { flex: 0.8 }]}>{dtm}</Text>
+                                        <Text style={[fpStyles.tableCell, { flex: 0.8 }]}>{igd > 0 ? igd : '—'}</Text>
+                                        <Text style={[fpStyles.tableCell, { flex: 1.2, fontSize: 10 }]}>{idealPlantDate}</Text>
+                                        <Text style={[fpStyles.tableCell, { flex: 1.5, fontSize: 10, color: '#1B5E20', fontWeight: '500' }]}>{gapDatesStr}</Text>
+                                        <Text style={[fpStyles.tableCell, { flex: 0.8 }]}>{rpb}</Text>
+                                        <Text style={[fpStyles.tableCell, { flex: 0.8 }]}>{irs}</Text>
                                     </TouchableOpacity>
                                 );
                             })
@@ -1706,7 +1728,13 @@ const SuccessionDrawer = ({ visible, bedNumber, blockName, currentSuccessions, a
                                 ? `${method} ${new Date(item.start_date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
                                 : '—';
                             const rpb = item.crop.rows_per_30in_bed ?? '—';
-                            const irs = item.crop.in_row_spacing_in ? `${item.crop.in_row_spacing_in}"` : '—';
+                            const irs = item.crop.in_row_spacing_in ? `${item.crop.in_row_spacing_in}"` : '—';                            
+
+                            const idealIso = getIdealStartDate(item.crop, farmProfile?.last_frost_date);
+                            const idealPlantDate = idealIso 
+                                ? `${method} ${new Date(idealIso + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
+                                : '—';
+
 
                             const rawFits = item.fits ?? false;
                             const dStr = item.start_date || '2026-05-01';
@@ -1753,10 +1781,11 @@ const SuccessionDrawer = ({ visible, bedNumber, blockName, currentSuccessions, a
                                                 </Text>
                                             )}
                                         </View>
-                                        <Text style={styles.cropListCell}>{item.crop.dtm > 0 ? `${item.crop.dtm}d` : 'CC'}</Text>
-                                        <Text style={styles.cropListCell}>{igd > 0 ? `${igd}d` : '—'}</Text>
-                                        <Text style={[styles.cropListCell, { fontSize: 9 }]}>{plantDate}</Text>
-                                        <Text style={styles.cropListCell}>{rpb}</Text>
+                                        <Text style={[styles.cropListCell, { flex: 0.8 }]}>{item.crop.dtm > 0 ? `${item.crop.dtm}d` : 'CC'}</Text>
+                                        <Text style={[styles.cropListCell, { flex: 0.8 }]}>{igd > 0 ? `${igd}d` : '—'}</Text>
+                                        <Text style={[styles.cropListCell, { flex: 1.2, fontSize: 9 }]}>{idealPlantDate}</Text>
+                                        <Text style={[styles.cropListCell, { flex: 1.5, fontSize: 9, color: '#1B5E20', fontWeight: '500' }]}>{gapDatesStr}</Text>
+                                        <Text style={[styles.cropListCell, { flex: 0.8 }]}>{rpb}</Text>
                                         <Text style={[styles.cropListCell, {
                                             color: bedFull ? '#BF360C' : Colors.mutedText,
                                             fontWeight: '700',
