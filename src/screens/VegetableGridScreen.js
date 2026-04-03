@@ -16,7 +16,7 @@ import {
 import { Colors, Typography, Spacing, Radius, Shadows } from '../theme';
 import cropDbRaw from '../data/crops.json';
 import CROP_IMAGES from '../data/cropImages';
-import MegaMenuBar from '../components/MegaMenuBar';
+import CategorySidebar from '../components/CategorySidebar';
 import { formatCropDisplayName } from '../utils/cropDisplay';
 import { getCropEarliestActionOffset } from '../services/homeGardenCalculator';
 import GlobalNavBar from '../components/GlobalNavBar';
@@ -181,11 +181,13 @@ export default function VegetableGridScreen({ navigation, route }) {
     // Always trust the local persistence layer over route params as the single source of truth.
     const [selectedCrops, setSelectedCrops] = useState(() => new Set(loadPlanCrops(planId) ?? []));
 
+    const loadedPlanIdRef = useRef(null);
     // Force re-synchronization when returning from a different phase so stale route params don't wipe memory.
     useFocusEffect(useCallback(() => {
         if (planId) {
             const stored = loadPlanCrops(planId) ?? [];
             setSelectedCrops(new Set(stored));
+            loadedPlanIdRef.current = planId;
         }
     }, [planId]));
     const [filterFn, setFilterFn]           = useState(() => () => true);  // driven by MegaMenuBar
@@ -204,7 +206,7 @@ export default function VegetableGridScreen({ navigation, route }) {
 
     // Auto-save selections to localStorage so other tabs (Farm Layout, Planner) can reliably access them
     React.useEffect(() => {
-        if (planId) {
+        if (planId && loadedPlanIdRef.current === planId) {
             savePlanCrops(planId, Array.from(selectedCrops));
         }
     }, [selectedCrops, planId]);
@@ -213,6 +215,10 @@ export default function VegetableGridScreen({ navigation, route }) {
     const { width } = useWindowDimensions();
     const layout = getBreakpoint(width);
     const { numColumns } = layout;
+    const isDesktop = width >= 1024;
+    
+    // Add an active label tracker for the sidebar
+    const [activeFilterLabel, setActiveFilterLabel] = useState('All');
 
     const toggleCrop = (id) => {
         setSelectedCrops((prev) => {
@@ -263,64 +269,153 @@ export default function VegetableGridScreen({ navigation, route }) {
                 }
             />
 
-            {/* Subtitle */}
-            <Text style={styles.subheading}>
-                Tap crops to add them to your planning queue. Seeds will populate your beds.
-            </Text>
-
-            {/* MegaMenuBar — same as Feed My Family */}
-            <MegaMenuBar
-                onFilterChange={({ filterFn }) => setFilterFn(() => filterFn)}
-            />
-
-            {/* Search bar */}
-            <View style={styles.searchRow}>
-                <Text style={{ paddingLeft: 12, color: Colors.mutedText, fontSize: 16 }}>🔍</Text>
-                <TextInput
-                    style={styles.searchInput}
-                    placeholder="Search crops..."
-                    placeholderTextColor={Colors.mutedText}
-                    value={searchQuery}
-                    onChangeText={setSearchQuery}
-                    clearButtonMode="while-editing"
-                />
-                {searchQuery.length > 0 && (
-                    <TouchableOpacity onPress={() => setSearchQuery('')} style={{ paddingHorizontal: 8 }}>
-                        <Text style={{ color: Colors.mutedText, fontSize: 16 }}>✕</Text>
-                    </TouchableOpacity>
-                )}
-            </View>
-
-            {/* Grid */}
-            <FlatList
-                ref={flatListRef}
-                data={filteredCrops}
-                keyExtractor={(item) => item.id}
-                numColumns={numColumns}
-                key={numColumns}
-                contentContainerStyle={[styles.grid, { paddingBottom: 140 }]}
-                columnWrapperStyle={numColumns > 1 ? styles.gridRow : undefined}
-                showsVerticalScrollIndicator={false}
-                style={Platform.OS === 'web' ? { overflowY: 'scroll', flex: 1 } : { flex: 1 }}
-                initialNumToRender={24}
-                maxToRenderPerBatch={24}
-                windowSize={5}
-                removeClippedSubviews={Platform.OS !== 'web'}
-                renderItem={({ item }) => (
-                    <View style={{ width: cardWidth }}>
-                        <CropCard
-                            crop={item}
-                            selected={selectedCrops.has(item.id)}
-                            onPress={toggleCrop}
-                            onLongPress={setContextMenuCrop}
-                            cardWidth={cardWidth}
+            {isDesktop ? (
+                // ── Desktop Layout: Sidebar + Main Content ──
+                <View style={styles.desktopRow}>
+                    <CategorySidebar 
+                        isMobile={false}
+                        activeLabel={activeFilterLabel}
+                        onFilterChange={({ label, filterFn }) => {
+                            setActiveFilterLabel(label);
+                            setFilterFn(() => filterFn);
+                        }}
+                    />
+                    <View style={styles.desktopMainContent}>
+                        {/* Subtitle */}
+                        <Text style={[styles.subheading, { paddingHorizontal: Spacing.md }]}>
+                            Tap crops to add them to your planning queue. Seeds will populate your beds.
+                        </Text>
+            
+                        {/* Search bar */}
+                        <View style={[styles.searchRow, { marginHorizontal: Spacing.md }]}>
+                            <Text style={{ paddingLeft: 12, color: Colors.mutedText, fontSize: 16 }}>🔍</Text>
+                            <TextInput
+                                style={styles.searchInput}
+                                placeholder="Search crops..."
+                                placeholderTextColor={Colors.mutedText}
+                                value={searchQuery}
+                                onChangeText={setSearchQuery}
+                                clearButtonMode="while-editing"
+                            />
+                            {searchQuery.length > 0 && (
+                                <TouchableOpacity onPress={() => setSearchQuery('')} style={{ paddingHorizontal: 8 }}>
+                                    <Text style={{ color: Colors.mutedText, fontSize: 16 }}>✕</Text>
+                                </TouchableOpacity>
+                            )}
+                        </View>
+            
+                        {/* Grid */}
+                        <FlatList
+                            ref={flatListRef}
+                            data={filteredCrops}
+                            keyExtractor={(item) => item.id}
+                            numColumns={numColumns}
+                            key={numColumns}
+                            contentContainerStyle={[styles.grid, { paddingHorizontal: Spacing.md, paddingBottom: 140 }]}
+                            columnWrapperStyle={numColumns > 1 ? styles.gridRow : undefined}
+                            showsVerticalScrollIndicator={false}
+                            style={Platform.OS === 'web' ? { overflowY: 'scroll', flex: 1 } : { flex: 1 }}
+                            initialNumToRender={24}
+                            maxToRenderPerBatch={24}
+                            windowSize={5}
+                            removeClippedSubviews={Platform.OS !== 'web'}
+                            renderItem={({ item }) => (
+                                <View style={{ width: cardWidth }}>
+                                    <CropCard
+                                        crop={item}
+                                        selected={selectedCrops.has(item.id)}
+                                        onPress={toggleCrop}
+                                        onLongPress={setContextMenuCrop}
+                                        cardWidth={cardWidth}
+                                    />
+                                </View>
+                            )}
                         />
                     </View>
-                )}
-            />
+                </View>
+            ) : (
+                // ── Mobile Layout: Stacked ──
+                <View style={{ flex: 1 }}>
+                    {/* Subtitle */}
+                    <Text style={styles.subheading}>
+                        Tap crops to add them to your planning queue. Seeds will populate your beds.
+                    </Text>
+        
+                    {/* Wrapping Mobile Filter Bar */}
+                    <CategorySidebar 
+                        isMobile={true}
+                        activeLabel={activeFilterLabel}
+                        onFilterChange={({ label, filterFn }) => {
+                            setActiveFilterLabel(label);
+                            setFilterFn(() => filterFn);
+                        }}
+                    />
+        
+                    {/* Search bar */}
+                    <View style={styles.searchRow}>
+                        <Text style={{ paddingLeft: 12, color: Colors.mutedText, fontSize: 16 }}>🔍</Text>
+                        <TextInput
+                            style={styles.searchInput}
+                            placeholder="Search crops..."
+                            placeholderTextColor={Colors.mutedText}
+                            value={searchQuery}
+                            onChangeText={setSearchQuery}
+                            clearButtonMode="while-editing"
+                        />
+                        {searchQuery.length > 0 && (
+                            <TouchableOpacity onPress={() => setSearchQuery('')} style={{ paddingHorizontal: 8 }}>
+                                <Text style={{ color: Colors.mutedText, fontSize: 16 }}>✕</Text>
+                            </TouchableOpacity>
+                        )}
+                    </View>
+        
+                    {/* Grid */}
+                    <FlatList
+                        ref={flatListRef}
+                        data={filteredCrops}
+                        keyExtractor={(item) => item.id}
+                        numColumns={numColumns}
+                        key={`mob-${numColumns}`}
+                        contentContainerStyle={[styles.grid, { paddingBottom: 140 }]}
+                        columnWrapperStyle={numColumns > 1 ? styles.gridRow : undefined}
+                        showsVerticalScrollIndicator={false}
+                        style={Platform.OS === 'web' ? { overflowY: 'scroll', flex: 1 } : { flex: 1 }}
+                        initialNumToRender={24}
+                        maxToRenderPerBatch={24}
+                        windowSize={5}
+                        removeClippedSubviews={Platform.OS !== 'web'}
+                        renderItem={({ item }) => (
+                            <View style={{ width: cardWidth }}>
+                                <CropCard
+                                    crop={item}
+                                    selected={selectedCrops.has(item.id)}
+                                    onPress={toggleCrop}
+                                    onLongPress={setContextMenuCrop}
+                                    cardWidth={cardWidth}
+                                />
+                            </View>
+                        )}
+                    />
+                </View>
+            )}
 
             {/* Sticky bottom bar — always visible Plan Crops button */}
             <View style={styles.stickyFooter}>
+                {selectedCrops.size > 0 && (
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12, maxHeight: 40 }} contentContainerStyle={{ gap: 8, paddingHorizontal: 4 }}>
+                        {Array.from(selectedCrops).map(id => {
+                            const cropMeta = CROPS.find(c => c.id === id);
+                            if (!cropMeta) return null;
+                            return (
+                                <TouchableOpacity key={id} onPress={() => removeCrop(id)} style={styles.compactSelectionBox}>
+                                    <Text style={{ fontSize: 16 }}>{cropMeta.emoji}</Text>
+                                    <Text style={styles.compactSelectionText}>{cropMeta.name}</Text>
+                                    <View style={styles.compactSelectionRemove}><Text style={{fontSize: 9, color: '#FFF'}}>✕</Text></View>
+                                </TouchableOpacity>
+                            );
+                        })}
+                    </ScrollView>
+                )}
                 <TouchableOpacity
                     style={[
                         styles.continueBtn,
@@ -442,7 +537,18 @@ const styles = StyleSheet.create({
         color: Colors.mutedText,
         paddingHorizontal: Spacing.lg,
         paddingTop: Spacing.md,
+        paddingBottom: Spacing.sm,
         lineHeight: 18,
+    },
+    
+    // ── Layout Modifiers ───────────────────────────────────────────────────────
+    desktopRow: {
+        flex: 1,
+        flexDirection: 'row',
+    },
+    desktopMainContent: {
+        flex: 1,
+        // The main content area also manages its own scroll state inherently via FlatList
     },
 
     // ── Filters ───────────────────────────────────────────────────────────────
@@ -467,13 +573,13 @@ const styles = StyleSheet.create({
     filterChipText: { fontSize: Typography.sm, color: Colors.primaryGreen, fontWeight: Typography.medium },
     filterChipTextActive: { color: Colors.cream },
 
-    // ── Grid ──────────────────────────────────────────────────────────────────
-    grid: { paddingHorizontal: Spacing.lg, paddingBottom: 100, paddingTop: Spacing.sm },
+    // ── Search & Grid ──────────────────────────────────────────────────────────────────
+    grid: { paddingHorizontal: Spacing.lg, paddingBottom: 100, paddingTop: Spacing.md },
     gridRow: { gap: Spacing.sm, marginBottom: Spacing.sm },
 
     // ── Crop Card ─────────────────────────────────────────────────────────────
     searchRow: {
-        marginHorizontal: Spacing.lg, marginBottom: Spacing.sm,
+        marginHorizontal: Spacing.lg, marginBottom: Spacing.sm, marginTop: Spacing.sm,
         borderRadius: Radius.md, backgroundColor: 'rgba(255,255,255,0.9)',
         borderWidth: 1.5, borderColor: 'rgba(45,79,30,0.18)',
         flexDirection: 'row', alignItems: 'center',
@@ -687,5 +793,16 @@ const styles = StyleSheet.create({
         fontSize: Typography.md,
         fontWeight: Typography.bold,
         letterSpacing: 1.5,
+    },
+    compactSelectionBox: {
+        flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF',
+        borderRadius: Radius.full, paddingLeft: 6, paddingRight: 8, paddingVertical: 4,
+        borderWidth: 1, borderColor: 'rgba(45,79,30,0.15)', gap: 6,
+        ...Shadows.card
+    },
+    compactSelectionText: { fontSize: 12, fontWeight: '700', color: Colors.primaryGreen },
+    compactSelectionRemove: {
+        width: 16, height: 16, borderRadius: 8, backgroundColor: '#B71C1C',
+        alignItems: 'center', justifyContent: 'center', marginLeft: 2
     },
 });

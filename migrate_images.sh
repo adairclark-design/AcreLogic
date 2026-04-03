@@ -1,0 +1,42 @@
+#!/bin/bash
+# Script to migrate generated crop images to the AcreLogic assets directory
+# Run this from the AcreLogic root folder
+
+BRAIN_DIR="$HOME/.gemini/antigravity/brain/b9c06c0a-0532-47b2-b66e-d09d86a11210"
+ASSETS_DIR="$HOME/Desktop/AntiGravity/AcreLogic/assets/crops"
+
+echo "Copying newly generated photorealistic crop images..."
+
+cp "$BRAIN_DIR/photo_aronia_1775150573371.png" "$ASSETS_DIR/aronia_viking.png"
+cp "$BRAIN_DIR/photo_beach_plum_1775150774098.png" "$ASSETS_DIR/beach_plum_standard.png"
+cp "$BRAIN_DIR/photo_black_currant_1775150588379.png" "$ASSETS_DIR/currant_black_ben_sarek.png"
+cp "$BRAIN_DIR/photo_black_currant_1775150588379.png" "$ASSETS_DIR/currant_black_titania.png"
+cp "$BRAIN_DIR/photo_blackberry_1775150913291.png" "$ASSETS_DIR/blackberry_triple_crown.png"
+cp "$BRAIN_DIR/photo_blackberry_1775150913291.png" "$ASSETS_DIR/blackberry_chester.png"
+cp "$BRAIN_DIR/photo_blackberry_1775150913291.png" "$ASSETS_DIR/blackberry_natchez.png"
+cp "$BRAIN_DIR/photo_blackberry_1775150913291.png" "$ASSETS_DIR/blackberry_ouachita.png"
+cp "$BRAIN_DIR/photo_blueberry_1775150790128.png" "$ASSETS_DIR/blueberry_bluecrop.png"
+cp "$BRAIN_DIR/photo_blueberry_1775150790128.png" "$ASSETS_DIR/blueberry_duke.png"
+cp "$BRAIN_DIR/photo_blueberry_1775150790128.png" "$ASSETS_DIR/blueberry_jersey.png"
+cp "$BRAIN_DIR/photo_blueberry_1775150790128.png" "$ASSETS_DIR/blueberry_sunshine_blue.png"
+cp "$BRAIN_DIR/photo_blueberry_1775150790128.png" "$ASSETS_DIR/blueberry_oneal.png"
+cp "$BRAIN_DIR/photo_blueberry_1775150790128.png" "$ASSETS_DIR/blueberry_patriot.png"
+cp "$BRAIN_DIR/photo_blueberry_1775150790128.png" "$ASSETS_DIR/blueberry_pink_lemonade.png"
+cp "$BRAIN_DIR/photo_blueberry_1775150790128.png" "$ASSETS_DIR/blueberry_top_hat.png"
+cp "$BRAIN_DIR/photo_cornelian_cherry_1775150805384.png" "$ASSETS_DIR/cornelian_cherry_standard.png"
+cp "$BRAIN_DIR/photo_currant_1775150819920.png" "$ASSETS_DIR/currant_white_imperial.png"
+cp "$BRAIN_DIR/photo_elderberry_1775150603218.png" "$ASSETS_DIR/elderberry_bob_gordon.png"
+cp "$BRAIN_DIR/photo_goji_1775150665676.png" "$ASSETS_DIR/goji_crimson_star.png"
+cp "$BRAIN_DIR/photo_gooseberry_1775150833032.png" "$ASSETS_DIR/gooseberry_hinnomaki_red.png"
+cp "$BRAIN_DIR/photo_gooseberry_1775150833032.png" "$ASSETS_DIR/gooseberry_pixwell.png"
+cp "$BRAIN_DIR/photo_gooseberry_1775150833032.png" "$ASSETS_DIR/gooseberry_invicta.png"
+cp "$BRAIN_DIR/photo_honeyberry_1775150617953.png" "$ASSETS_DIR/honeyberry_aurora.png"
+cp "$BRAIN_DIR/photo_jostaberry_1775150848438.png" "$ASSETS_DIR/jostaberry_standard.png"
+cp "$BRAIN_DIR/photo_lingonberry_1775150864674.png" "$ASSETS_DIR/lingonberry_koralle.png"
+cp "$BRAIN_DIR/photo_nanking_cherry_1775150882954.png" "$ASSETS_DIR/nanking_cherry_standard.png"
+cp "$BRAIN_DIR/photo_raspberry_1775150630021.png" "$ASSETS_DIR/raspberry_heritage.png"
+cp "$BRAIN_DIR/photo_red_currant_1775150645611.png" "$ASSETS_DIR/currant_red_rovada.png"
+cp "$BRAIN_DIR/photo_red_currant_1775150645611.png" "$ASSETS_DIR/currant_red_jonkheer.png"
+cp "$BRAIN_DIR/photo_sea_buckthorn_1775150897112.png" "$ASSETS_DIR/sea_buckthorn_leikora.png"
+
+echo "Done! If you see 'Operation not permitted', please grant Full Disk Access to your terminal or manually drag-and-drop the 17 new images."

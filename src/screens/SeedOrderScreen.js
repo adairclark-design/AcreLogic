@@ -14,10 +14,11 @@
  *   - Copy-to-clipboard for the full order list
  *   - Expandable planting-day breakdown per crop
  */
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useCallback } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import {
     View, Text, StyleSheet, ScrollView, TouchableOpacity,
-    ActivityIndicator, Platform, Clipboard, Image,
+    ActivityIndicator, Platform, Clipboard, Image, Modal
 } from 'react-native';
 import { Colors, Typography, Spacing, Radius, Shadows } from '../theme';
 import cropData from '../data/crops.json';
@@ -55,9 +56,25 @@ function daysDiff(isoDate) {
 function recommendPackets(item) {
     if (item.reqType === 'seeds') {
         const meta = CROPS_MAP[item.cropId];
-        const pktSize = meta?.seeds_per_packet || 100;
-        const pkts = Math.ceil(item.totalSeeds / pktSize);
-        return `${pkts} × ${pktSize}-seed pkt`;
+        const basePkt = meta?.seeds_per_packet || 100;
+        const total = item.totalSeeds;
+        
+        // Build out a progression of standard commercial packet sizes
+        const rawSteps = [basePkt, 100, 250, 500, 1000, 5000, 10000, 25000];
+        const uniqueSteps = [...new Set(rawSteps)].sort((a, b) => a - b);
+        
+        // Find the most appropriate commercial bulk tier
+        for (const size of uniqueSteps) {
+            if (total <= size) {
+                if (size >= 5000) return `1 × ${size.toLocaleString()}-seed bag`;
+                if (size === 1000) return `1 × 1M (1,000) seeds`;
+                return `1 × ${size.toLocaleString()}-seed pkt`;
+            }
+        }
+        
+        // Above 25,000 seeds
+        const pkts = Math.ceil(total / 25000);
+        return `${pkts} × 25k-seed bag`;
     }
 
     const totalOz = item.totalOz;
@@ -68,7 +85,10 @@ function recommendPackets(item) {
     if (totalOz <= 2.0) return `2 × 1oz packets`;
     if (totalOz <= 4.0) return '1 × ¼lb bag';
     if (totalOz <= 8.0) return '1 × ½lb bag';
-    return `${Math.ceil(totalOz / 8)} × ½lb bags`;
+    if (totalOz <= 16.0) return '1 × 1lb bag';
+    if (totalOz <= 80.0) return '1 × 5lb bag';
+    if (totalOz <= 160.0) return '1 × 10lb bag';
+    return `${Math.ceil(totalOz / 160)} × 10lb bags`;
 }
 
 function fmtReq(item) {
@@ -112,17 +132,7 @@ async function buildSeedList(planId) {
         if (typeof localStorage === 'undefined') return [];
         const seedMap = {};
 
-        // Source 1 — 8-Bed Workspace flat store (Legacy / Default Dashboard)
-        const flatRaw = localStorage.getItem('acrelogic_bed_successions');
-        if (flatRaw) {
-            try {
-                const flatData = JSON.parse(flatRaw);
-                for (const [bedNum, successions] of Object.entries(flatData)) {
-                    if (Array.isArray(successions))
-                        accumulateSeeds(seedMap, successions, bedNum, '8-Bed Plan', 30);
-                }
-            } catch {}
-        }
+
 
         // Source 2 — Farm Designer per-block stores
         const allBlocks = loadBlocks();
@@ -267,77 +277,99 @@ const WaveHeader = ({ label, waveNum, itemCount }) => (
     </View>
 );
 
-const SeedRow = ({ item, expanded, onToggle }) => {
+const SeedCard = ({ item, onOpenBreakdown }) => {
     const packets = recommendPackets(item);
     const daysUntilBuy = item.earliestBuyDate ? daysDiff(item.earliestBuyDate) : null;
     const isUrgent = daysUntilBuy !== null && daysUntilBuy <= 14;
 
     return (
         <TouchableOpacity
-            style={[styles.seedRow, isUrgent && styles.seedRowUrgent]}
-            onPress={onToggle}
+            style={[styles.seedCard, isUrgent && styles.seedCardUrgent]}
+            onPress={() => onOpenBreakdown(item)}
             activeOpacity={0.8}
         >
-            {/* Crop image — falls back to emoji if not in CROP_IMAGES */}
-            {CROP_IMAGES[item.cropId] ? (
-                <Image
-                    source={CROP_IMAGES[item.cropId]}
-                    style={styles.seedImage}
-                    resizeMode="cover"
-                />
-            ) : (
-                <Text style={styles.seedEmoji}>{item.emoji}</Text>
-            )}
-            <View style={styles.seedInfo}>
-                <View style={styles.seedTopRow}>
-                    <Text style={styles.seedName}>{item.name}</Text>
-                    <View style={[styles.seedTypeBadge, item.seedType === 'TP' && styles.seedTypeBadgeTP]}>
-                        <Text style={styles.seedTypeText}>{item.seedType}</Text>
-                    </View>
-                </View>
-                {item.variety && <Text style={styles.seedVariety}>{item.variety}</Text>}
-
-                <View style={styles.seedMetaRow}>
-                    {/* Requirement needed */}
-                    <View style={styles.seedOzBadge}>
-                        <Text style={styles.seedOzText}>🌱 {fmtReq(item)}</Text>
-                    </View>
-                    {/* Packet recommendation */}
-                    {packets && (
-                        <View style={styles.packetBadge}>
-                            <Text style={styles.packetText}>📦 {packets}</Text>
-                        </View>
-                    )}
-                </View>
-
-                {item.earliestBuyDate && (
-                    <Text style={[styles.seedBuyDate, isUrgent && styles.seedBuyDateUrgent]}>
-                        {isUrgent ? '⚡' : '📅'} Order by {fmtDate(item.earliestBuyDate)}
-                        {daysUntilBuy !== null && daysUntilBuy >= 0
-                            ? ` (${daysUntilBuy === 0 ? 'today!' : `${daysUntilBuy}d`})`
-                            : daysUntilBuy < 0 ? ' — overdue' : ''}
-                    </Text>
+            <View style={styles.cardHeader}>
+                {CROP_IMAGES[item.cropId] ? (
+                    <Image
+                        source={CROP_IMAGES[item.cropId]}
+                        style={styles.cardImage}
+                        resizeMode="cover"
+                    />
+                ) : (
+                    <Text style={styles.cardEmoji}>{item.emoji}</Text>
                 )}
+                <View style={styles.cardHeaderInfo}>
+                    <Text style={styles.cardName} numberOfLines={1} adjustsFontSizeToFit>{item.name}</Text>
+                    {item.variety && <Text style={styles.cardVariety} numberOfLines={1}>{item.variety}</Text>}
+                </View>
+            </View>
 
-                {expanded && item.plantingDays.length > 0 && (
-                    <View style={styles.plantingBreakdown}>
-                        <Text style={styles.breakdownTitle}>Planting schedule:</Text>
+            <View style={styles.cardBody}>
+                {/* Seed Requirement Badge */}
+                <View style={styles.cardOzBadge}>
+                    <Text style={styles.cardOzText}>🌱 {fmtReq(item)}</Text>
+                    {item.seedType === 'TP' && <Text style={styles.cardTpText}> (TP)</Text>}
+                </View>
+                
+                {/* Packet Suggestion */}
+                {packets && (
+                    <View style={styles.cardPacketBadge}>
+                        <Text style={styles.cardPacketText}>📦 {packets}</Text>
+                    </View>
+                )}
+            </View>
+
+            {item.earliestBuyDate && (
+                <View style={styles.cardFooter}>
+                    <Text style={[styles.cardDateText, isUrgent && styles.cardDateUrgent]}>
+                        {isUrgent ? '⚡' : '📅'} {fmtDate(item.earliestBuyDate)}
+                    </Text>
+                </View>
+            )}
+        </TouchableOpacity>
+    );
+};
+// Breakdown Modal
+const BreakdownModal = ({ item, visible, onClose }) => {
+    if (!item) return null;
+    return (
+        <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+            <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={onClose}>
+                <View style={styles.modalContent} onStartShouldSetResponder={() => true}>
+                    <View style={styles.modalHeader}>
+                        {CROP_IMAGES[item.cropId] ? (
+                            <Image source={CROP_IMAGES[item.cropId]} style={styles.modalImage} resizeMode="cover" />
+                        ) : (
+                            <Text style={styles.modalEmoji}>{item.emoji}</Text>
+                        )}
+                        <View style={{ flex: 1 }}>
+                            <Text style={styles.modalTitle}>{item.name}</Text>
+                            {item.variety && <Text style={styles.modalSubtitle}>{item.variety}</Text>}
+                        </View>
+                        <TouchableOpacity onPress={onClose} style={styles.modalClose}>
+                            <Text style={styles.modalCloseText}>✕</Text>
+                        </TouchableOpacity>
+                    </View>
+                    
+                    <Text style={styles.modalBreakdownLabel}>PLANTING BREAKDOWN</Text>
+                    <ScrollView style={styles.modalScroll} showsVerticalScrollIndicator={false}>
                         {item.plantingDays
                             .sort((a, b) => (a.date ?? '').localeCompare(b.date ?? ''))
                             .map((pd, i) => (
-                                <View key={i} style={styles.breakdownRow}>
-                                    <Text style={styles.breakdownDate}>{fmtDate(pd.date)}</Text>
-                                    <Text style={styles.breakdownBlock}>{pd.blockName} · Bed {pd.bedNum}</Text>
-                                    <Text style={styles.breakdownOz}>
+                                <View key={i} style={styles.modalRow}>
+                                    <View style={styles.modalRowLeft}>
+                                        <Text style={styles.modalDate}>{fmtDate(pd.date)}</Text>
+                                        <Text style={styles.modalBlock}>{pd.blockName} • Bed {pd.bedNum}</Text>
+                                    </View>
+                                    <Text style={styles.modalOz}>
                                         {pd.req.type === 'seeds' ? `${pd.req.val} seeds` : fmtReq({reqType: 'oz', totalOz: pd.req.val})}
                                     </Text>
                                 </View>
                             ))}
-                    </View>
-                )}
-            </View>
-            <Text style={styles.chevron}>{expanded ? '∧' : '›'}</Text>
-        </TouchableOpacity>
+                    </ScrollView>
+                </View>
+            </TouchableOpacity>
+        </Modal>
     );
 };
 
@@ -347,15 +379,16 @@ export default function SeedOrderScreen({ navigation, route }) {
     const { farmProfile, planId } = route?.params ?? {};
     const [seedList, setSeedList] = useState([]);
     const [loading, setLoading] = useState(true);
-    const [expandedId, setExpandedId] = useState(null);
+    const [breakdownItem, setBreakdownItem] = useState(null);
     const [copied, setCopied] = useState(false);
 
-    useEffect(() => {
+    useFocusEffect(useCallback(() => {
+        setLoading(true);
         buildSeedList(planId).then(list => {
             setSeedList(list);
             setLoading(false);
         });
-    }, [planId]);
+    }, [planId]));
 
     const totalCrops = seedList.length;
     const totalOzAll = seedList.reduce((s, r) => s + r.totalOz, 0);
@@ -457,20 +490,27 @@ export default function SeedOrderScreen({ navigation, route }) {
                                 waveNum={waveIdx + 1}
                                 itemCount={wave.items.length}
                             />
-                            {wave.items.map(item => (
-                                <SeedRow
-                                    key={item.cropId}
-                                    item={item}
-                                    expanded={expandedId === item.cropId}
-                                    onToggle={() => setExpandedId(prev => prev === item.cropId ? null : item.cropId)}
-                                />
-                            ))}
+                            <View style={styles.waveGrid}>
+                                {wave.items.map(item => (
+                                    <SeedCard
+                                        key={item.cropId}
+                                        item={item}
+                                        onOpenBreakdown={setBreakdownItem}
+                                    />
+                                ))}
+                            </View>
                         </View>
                     ))}
 
                     <View style={{ height: 60 }} />
                 </ScrollView>
             )}
+            
+            <BreakdownModal 
+                item={breakdownItem} 
+                visible={!!breakdownItem} 
+                onClose={() => setBreakdownItem(null)} 
+            />
         </View>
     );
 }
@@ -536,64 +576,84 @@ const styles = StyleSheet.create({
         backgroundColor: Colors.primaryGreen, borderRadius: Radius.sm,
         paddingVertical: 10, paddingHorizontal: Spacing.md,
     },
+    waveGrid: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 8,
+        marginTop: 4,
+    },
     waveHeaderLeft: { gap: 1 },
     waveNum: { fontSize: 9, fontWeight: '800', color: 'rgba(255,255,255,0.65)', letterSpacing: 1.5 },
     waveLabel: { fontSize: Typography.base, fontWeight: '800', color: Colors.cream },
     waveCount: { fontSize: Typography.xs, color: 'rgba(255,255,255,0.7)', fontWeight: '600' },
 
-    // ── Seed Row ──────────────────────────────────────────────────────────────
-    seedRow: {
-        backgroundColor: '#FAFAF7', borderRadius: Radius.md, padding: 10,
-        flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.xs,
-        borderWidth: 1, borderColor: 'rgba(45,79,30,0.1)',
+    // ── Compact Seed Card ──────────────────────────────────────────────────────
+    seedCard: {
+        backgroundColor: '#FCFCF9', 
+        borderRadius: Radius.md, 
+        padding: 8,
+        width: 155, // Optimized to fit ~6-8 across on standard widescreen displays, 2-3 on mobile
+        borderWidth: 1.5, 
+        borderColor: 'rgba(45,79,30,0.1)',
+        justifyContent: 'space-between',
+        flexGrow: 0,
     },
-    seedRowUrgent: { borderColor: '#F59E0B', backgroundColor: '#FFFBF0' },
-    seedEmoji: { fontSize: 22, marginTop: 1 },
-    seedImage: {
-        width: 32,
-        height: 32,
-        borderRadius: 4,
-        marginTop: 2,
-        backgroundColor: 'rgba(45,79,30,0.06)',
+    seedCardUrgent: { borderColor: '#F59E0B', backgroundColor: '#FFFBF0' },
+    
+    cardHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginBottom: 6 },
+    cardImage: { width: 32, height: 32, borderRadius: 4, backgroundColor: 'rgba(45,79,30,0.06)' },
+    cardEmoji: { fontSize: 24, lineHeight: 32, textAlign: 'center' },
+    cardHeaderInfo: { flex: 1, justifyContent: 'center' },
+    cardName: { fontSize: 16, fontWeight: '900', color: Colors.primaryGreen },
+    cardVariety: { fontSize: 11, color: Colors.mutedText },
+    
+    cardBody: { gap: 4, marginBottom: 8 },
+    cardOzBadge: {
+        flexDirection: 'row', alignItems: 'center', backgroundColor: Colors.primaryGreen, 
+        paddingHorizontal: 6, paddingVertical: 3, borderRadius: Radius.sm, alignSelf: 'flex-start'
     },
-    seedInfo: { flex: 1, gap: 2 },
-    seedTopRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-    seedName: { fontSize: 14, fontWeight: '800', color: Colors.primaryGreen, flex: 1 },
-    seedTypeBadge: {
-        backgroundColor: 'rgba(45,79,30,0.12)', paddingHorizontal: 7,
-        paddingVertical: 2, borderRadius: Radius.full,
+    cardOzText: { fontSize: 12, fontWeight: '900', color: Colors.cream },
+    cardTpText: { fontSize: 10, fontWeight: '700', color: 'rgba(255,255,255,0.7)' },
+    
+    cardPacketBadge: {
+        backgroundColor: 'rgba(255,165,0,0.15)', paddingHorizontal: 6, paddingVertical: 3, 
+        borderRadius: Radius.sm, borderWidth: 1, borderColor: 'rgba(255,165,0,0.3)', alignSelf: 'flex-start'
     },
-    seedTypeBadgeTP: { backgroundColor: 'rgba(100,60,200,0.13)' },
-    seedTypeText: { fontSize: 9, fontWeight: '800', color: Colors.primaryGreen },
-    seedVariety: { fontSize: 10, color: Colors.mutedText },
-    seedMetaRow: { flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginTop: 1 },
+    cardPacketText: { fontSize: 11, fontWeight: '800', color: '#92400E' },
+    
+    cardFooter: { borderTopWidth: 1, borderTopColor: 'rgba(45,79,30,0.08)', paddingTop: 6 },
+    cardDateText: { fontSize: 11, color: Colors.mutedText, fontWeight: '700' },
+    cardDateUrgent: { color: '#B45309', fontWeight: '900' },
 
-    seedOzBadge: { backgroundColor: Colors.primaryGreen, paddingHorizontal: 6, paddingVertical: 2, borderRadius: Radius.sm },
-    seedOzText: { fontSize: 9, fontWeight: '800', color: Colors.cream },
-
-    packetBadge: {
-        backgroundColor: 'rgba(255,165,0,0.12)', paddingHorizontal: 6,
-        paddingVertical: 2, borderRadius: Radius.sm,
-        borderWidth: 1, borderColor: 'rgba(255,165,0,0.3)',
+    // ── Modal Breakdown ───────────────────────────────────────────────────────
+    modalOverlay: {
+        flex: 1, backgroundColor: 'rgba(0,0,0,0.5)',
+        alignItems: 'center', justifyContent: 'center', padding: Spacing.lg
     },
-    packetText: { fontSize: 9, fontWeight: '700', color: '#92400E' },
-
-    seedBuyDate: { fontSize: 9, color: Colors.mutedText, fontWeight: '600', marginTop: 1 },
-    seedBuyDateUrgent: { color: '#B45309', fontWeight: '800' },
-
-    chevron: { fontSize: 18, color: Colors.mutedText, marginTop: 2 },
-
-    // ── Planting Breakdown ────────────────────────────────────────────────────
-    plantingBreakdown: {
-        marginTop: 8, borderTopWidth: 1, borderTopColor: 'rgba(45,79,30,0.1)',
-        paddingTop: 6, gap: 4,
+    modalContent: {
+        width: '100%', maxWidth: 450, backgroundColor: Colors.white,
+        borderRadius: Radius.lg, padding: Spacing.lg, maxHeight: '80%',
+        ...Shadows.card
     },
-    breakdownTitle: {
-        fontSize: 9, fontWeight: '800', color: Colors.primaryGreen,
-        textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 2,
+    modalHeader: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md, marginBottom: Spacing.md },
+    modalImage: { width: 44, height: 44, borderRadius: 6 },
+    modalEmoji: { fontSize: 36 },
+    modalTitle: { fontSize: 20, fontWeight: '900', color: Colors.primaryGreen },
+    modalSubtitle: { fontSize: 14, color: Colors.mutedText, fontWeight: '600' },
+    modalClose: { padding: 4 },
+    modalCloseText: { fontSize: 22, color: Colors.mutedText, fontWeight: 'bold' },
+    
+    modalBreakdownLabel: {
+        fontSize: 11, fontWeight: '800', color: Colors.mutedText,
+        letterSpacing: 1.5, marginBottom: Spacing.sm, marginTop: Spacing.sm
     },
-    breakdownRow: { flexDirection: 'row', gap: Spacing.sm, alignItems: 'center' },
-    breakdownDate: { fontSize: 10, fontWeight: '700', color: Colors.primaryGreen, width: 40 },
-    breakdownBlock: { fontSize: 10, color: Colors.mutedText, flex: 1 },
-    breakdownOz: { fontSize: 10, fontWeight: '700', color: Colors.primaryGreen },
+    modalScroll: { gap: Spacing.sm },
+    modalRow: {
+        flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+        paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#f1f1f1'
+    },
+    modalRowLeft: { flex: 1, gap: 2 },
+    modalDate: { fontSize: 14, fontWeight: '800', color: Colors.primaryGreen },
+    modalBlock: { fontSize: 12, color: Colors.mutedText, fontWeight: '600' },
+    modalOz: { fontSize: 14, fontWeight: '900', color: Colors.burntOrange }
 });

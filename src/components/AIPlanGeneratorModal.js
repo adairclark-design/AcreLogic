@@ -174,7 +174,7 @@ export default function AIPlanGeneratorModal({ visible, farmProfile, frostFreeDa
                     <Text style={styles.headerIcon}>🤖</Text>
                     <View style={styles.headerText}>
                         <Text style={styles.title}>AI Plan Generator</Text>
-                        <Text style={styles.subtitle}>Gemini designs your 8-bed CSA plan</Text>
+                        <Text style={styles.subtitle}>Gemini designs your farm block CSA plan</Text>
                     </View>
                     <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
                         <Text style={styles.closeBtnText}>✕</Text>

@@ -1,23 +1,9 @@
-/**
- * MegaMenuBar.js
- * ══════════════
- * Johnny Seeds-style mega menu for crop category navigation.
- * - Hover (web) or tap (mobile) a top-level tab to open the panel
- * - Panel shows subcategories as clickable chips
- * - Calls onFilterChange({ label, filterFn }) when selection changes
- * - "All" resets to show every crop
- */
-import React, { useState, useRef, useCallback, useEffect } from 'react';
-import {
-    View, Text, TouchableOpacity, ScrollView,
-    StyleSheet, Platform, Animated, Pressable,
-} from 'react-native';
-import { Colors, Typography, Spacing, Radius, Shadows } from '../theme';
 
-// ─── Taxonomy ─────────────────────────────────────────────────────────────────
-// Each top-level entry has: label, emoji, subcategories[]
-// Each subcategory has: label, filter(crop) → bool
-export const MEGA_CATEGORIES = [
+const fs = require('fs');
+const cropsData = JSON.parse(fs.readFileSync('src/data/crops.json', 'utf8'));
+const crops = cropsData.crops;
+
+const MEGA_CATEGORIES = [
     // ── All ───────────────────────────────────────────────────────────────────
     {
         label: 'All',
@@ -218,263 +204,42 @@ export const MEGA_CATEGORIES = [
 ];
 
 // ─── Component ────────────────────────────────────────────────────────────────
-export default function MegaMenuBar({ onFilterChange }) {
-    const [openIndex, setOpenIndex] = useState(null);   // which top tab is open
-    const [activeLabel, setActiveLabel] = useState('All');
-    const panelAnim = useRef(new Animated.Value(0)).current;
-    const closeTimer = useRef(null);
 
-    const openPanel = useCallback((idx) => {
-        clearTimeout(closeTimer.current);
-        setOpenIndex(idx);
-        Animated.spring(panelAnim, {
-            toValue: 1, tension: 200, friction: 20, useNativeDriver: true,
-        }).start();
-    }, [panelAnim]);
 
-    const closePanel = useCallback((delay = 0) => {
-        clearTimeout(closeTimer.current);
-        closeTimer.current = setTimeout(() => {
-            Animated.timing(panelAnim, {
-                toValue: 0, duration: 120, useNativeDriver: true,
-            }).start(() => setOpenIndex(null));
-        }, delay);
-    }, [panelAnim]);
+let unmapped = [];
+let sub_unmapped = [];
 
-    useEffect(() => () => clearTimeout(closeTimer.current), []);
-
-    const selectTop = (cat, idx) => {
-        if (cat.subcategories.length === 0) {
-            // "All" — direct select
-            setActiveLabel('All');
-            setOpenIndex(null);
-            onFilterChange({ label: 'All', filterFn: () => true });
-            return;
+for (const c of crops) {
+    let topLevels = MEGA_CATEGORIES.filter(cat => cat.label !== 'All' && cat.filter(c));
+    if (topLevels.length === 0) {
+        unmapped.push(c);
+        continue;
+    }
+    
+    let hasSub = false;
+    for (const topCat of topLevels) {
+        if (topCat.subcategories.some(sub => sub.filter(c))) {
+            hasSub = true;
+            break;
         }
-        if (openIndex === idx) {
-            closePanel();
-        } else {
-            openPanel(idx);
-        }
-    };
-
-    const selectSub = (topCat, sub) => {
-        setActiveLabel(sub.label);
-        closePanel();
-        onFilterChange({ label: sub.label, filterFn: sub.filter });
-    };
-
-    const selectTopAll = (topCat) => {
-        setActiveLabel(topCat.label);
-        closePanel();
-        onFilterChange({ label: topCat.label, filterFn: topCat.filter });
-    };
-
-    const openCat = openIndex != null ? MEGA_CATEGORIES[openIndex] : null;
-
-    return (
-        <View style={styles.wrapper}>
-            {/* ── Tab bar ── */}
-            <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                style={styles.tabBar}
-                contentContainerStyle={styles.tabBarContent}
-            >
-                {MEGA_CATEGORIES.map((cat, idx) => {
-                    const isActive = activeLabel === 'All' ? cat.label === 'All' : activeLabel === cat.label || cat.subcategories.some(s => s.label === activeLabel);
-                    const isOpen = openIndex === idx;
-                    return (
-                        <Pressable
-                            key={cat.label}
-                            style={[styles.tab, isActive && styles.tabActive, isOpen && styles.tabOpen]}
-                            onPress={() => selectTop(cat, idx)}
-                            // Web: hover opens panel
-                            {...(Platform.OS === 'web' ? {
-                                onMouseEnter: () => cat.subcategories.length > 0 && openPanel(idx),
-                                onMouseLeave: () => closePanel(150),
-                            } : {})}
-                        >
-                            <Text style={styles.tabEmoji}>{cat.emoji}</Text>
-                            <Text style={[styles.tabText, isActive && styles.tabTextActive]}>
-                                {cat.label}
-                            </Text>
-                            {cat.subcategories.length > 0 && (
-                                <Text style={[styles.tabChevron, isOpen && styles.tabChevronOpen]}>›</Text>
-                            )}
-                        </Pressable>
-                    );
-                })}
-            </ScrollView>
-
-            {/* ── Mega panel dropdown ── */}
-            {openCat && openCat.subcategories.length > 0 && (
-                <Animated.View
-                    style={[
-                        styles.panel,
-                        Shadows.card,
-                        {
-                            opacity: panelAnim,
-                            transform: [{
-                                translateY: panelAnim.interpolate({
-                                    inputRange: [0, 1], outputRange: [-8, 0],
-                                }),
-                            }],
-                        },
-                    ]}
-                    {...(Platform.OS === 'web' ? {
-                        onMouseEnter: () => clearTimeout(closeTimer.current),
-                        onMouseLeave: () => closePanel(80),
-                    } : {})}
-                >
-                    {/* Panel header — "View All X" */}
-                    <TouchableOpacity
-                        style={styles.panelHeader}
-                        onPress={() => selectTopAll(openCat)}
-                    >
-                        <Text style={styles.panelHeaderEmoji}>{openCat.emoji}</Text>
-                        <Text style={styles.panelHeaderTitle}>{openCat.label}</Text>
-                        <Text style={styles.panelHeaderViewAll}>View All →</Text>
-                    </TouchableOpacity>
-
-                    {/* Subcategory chips */}
-                    <View style={styles.panelSubcats}>
-                        {openCat.subcategories.map(sub => {
-                            const isActiveSub = activeLabel === sub.label;
-                            return (
-                                <TouchableOpacity
-                                    key={sub.label}
-                                    style={[styles.subChip, isActiveSub && styles.subChipActive]}
-                                    onPress={() => selectSub(openCat, sub)}
-                                >
-                                    <Text style={[styles.subChipText, isActiveSub && styles.subChipTextActive]}>
-                                        {sub.label}
-                                    </Text>
-                                </TouchableOpacity>
-                            );
-                        })}
-                    </View>
-                </Animated.View>
-            )}
-        </View>
-    );
+    }
+    if (!hasSub) {
+        sub_unmapped.push({ crop: c, topCat: topLevels.map(v => v.label).join(', ') });
+    }
 }
 
-// ─── Styles ───────────────────────────────────────────────────────────────────
-const styles = StyleSheet.create({
-    wrapper: {
-        position: 'relative',
-        zIndex: 50,
-        backgroundColor: Colors.white,
-        borderBottomWidth: 1,
-        borderBottomColor: 'rgba(45,79,30,0.1)',
-    },
-
-    // ── Tab bar ───────────────────────────────────────────────────────────────
-    tabBar: { flexShrink: 0 },
-    tabBarContent: {
-        paddingHorizontal: Spacing.lg,
-        paddingVertical: 6,
-        gap: 4,
-        alignItems: 'center',
-    },
-    tab: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 4,
-        paddingVertical: 6,
-        paddingHorizontal: 12,
-        borderRadius: Radius.full,
-        borderWidth: 1.5,
-        borderColor: 'transparent',
-        backgroundColor: 'transparent',
-        ...(Platform.OS === 'web' ? { cursor: 'pointer' } : {}),
-    },
-    tabActive: {
-        backgroundColor: Colors.primaryGreen,
-        borderColor: Colors.primaryGreen,
-    },
-    tabOpen: {
-        backgroundColor: 'rgba(45,79,30,0.08)',
-        borderColor: 'rgba(45,79,30,0.25)',
-    },
-    tabEmoji: { fontSize: 13 },
-    tabText: {
-        fontSize: 12,
-        fontWeight: Typography.semiBold,
-        color: Colors.primaryGreen,
-        whiteSpace: 'nowrap',
-    },
-    tabTextActive: { color: Colors.cream },
-    tabChevron: {
-        fontSize: 14,
-        color: Colors.mutedText,
-        transform: [{ rotate: '90deg' }],
-        lineHeight: 16,
-    },
-    tabChevronOpen: {
-        transform: [{ rotate: '270deg' }],
-    },
-
-    // ── Dropdown panel ────────────────────────────────────────────────────────
-    panel: {
-        position: 'absolute',
-        top: '100%',
-        left: 0,
-        right: 0,
-        backgroundColor: Colors.white,
-        borderBottomWidth: 2,
-        borderBottomColor: Colors.primaryGreen,
-        borderTopWidth: 0,
-        paddingBottom: Spacing.md,
-        zIndex: 99,
-        ...(Platform.OS === 'web' ? { boxShadow: '0 8px 24px rgba(0,0,0,0.12)' } : {}),
-    },
-    panelHeader: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 8,
-        paddingHorizontal: Spacing.lg,
-        paddingVertical: 10,
-        borderBottomWidth: 1,
-        borderBottomColor: 'rgba(45,79,30,0.08)',
-    },
-    panelHeaderEmoji: { fontSize: 16 },
-    panelHeaderTitle: {
-        flex: 1,
-        fontSize: Typography.md,
-        fontWeight: Typography.bold,
-        color: Colors.primaryGreen,
-    },
-    panelHeaderViewAll: {
-        fontSize: Typography.xs,
-        color: Colors.burntOrange,
-        fontWeight: Typography.semiBold,
-    },
-    panelSubcats: {
-        flexDirection: 'row',
-        flexWrap: 'wrap',
-        paddingHorizontal: Spacing.lg,
-        paddingTop: Spacing.sm,
-        gap: 8,
-    },
-    subChip: {
-        paddingVertical: 6,
-        paddingHorizontal: 14,
-        borderRadius: Radius.full,
-        backgroundColor: 'rgba(45,79,30,0.06)',
-        borderWidth: 1.5,
-        borderColor: 'rgba(45,79,30,0.18)',
-        ...(Platform.OS === 'web' ? { cursor: 'pointer' } : {}),
-    },
-    subChipActive: {
-        backgroundColor: Colors.primaryGreen,
-        borderColor: Colors.primaryGreen,
-    },
-    subChipText: {
-        fontSize: 12,
-        fontWeight: Typography.medium,
-        color: Colors.primaryGreen,
-    },
-    subChipTextActive: { color: Colors.cream },
-});
+if (unmapped.length > 0) {
+    console.log('=== COMPLETELY ORPHANED CROPS ===');
+    console.log(unmapped.map(c => c.id + ' (Cat: ' + c.category + ')').join('\n'));
+} else {
+    console.log('All crops belong to at least one top-level tab.');
+}
+console.log('');
+if (sub_unmapped.length > 0) {
+    console.log('=== ORPHANED FROM SUB-TABS ===');
+    sub_unmapped.forEach(item => {
+        console.log(item.crop.id + ' (In ' + item.topCat + ')');
+    });
+} else {
+    console.log('All categorized crops belong to at least one sub-tab.');
+}

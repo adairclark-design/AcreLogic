@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useState } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import {
     View, Text, StyleSheet, ScrollView, TouchableOpacity,
     ActivityIndicator, Platform
@@ -201,10 +202,11 @@ export default function CropCalendarScreen({ navigation, route }) {
     const { farmProfile = {}, planId, bedSuccessions, fromWorkspace } = route?.params ?? {};
     const [events, setEvents] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [activeTab, setActiveTab] = useState('planting'); // 'planting' | 'harvests'
 
-    useEffect(() => {
+    useFocusEffect(useCallback(() => {
         loadAndProcessEvents();
-    }, [planId]);
+    }, [planId]));
 
     const loadAndProcessEvents = async () => {
         try {
@@ -213,7 +215,7 @@ export default function CropCalendarScreen({ navigation, route }) {
             if (fromWorkspace && bedSuccessions) {
                 // Called from generic workspace or older component
                 allSuccessionsData = Object.entries(bedSuccessions).map(([bedNum, succs]) => ({
-                    blockName: '8-Bed Plan',
+                    blockName: route?.params?.blockName || 'Current Block',
                     bed_number: parseInt(bedNum),
                     successions: succs
                 }));
@@ -256,8 +258,8 @@ export default function CropCalendarScreen({ navigation, route }) {
                         type: entry.plan_entry_type,
                         blockName: item.blockName,
                         weekKey: isoDate(ws),
-                        monthKey: `${dateObj.getFullYear()}-${String(dateObj.getMonth()).padStart(2, '0')}`,
-                        monthLabel: `${MONTH_NAMES[dateObj.getMonth()]} ${dateObj.getFullYear()}`,
+                        monthKey: `${ws.getFullYear()}-${String(ws.getMonth()).padStart(2, '0')}`,
+                        monthLabel: `${MONTH_NAMES[ws.getMonth()]} ${ws.getFullYear()}`,
                         weekLabel: weekLabel(ws),
                         plants: entry.plant_count,
                         cropName: entry.crop_name,
@@ -289,7 +291,18 @@ export default function CropCalendarScreen({ navigation, route }) {
         }
     };
 
-    const groupedEvents = groupEvents(events);
+    // Filter by active tab BEFORE grouping week/month
+    const filteredEvents = events.filter(e => {
+        if (activeTab === 'harvests') {
+            return e.type === 'harvest';
+        } else if (activeTab === 'planting') {
+            // Include starting, transplanting, direct sow, and cover crop
+            return ['seed_start', 'direct_seed', 'buy_starts', 'transplant', 'cover_crop'].includes(e.type);
+        }
+        return true; 
+    });
+
+    const groupedEvents = groupEvents(filteredEvents);
 
     return (
         <View style={screenStyles.container}>
@@ -306,6 +319,23 @@ export default function CropCalendarScreen({ navigation, route }) {
                     ) : null
                 }
             />
+
+            {/* In-Page Navigation Tabs */}
+            <View style={screenStyles.tabRow}>
+                <TouchableOpacity 
+                    style={[screenStyles.tabBtn, activeTab === 'planting' && screenStyles.tabBtnActive]} 
+                    onPress={() => setActiveTab('planting')}
+                >
+                    <Text style={[screenStyles.tabText, activeTab === 'planting' && screenStyles.tabTextActive]}>Planting (TP / DS)</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity 
+                    style={[screenStyles.tabBtn, activeTab === 'harvests' && screenStyles.tabBtnActive]} 
+                    onPress={() => setActiveTab('harvests')}
+                >
+                    <Text style={[screenStyles.tabText, activeTab === 'harvests' && screenStyles.tabTextActive]}>Harvests</Text>
+                </TouchableOpacity>
+            </View>
 
             {loading ? (
                 <View style={screenStyles.loadingContainer}>
@@ -486,6 +516,30 @@ const screenStyles = StyleSheet.create({
         paddingBottom: Spacing.md,
         backgroundColor: Colors.primaryGreen,
         gap: Spacing.sm,
+    },
+    tabRow: {
+        flexDirection: 'row',
+        paddingHorizontal: Spacing.lg,
+        paddingBottom: Spacing.md,
+        backgroundColor: Colors.primaryGreen,
+        gap: Spacing.sm,
+    },
+    tabBtn: {
+        paddingVertical: 8,
+        paddingHorizontal: 16,
+        borderRadius: Radius.full,
+        backgroundColor: 'rgba(255,255,255,0.15)',
+    },
+    tabBtnActive: {
+        backgroundColor: Colors.cream,
+    },
+    tabText: {
+        fontSize: Typography.sm,
+        fontWeight: Typography.bold,
+        color: 'rgba(255,255,255,0.8)',
+    },
+    tabTextActive: {
+        color: Colors.primaryGreen,
     },
     backBtn: { padding: 4 },
     backArrow: { fontSize: 28, color: Colors.cream, lineHeight: 30 },

@@ -3,7 +3,7 @@
  * ===========================
  * The agronomic brain of the app. Given a bed's history and the frost window,
  * it determines what crops can follow, ranks them by rotation quality,
- * and can auto-generate full 8-bed plans.
+ * and can auto-generate full farm block plans.
  *
  * Sources:
  *   - JM Fortier, The Market Gardener
@@ -33,6 +33,42 @@ function safeParseArray(value, fallback = []) {
     if (Array.isArray(value)) return value;
     if (!value) return fallback;
     try { return JSON.parse(value); } catch { return fallback; }
+}
+
+// ─── Agronomic Viability Windows ──────────────────────────────────────────────
+export function checkAgronomicViability(cropSeason, plantDateStr, shelterType = 'uncovered') {
+    const d = new Date(plantDateStr + 'T12:00:00');
+    const month = d.getMonth() + 1; // 1-12
+    const day = d.getDate();        // 1-31
+    const md = month + (day / 100); // e.g., 4.15 = April 15, 6.30 = June 30
+
+    if (shelterType === 'greenhouse') {
+        if (cropSeason === 'cool') return { fits: true, reason: 'Greenhouse: Cool crops permitted all year' };
+        if (cropSeason === 'warm') {
+            const fits = md >= 3.01 && md <= 8.31; // Mar 1 - Aug 31
+            return { fits, reason: fits ? 'Greenhouse: Warm crop in window (Mar-Aug)' : 'Greenhouse: Warm crop outside window (Mar-Aug)' };
+        }
+    } else if (shelterType === 'rowCover') {
+        if (cropSeason === 'cool') {
+            const fits = md >= 4.01 && md <= 10.31; // Apr 1 - Oct 31
+            return { fits, reason: fits ? 'Row Cover: Cool crop in window (Early Apr-Oct)' : 'Row Cover: Cool crop outside window (Early Apr-Oct)' };
+        }
+        if (cropSeason === 'warm') {
+            const fits = md >= 4.20 && md <= 7.10; // Apr 20 - Jul 10
+            return { fits, reason: fits ? 'Row Cover: Warm crop in window (Late Apr-Early Jul)' : 'Row Cover: Warm crop outside window (Late Apr-Early Jul)' };
+        }
+    } else { // 'uncovered'
+        if (cropSeason === 'cool') {
+            const fits = md >= 4.20 && md <= 9.15; // Apr 20 - Sep 15
+            return { fits, reason: fits ? 'Uncovered: Cool crop in window (Late Apr-Mid Sep)' : 'Uncovered: Cool crop outside window (Late Apr-Mid Sep)' };
+        }
+        if (cropSeason === 'warm') {
+            const fits = md >= 5.15 && md <= 6.30; // May 15 - Jun 30
+            return { fits, reason: fits ? 'Uncovered: Warm crop in window (Mid May-Late Jun)' : 'Uncovered: Warm crop outside window (Mid May-Late Jun)' };
+        }
+    }
+    
+    return { fits: true, reason: 'Allowed by default' };
 }
 
 // ─── Scoring Constants (Fortier-aligned rotation principles) ──────────────────
@@ -165,8 +201,8 @@ export async function getSuccessionCandidatesRanked(bedState, farmProfile, optio
         if (currentPeak < 0.99) {
             nextStartDate = lastSuccession.start_date;
         } else if (lastSuccession.end_date) {
-            // Do not add 1 day; butt crops exactly end-to-end to prevent 1-day timeline holes
-            nextStartDate = lastSuccession.end_date;
+            // Add 1 day to prevent overlapping crops on the exact same chronological day
+            nextStartDate = addDays(lastSuccession.end_date, 1);
         }
     }
 
@@ -179,18 +215,14 @@ export async function getSuccessionCandidatesRanked(bedState, farmProfile, optio
     const seasonClass = forceSeasonClass ?? getSeasonClass(nextStartDate, lat);
 
     // What seasons are viable? If warm window, warm+cool both might work
-    let viableSeasons = seasonClass === 'warm' ? ['warm', 'cool'] : ['cool'];
-
-    // Greenhouses functionally create a summer microclimate much earlier and later in the year
-    if (shelterType === 'greenhouse') {
-        viableSeasons = ['warm', 'cool'];
-    }
+    // We intentionally unlock both to let the DTM / Frost engine penalize out of season crops
+    // naturally, rather than hard-filtering them via UI, so Farmers can push boundaries if they want.
+    let viableSeasons = ['warm', 'cool'];
 
     // Get all agronomically eligible crops
     const excludeCategories = includeCovers ? [] : ['Cover Crop'];
-    // To ensure overwinter crops (which demand 120+ frost-free days) aren't brutally deleted by `getCropsForWindow` when queried in Fall with remainingDays <= 60,
-    // we fetch with a faux 365 days window if season is winding down. `scoreCrop.fits` math will eliminate non-hardy imposters.
-    const queryDays = remainingDays < 100 ? 365 : remainingDays;
+    // Hard-filter limiters removed per user request so all crops are available for manual override.
+    const queryDays = 365;
     const candidates = await getCropsForWindow(queryDays, viableSeasons, excludeCategories);
 
     // Score each candidate
@@ -202,13 +234,12 @@ export async function getSuccessionCandidatesRanked(bedState, farmProfile, optio
         candidates.map(async (crop) => scoreCrop(
             crop, previousCrop, successions, farmProfile, nextStartDate, remainingDays,
             strat, farmUsedCategories ?? new Set(), farmCropCount ?? {},
-            options.priorYearCrops ?? []
+            options.priorYearCrops ?? [], options
         ))
     );
 
-    // Sort by score descending, filter out hard failures
+    // Sort by score descending (hard-filters removed per user request so farmers can force manual overrides)
     const ranked = scored
-        .filter(s => s.score > -30) // Remove rotation violations
         .sort((a, b) => b.score - a.score)
         .slice(0, maxResults);
 
@@ -219,7 +250,7 @@ export async function getSuccessionCandidatesRanked(bedState, farmProfile, optio
  * Score a single crop candidate against the bed's rotation history.
  * @param {Array} priorYearCrops  — [{ crop_id, crop_name, category }] from prior season
  */
-async function scoreCrop(crop, previousCrop, successions, farmProfile, nextStartDate, remainingDays, strategy = DEFAULT_STRATEGY, farmUsedCategories = new Set(), farmCropCount = {}, priorYearCrops = []) {
+async function scoreCrop(crop, previousCrop, successions, farmProfile, nextStartDate, remainingDays, strategy = DEFAULT_STRATEGY, farmUsedCategories = new Set(), farmCropCount = {}, priorYearCrops = [], options = {}) {
     let score = 0;
     const reasons = [];
     const warnings = [];
@@ -305,7 +336,10 @@ async function scoreCrop(crop, previousCrop, successions, farmProfile, nextStart
 
     let idealStart = getIdealStartDate(crop, effectiveLastFrost);
     let cropStartDate = nextStartDate;
-    if (idealStart && new Date(idealStart) > new Date(nextStartDate)) {
+    
+    // Only jump forward to the ideal biological start date if the bed is completely empty.
+    // If a previous crop exists, snap the new succession directly after the previous crop with no artificial gap.
+    if (!previousCrop && idealStart && new Date(idealStart) > new Date(nextStartDate)) {
         cropStartDate = idealStart;
     }
 
@@ -323,6 +357,15 @@ async function scoreCrop(crop, previousCrop, successions, farmProfile, nextStart
         reasons.push(`${seasonClass === 'cool' ? 'Cool' : 'Warm'} season match ✓`);
     }
 
+    // ── 4b. Agronomic Viability Window Check ────────────────────────────────
+    // Use the explicit planting window schedules instead of arbitrary math penalties
+    const viability = checkAgronomicViability(crop.season, cropStartDate, options?.shelterType || 'uncovered');
+    
+    if (!viability.fits) {
+        score -= 40; // Soft penalty to put it at the bottom, but the crop is never "locked out"
+        warnings.push(`⚠️ ${viability.reason}`);
+    }
+
     // ── 5. Family diversity bonus (check entire bed history) ─────────────────
     const usedCategories = new Set(successions.map(s => s.category).filter(Boolean));
     const prevCropId = successions[successions.length - 1]?.crop_id;
@@ -332,20 +375,18 @@ async function scoreCrop(crop, previousCrop, successions, farmProfile, nextStart
         if (!usedCategories.has(crop.category)) reasons.push('New crop family in this bed ✓');
     }
 
-    // ── 6. DTM fit scoring ──────────────────────────────────────────────────
-    
+    // ── 6. Overwinter capabilities & Grace logic ──────────────────────────────
     // Determine overwinter survivability from deep contextual hints to counteract database limitations
+    const noteHint = ((crop.frost_note || '') + ' ' + (crop.notes || '') + ' ' + (crop.description || '')).toLowerCase();
     const isExplicitOverwinter = crop.overwinter_cover === true || 
-        (crop.frost_note && crop.frost_note.toLowerCase().includes('overwinter')) ||
-        (crop.notes && crop.notes.toLowerCase().includes('overwinter')) ||
-        (crop.description && crop.description.toLowerCase().includes('overwinter'));
+        noteHint.includes('overwinter') ||
+        (crop.season === 'cool' && (noteHint.includes('winter') || crop.name.toLowerCase().includes('chicory')));
 
     const isMassiveHardyCrop = crop.dtm >= 180 && crop.hard_frost === true;
     const canOverwinter = crop.feed_class === 'cover_crop' || isExplicitOverwinter || isMassiveHardyCrop;
     
-    // Evaluate regular grace period
+    // Evaluate length of grow against remaining days (purely suggestive now)
     const totalDaysNeeded = crop.dtm + (crop.harvest_window_days ?? 0);
-    const gracePeriod = crop.frost_tolerant ? 28 : 7;
     
     if (canOverwinter && actualRemainingDays <= 60) {
         score += 20; // Massive scoring bonus to explicitly favor true overwinter crops in the fall
@@ -359,12 +400,6 @@ async function scoreCrop(crop, previousCrop, successions, farmProfile, nextStart
     } else if (crop.dtm <= actualRemainingDays) {
         score -= 5;
         warnings.push(`DTM fits but harvest window extends past frost`);
-    } else if (crop.dtm <= actualRemainingDays + gracePeriod) {
-        score -= 10;
-        warnings.push(`⚠️ Extends ${Math.max(1, crop.dtm - actualRemainingDays)} days past frost (grace period)`);
-    } else if (!canOverwinter && crop.dtm > actualRemainingDays + gracePeriod) {
-        score -= 100; // Brutal penalty for crops that absolutely will freeze and die
-        warnings.push(`Will not finish before deep freeze!`);
     }
 
     // ── 7. Interplanting synergy ────────────────────────────────────────────
@@ -382,11 +417,17 @@ async function scoreCrop(crop, previousCrop, successions, farmProfile, nextStart
             const plantYear = new Date(cropStartDate).getFullYear();
             endDate = `${plantYear + 1}-04-01`;
         } else {
-            // For biological overwinter crops (Garlic, Leeks, Salsify), trust their actual biological DTM
-            endDate = addDays(cropStartDate, (crop.dtm ?? 0) + (crop.harvest_window_days ?? 0));
+            // For biological overwinter crops (Garlic, Leeks, Salsify, Chicory), trust their actual biological DTM
+            // but apply the 1.8x winter DTM multiplier to account for the Persephone period.
+            const winterDtm = Math.round((crop.dtm ?? 0) * 1.8);
+            endDate = addDays(cropStartDate, winterDtm + (crop.harvest_window_days ?? 0));
         }
     } else {
-        endDate = addDays(cropStartDate, (crop.dtm ?? 0) + (crop.harvest_window_days ?? 0));
+        let hw = crop.harvest_window_days ?? 0;
+        if (options?.shelterType === 'greenhouse' && crop.season === 'warm' && hw >= 45) {
+            hw += 21; // Dynamically stretch indeterminate fruiting limits into the greenhouse frost-extension window
+        }
+        endDate = addDays(cropStartDate, (crop.dtm ?? 0) + hw);
     }
 
     // ── 8. Strategy-weighted profit / diversity boost ──────────────────────────
@@ -413,7 +454,7 @@ async function scoreCrop(crop, previousCrop, successions, farmProfile, nextStart
         start_date: cropStartDate,
         end_date: endDate,
         remaining_days_after: canOverwinter ? 0 : Math.max(0, actualRemainingDays - (crop.dtm + (crop.harvest_window_days ?? 0))),
-        fits: canOverwinter ? (score >= 0) : (score > 0 && crop.dtm <= actualRemainingDays + gracePeriod),
+        fits: canOverwinter ? true : viability.fits,
         season_class: seasonClass,
     };
 }
@@ -567,7 +608,8 @@ export async function autoFillRemainingBeds(filledBeds, emptyBedNumbers, farmPro
             .filter(c => (farmCropCount[c.crop.id] ?? 0) < maxRepeat);
         const best = filtered[0];
 
-        if (!best) {
+        // Auto-generator must still respect hard limits (don't auto-fill rotation violations)
+        if (!best || best.score < -20) {
             result[bedNum] = [];
             continue;
         }

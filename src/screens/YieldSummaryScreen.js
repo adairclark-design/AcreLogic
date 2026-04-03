@@ -6,7 +6,8 @@
  *   - Revenue by block (stacked bar)
  *   - Per-bed succession breakdown automatically sorted by block assignment
  */
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useCallback, useState, useRef } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import {
     View, Text, TextInput, StyleSheet, ScrollView,
     TouchableOpacity, Animated, ActivityIndicator, Alert, Platform, useWindowDimensions
@@ -18,6 +19,7 @@ import { exportPDF, exportCalendarCSV, exportYieldCSV, exportExcel } from '../se
 import { fetchOrganicPrice } from '../services/climateService';
 import { loadBlocks, loadBlockBeds, loadActualHarvests, loadRevenueGoal, saveRevenueGoal, saveSeasonSnapshot } from '../services/persistence';
 import GlobalNavBar from '../components/GlobalNavBar';
+import AIAdvisorWidget from '../components/AIAdvisorWidget';
 
 export default function YieldSummaryScreen({ navigation, route }) {
     const { farmProfile = {}, planId, bedSuccessions: routeSuccs = null } = route?.params ?? {};
@@ -34,9 +36,10 @@ export default function YieldSummaryScreen({ navigation, route }) {
     const fadeAnim = useRef(new Animated.Value(0)).current;
     const slideAnim = useRef(new Animated.Value(30)).current;
 
-    useEffect(() => {
+    useFocusEffect(useCallback(() => {
+        setLoading(true);
         computeYield();
-    }, []);
+    }, [planId]));
 
     const computeYield = async () => {
         try {

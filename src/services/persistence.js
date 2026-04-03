@@ -130,7 +130,7 @@ export function hasSavedPlan() {
  * clearSavedPlan / clearAllFarmData
  * ─────────────────────────────────
  * Wipes ALL AcreLogic app data from localStorage:
- *   • 8-bed workspace keys (farm profile, bed successions, plan id, etc.)
+ *   • Legacy flat workspace keys (farm profile, bed successions, plan id, etc.)
  *   • Farm Designer blocks (acrelogic_farm_blocks)
  *   • Per-block bed succession data (acrelogic_block_beds_*)
  *   • Satellite polygon drawings (acrelogic_block_polygons)
@@ -688,3 +688,27 @@ export function savePlanCrops(planId, cropIds) {
         console.warn('[Persistence] savePlanCrops failed:', e);
     }
 }
+
+// ─── Cross-Block Global Bed Clipboard ─────────────────────────────────────────
+
+let _bedClipboard = [];
+
+/**
+ * Saves an array of bed structures { successions: [], shelterType: '' } 
+ * to the global clipboard for cross-block pasting.
+ */
+export function setClipboardBeds(beds) {
+    _bedClipboard = Array.isArray(beds) ? [...beds] : [];
+}
+
+/**
+ * Returns the currently copied bed array.
+ */
+export function getClipboardBeds() {
+    return _bedClipboard;
+}
+
+export function clearClipboardBeds() {
+    _bedClipboard = [];
+}
+

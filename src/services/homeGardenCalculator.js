@@ -859,6 +859,16 @@ function getClusterKey(crop) {
     if (name.includes('carrot')) return 'carrot';
     if (name.includes('radish')) return 'radish';
     if (name.includes('spinach')) return 'spinach';
+    if (name.includes('beet')) return 'beet';
+    if (name.includes('turnip')) return 'turnip';
+    if (name.includes('leek')) return 'leek';
+    if (name.includes('scallion')) return 'scallion';
+    if (name.includes('chive')) return 'chive';
+    if (name.includes('garlic')) return 'garlic';
+    if (name.includes('strawberry')) return 'strawberry';
+    if (name.includes('raspberry')) return 'raspberry';
+    if (name.includes('blackberry')) return 'blackberry';
+    if (name.includes('mustard')) return 'mustard';
 
     // Fallback: Just return the exact name lowercased
     return name;

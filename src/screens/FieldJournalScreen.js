@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import {
     View, Text, StyleSheet, ScrollView, TouchableOpacity,
     TextInput, Animated, Platform, Alert, KeyboardAvoidingView,
@@ -94,16 +95,16 @@ export default function FieldJournalScreen({ navigation, route }) {
     const formAnim = useRef(new Animated.Value(0)).current;
     const fadeAnim = useRef(new Animated.Value(0)).current;
 
-    useEffect(() => {
+    useFocusEffect(useCallback(() => {
         const loadedEntries = loadJournalEntries();
         setEntries(loadedEntries);
 
         const loadedBlocks = loadBlocks();
         setBlocks(loadedBlocks);
-        if (loadedBlocks.length > 0) setActiveBlockId(loadedBlocks[0].id);
+        if (loadedBlocks.length > 0) setActiveBlockId(prev => prev || loadedBlocks[0].id);
 
         Animated.timing(fadeAnim, { toValue: 1, duration: 350, useNativeDriver: true }).start();
-    }, []);
+    }, []));
 
     const activeBlock = blocks.find(b => b.id === activeBlockId) || null;
     const currentBlockName = activeBlock?.name || 'Legacy Workspace';
@@ -113,7 +114,7 @@ export default function FieldJournalScreen({ navigation, route }) {
     let quadrants = ['All'];
     if (activeBlock?.bisectingRoad?.enabled) {
         if (activeBlock.bisectingRoad.orientation === 'EW') quadrants = ['All', 'North', 'South'];
-        if (activeBlock.bisectingRoad.orientation === 'NS') quadrants = ['All', 'East', 'West'];
+        if (activeBlock.bisectingRoad.orientation === 'NS') quadrants = ['All', 'West', 'East'];
     }
 
     useEffect(() => {

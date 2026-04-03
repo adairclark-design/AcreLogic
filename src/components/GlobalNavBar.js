@@ -15,8 +15,14 @@ const NAV_TABS = [
 export default function GlobalNavBar({ navigation, farmProfile, planId, activeRoute, rightAction }) {
     return (
         <View style={styles.topNavContainer}>
-            {/* Left — back chevron drops back to Main Dashboard */}
-            <TouchableOpacity style={styles.backBtn} onPress={() => navigation.navigate('Dashboard')}>
+            {/* Left — back chevron correctly returns to previous screen (FarmPlanList or Dashboard) */}
+            <TouchableOpacity style={styles.backBtn} onPress={() => {
+                if (navigation.canGoBack()) {
+                    navigation.goBack();
+                } else {
+                    navigation.navigate('FarmPlanList');
+                }
+            }}>
                 <Text style={styles.backArrow}>‹</Text>
             </TouchableOpacity>
 
@@ -36,7 +42,7 @@ export default function GlobalNavBar({ navigation, farmProfile, planId, activeRo
                             style={[styles.navLinkWrap, isActive && styles.navLinkActive]}
                             onPress={() => {
                                 if (!isActive) {
-                                    navigation.replace(tab.route, { farmProfile, planId });
+                                    navigation.navigate(tab.route, { farmProfile, planId });
                                 }
                             }}
                             activeOpacity={isActive ? 1 : 0.7}

@@ -194,16 +194,7 @@ export default function DashboardScreen({ navigation, route }) {
             }
 
             if (typeof localStorage !== 'undefined') {
-                // Source B: 8-bed workspace store (flat successions array)
-                const flatRaw = localStorage.getItem('acrelogic_bed_successions');
-                if (flatRaw) {
-                    const flatData = JSON.parse(flatRaw);
-                    for (const [, succs] of Object.entries(flatData)) {
-                        if (Array.isArray(succs) && succs.length > 0) {
-                            merged[String(virtualBedCounter++)] = succs;
-                        }
-                    }
-                }
+
 
                 // Source C: Farm Designer per-block bed stores
                 for (let i = 0; i < localStorage.length; i++) {

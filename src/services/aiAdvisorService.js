@@ -99,7 +99,7 @@ export function getStarterQuestions(farmContext = {}) {
 }
 
 /**
- * Generate a full 8-bed CSA plan using AI.
+ * Generate a full farm block CSA plan using AI.
  * @param {object} farmProfile
  * @param {number} memberCount - number of CSA members
  * @param {Array}  availableCrops - array of { name, dtm, price, yield_lbs } from crop DB
