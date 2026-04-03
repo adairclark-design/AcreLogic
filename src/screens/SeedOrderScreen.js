@@ -277,17 +277,13 @@ const WaveHeader = ({ label, waveNum, itemCount }) => (
     </View>
 );
 
-const SeedCard = ({ item, onOpenBreakdown }) => {
+const SeedCard = ({ item }) => {
     const packets = recommendPackets(item);
     const daysUntilBuy = item.earliestBuyDate ? daysDiff(item.earliestBuyDate) : null;
     const isUrgent = daysUntilBuy !== null && daysUntilBuy <= 14;
 
     return (
-        <TouchableOpacity
-            style={[styles.seedCard, isUrgent && styles.seedCardUrgent]}
-            onPress={() => onOpenBreakdown(item)}
-            activeOpacity={0.8}
-        >
+        <View style={[styles.seedCard, isUrgent && styles.seedCardUrgent]}>
             <View style={styles.cardHeader}>
                 {CROP_IMAGES[item.cropId] ? (
                     <Image
@@ -299,77 +295,56 @@ const SeedCard = ({ item, onOpenBreakdown }) => {
                     <Text style={styles.cardEmoji}>{item.emoji}</Text>
                 )}
                 <View style={styles.cardHeaderInfo}>
-                    <Text style={styles.cardName} numberOfLines={1} adjustsFontSizeToFit>{item.name}</Text>
-                    {item.variety && <Text style={styles.cardVariety} numberOfLines={1}>{item.variety}</Text>}
+                    <Text style={styles.cardName} numberOfLines={1}>{item.name}</Text>
+                    {item.variety && <Text style={styles.cardVariety} numberOfLines={1}>Variety: {item.variety}</Text>}
                 </View>
             </View>
 
             <View style={styles.cardBody}>
-                {/* Seed Requirement Badge */}
-                <View style={styles.cardOzBadge}>
-                    <Text style={styles.cardOzText}>🌱 {fmtReq(item)}</Text>
-                    {item.seedType === 'TP' && <Text style={styles.cardTpText}> (TP)</Text>}
-                </View>
-                
-                {/* Packet Suggestion */}
-                {packets && (
-                    <View style={styles.cardPacketBadge}>
-                        <Text style={styles.cardPacketText}>📦 {packets}</Text>
-                    </View>
-                )}
-            </View>
-
-            {item.earliestBuyDate && (
-                <View style={styles.cardFooter}>
-                    <Text style={[styles.cardDateText, isUrgent && styles.cardDateUrgent]}>
-                        {isUrgent ? '⚡' : '📅'} {fmtDate(item.earliestBuyDate)}
-                    </Text>
-                </View>
-            )}
-        </TouchableOpacity>
-    );
-};
-// Breakdown Modal
-const BreakdownModal = ({ item, visible, onClose }) => {
-    if (!item) return null;
-    return (
-        <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-            <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={onClose}>
-                <View style={styles.modalContent} onStartShouldSetResponder={() => true}>
-                    <View style={styles.modalHeader}>
-                        {CROP_IMAGES[item.cropId] ? (
-                            <Image source={CROP_IMAGES[item.cropId]} style={styles.modalImage} resizeMode="cover" />
-                        ) : (
-                            <Text style={styles.modalEmoji}>{item.emoji}</Text>
-                        )}
-                        <View style={{ flex: 1 }}>
-                            <Text style={styles.modalTitle}>{item.name}</Text>
-                            {item.variety && <Text style={styles.modalSubtitle}>{item.variety}</Text>}
-                        </View>
-                        <TouchableOpacity onPress={onClose} style={styles.modalClose}>
-                            <Text style={styles.modalCloseText}>✕</Text>
-                        </TouchableOpacity>
+                <Text style={styles.cardSectionTitle}>SEED REQUIREMENT</Text>
+                <View style={styles.cardBadgesRow}>
+                    <View style={styles.cardOzBadge}>
+                        <Text style={styles.cardOzText}>🌱 {fmtReq(item)}</Text>
+                        {item.seedType === 'TP' && <Text style={styles.cardTpText}> (Transplants)</Text>}
                     </View>
                     
-                    <Text style={styles.modalBreakdownLabel}>PLANTING BREAKDOWN</Text>
-                    <ScrollView style={styles.modalScroll} showsVerticalScrollIndicator={false}>
+                    {packets && (
+                        <View style={styles.cardPacketBadge}>
+                            <Text style={styles.cardPacketText}>📦 {packets}</Text>
+                        </View>
+                    )}
+                </View>
+
+                {item.earliestBuyDate && (
+                    <View style={styles.cardDeadlineRow}>
+                        <Text style={styles.cardSectionTitle}>ORDER DEADLINE:</Text>
+                        <Text style={[styles.cardDateText, isUrgent && styles.cardDateUrgent]}>
+                            {isUrgent ? '⚡ MUST ORDER BY:' : '📅 PURCHASE BY:'} {fmtDate(item.earliestBuyDate)}
+                        </Text>
+                    </View>
+                )}
+
+                {item.plantingDays && item.plantingDays.length > 0 && (
+                    <View style={styles.cardBreakdownWrapper}>
+                        <Text style={styles.cardSectionTitle}>PLANTING DATES</Text>
                         {item.plantingDays
                             .sort((a, b) => (a.date ?? '').localeCompare(b.date ?? ''))
                             .map((pd, i) => (
-                                <View key={i} style={styles.modalRow}>
-                                    <View style={styles.modalRowLeft}>
-                                        <Text style={styles.modalDate}>{fmtDate(pd.date)}</Text>
-                                        <Text style={styles.modalBlock}>{pd.blockName} • Bed {pd.bedNum}</Text>
-                                    </View>
-                                    <Text style={styles.modalOz}>
+                                <View key={i} style={styles.cardBreakdownRow}>
+                                    <View style={styles.cardBreakdownDot} />
+                                    <Text style={styles.cardBreakdownText}>
+                                        <Text style={{ fontWeight: '800' }}>Sow {fmtDate(pd.date)}</Text>
+                                        <Text style={{ color: Colors.mutedText }}> — {pd.blockName} • Bed {pd.bedNum}</Text>
+                                    </Text>
+                                    <Text style={styles.cardBreakdownVal}>
                                         {pd.req.type === 'seeds' ? `${pd.req.val} seeds` : fmtReq({reqType: 'oz', totalOz: pd.req.val})}
                                     </Text>
                                 </View>
                             ))}
-                    </ScrollView>
-                </View>
-            </TouchableOpacity>
-        </Modal>
+                    </View>
+                )}
+            </View>
+        </View>
     );
 };
 
@@ -379,7 +354,6 @@ export default function SeedOrderScreen({ navigation, route }) {
     const { farmProfile, planId } = route?.params ?? {};
     const [seedList, setSeedList] = useState([]);
     const [loading, setLoading] = useState(true);
-    const [breakdownItem, setBreakdownItem] = useState(null);
     const [copied, setCopied] = useState(false);
 
     useFocusEffect(useCallback(() => {
@@ -495,7 +469,6 @@ export default function SeedOrderScreen({ navigation, route }) {
                                     <SeedCard
                                         key={item.cropId}
                                         item={item}
-                                        onOpenBreakdown={setBreakdownItem}
                                     />
                                 ))}
                             </View>
@@ -506,11 +479,7 @@ export default function SeedOrderScreen({ navigation, route }) {
                 </ScrollView>
             )}
             
-            <BreakdownModal 
-                item={breakdownItem} 
-                visible={!!breakdownItem} 
-                onClose={() => setBreakdownItem(null)} 
-            />
+
         </View>
     );
 }
@@ -587,73 +556,50 @@ const styles = StyleSheet.create({
     waveLabel: { fontSize: Typography.base, fontWeight: '800', color: Colors.cream },
     waveCount: { fontSize: Typography.xs, color: 'rgba(255,255,255,0.7)', fontWeight: '600' },
 
-    // ── Compact Seed Card ──────────────────────────────────────────────────────
+    // ── Wide Fluid Seed Card ──────────────────────────────────────────────────────
     seedCard: {
         backgroundColor: '#FCFCF9', 
         borderRadius: Radius.md, 
-        padding: 8,
-        width: 155, // Optimized to fit ~6-8 across on standard widescreen displays, 2-3 on mobile
+        padding: 14,
+        flex: 1,
+        minWidth: 300,
+        maxWidth: 450, // Prevents a single card stretching entirely across ultra-wides, maintaining nice columns
         borderWidth: 1.5, 
         borderColor: 'rgba(45,79,30,0.1)',
-        justifyContent: 'space-between',
-        flexGrow: 0,
     },
     seedCardUrgent: { borderColor: '#F59E0B', backgroundColor: '#FFFBF0' },
     
-    cardHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginBottom: 6 },
-    cardImage: { width: 32, height: 32, borderRadius: 4, backgroundColor: 'rgba(45,79,30,0.06)' },
-    cardEmoji: { fontSize: 24, lineHeight: 32, textAlign: 'center' },
+    cardHeader: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 },
+    cardImage: { width: 40, height: 40, borderRadius: 6, backgroundColor: 'rgba(45,79,30,0.06)' },
+    cardEmoji: { fontSize: 32, lineHeight: 40, textAlign: 'center' },
     cardHeaderInfo: { flex: 1, justifyContent: 'center' },
-    cardName: { fontSize: 16, fontWeight: '900', color: Colors.primaryGreen },
-    cardVariety: { fontSize: 11, color: Colors.mutedText },
+    cardName: { fontSize: 18, fontWeight: '900', color: Colors.primaryGreen },
+    cardVariety: { fontSize: 13, color: Colors.mutedText },
     
-    cardBody: { gap: 4, marginBottom: 8 },
+    cardBody: { gap: 6 },
+    cardSectionTitle: { fontSize: 10, fontWeight: '800', color: Colors.mutedText, letterSpacing: 1.2, marginTop: 4 },
+    
+    cardBadgesRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 4 },
     cardOzBadge: {
         flexDirection: 'row', alignItems: 'center', backgroundColor: Colors.primaryGreen, 
-        paddingHorizontal: 6, paddingVertical: 3, borderRadius: Radius.sm, alignSelf: 'flex-start'
+        paddingHorizontal: 8, paddingVertical: 4, borderRadius: Radius.sm,
     },
-    cardOzText: { fontSize: 12, fontWeight: '900', color: Colors.cream },
-    cardTpText: { fontSize: 10, fontWeight: '700', color: 'rgba(255,255,255,0.7)' },
+    cardOzText: { fontSize: 13, fontWeight: '900', color: Colors.cream },
+    cardTpText: { fontSize: 11, fontWeight: '700', color: 'rgba(255,255,255,0.7)' },
     
     cardPacketBadge: {
-        backgroundColor: 'rgba(255,165,0,0.15)', paddingHorizontal: 6, paddingVertical: 3, 
-        borderRadius: Radius.sm, borderWidth: 1, borderColor: 'rgba(255,165,0,0.3)', alignSelf: 'flex-start'
+        backgroundColor: 'rgba(255,165,0,0.15)', paddingHorizontal: 8, paddingVertical: 4, 
+        borderRadius: Radius.sm, borderWidth: 1, borderColor: 'rgba(255,165,0,0.3)',
     },
-    cardPacketText: { fontSize: 11, fontWeight: '800', color: '#92400E' },
+    cardPacketText: { fontSize: 12, fontWeight: '800', color: '#92400E' },
     
-    cardFooter: { borderTopWidth: 1, borderTopColor: 'rgba(45,79,30,0.08)', paddingTop: 6 },
-    cardDateText: { fontSize: 11, color: Colors.mutedText, fontWeight: '700' },
+    cardDeadlineRow: { marginTop: 4, paddingVertical: 6, paddingHorizontal: 10, backgroundColor: 'rgba(0,0,0,0.03)', borderRadius: Radius.sm },
+    cardDateText: { fontSize: 14, color: Colors.primaryGreen, fontWeight: '800', marginTop: 2 },
     cardDateUrgent: { color: '#B45309', fontWeight: '900' },
 
-    // ── Modal Breakdown ───────────────────────────────────────────────────────
-    modalOverlay: {
-        flex: 1, backgroundColor: 'rgba(0,0,0,0.5)',
-        alignItems: 'center', justifyContent: 'center', padding: Spacing.lg
-    },
-    modalContent: {
-        width: '100%', maxWidth: 450, backgroundColor: Colors.white,
-        borderRadius: Radius.lg, padding: Spacing.lg, maxHeight: '80%',
-        ...Shadows.card
-    },
-    modalHeader: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md, marginBottom: Spacing.md },
-    modalImage: { width: 44, height: 44, borderRadius: 6 },
-    modalEmoji: { fontSize: 36 },
-    modalTitle: { fontSize: 20, fontWeight: '900', color: Colors.primaryGreen },
-    modalSubtitle: { fontSize: 14, color: Colors.mutedText, fontWeight: '600' },
-    modalClose: { padding: 4 },
-    modalCloseText: { fontSize: 22, color: Colors.mutedText, fontWeight: 'bold' },
-    
-    modalBreakdownLabel: {
-        fontSize: 11, fontWeight: '800', color: Colors.mutedText,
-        letterSpacing: 1.5, marginBottom: Spacing.sm, marginTop: Spacing.sm
-    },
-    modalScroll: { gap: Spacing.sm },
-    modalRow: {
-        flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-        paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#f1f1f1'
-    },
-    modalRowLeft: { flex: 1, gap: 2 },
-    modalDate: { fontSize: 14, fontWeight: '800', color: Colors.primaryGreen },
-    modalBlock: { fontSize: 12, color: Colors.mutedText, fontWeight: '600' },
-    modalOz: { fontSize: 14, fontWeight: '900', color: Colors.burntOrange }
+    cardBreakdownWrapper: { marginTop: 6, borderTopWidth: 1, borderTopColor: 'rgba(45,79,30,0.06)', paddingTop: 10 },
+    cardBreakdownRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 4, gap: 6 },
+    cardBreakdownDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: Colors.primaryGreen, opacity: 0.6 },
+    cardBreakdownText: { flex: 1, fontSize: 13, color: Colors.primaryGreen },
+    cardBreakdownVal: { fontSize: 12, fontWeight: '800', color: Colors.burntOrange }
 });
