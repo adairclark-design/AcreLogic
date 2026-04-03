@@ -54,8 +54,9 @@ function daysDiff(isoDate) {
  * Maps raw oz or seed count needed → human-friendly packet recommendation.
  */
 function recommendPackets(item) {
+    const meta = item.cropId ? CROPS_MAP[item.cropId] : null;
+
     if (item.reqType === 'seeds') {
-        const meta = CROPS_MAP[item.cropId];
         const basePkt = meta?.seeds_per_packet || 100;
         const total = item.totalSeeds;
         
@@ -63,39 +64,87 @@ function recommendPackets(item) {
         const rawSteps = [basePkt, 100, 250, 500, 1000, 5000, 10000, 25000];
         const uniqueSteps = [...new Set(rawSteps)].sort((a, b) => a - b);
         
+        let targetSize = null;
+        let count = 1;
+
         // Find the most appropriate commercial bulk tier
         for (const size of uniqueSteps) {
             if (total <= size) {
-                if (size >= 5000) return `1 × ${size.toLocaleString()}-seed bag`;
-                if (size === 1000) return `1 × 1M (1,000) seeds`;
-                return `1 × ${size.toLocaleString()}-seed pkt`;
+                targetSize = size;
+                break;
             }
         }
         
         // Above 25,000 seeds
-        const pkts = Math.ceil(total / 25000);
-        return `${pkts} × 25k-seed bag`;
+        if (!targetSize) {
+            targetSize = 25000;
+            count = Math.ceil(total / 25000);
+        }
+
+        let str = '';
+        const qtyPrefix = count > 1 ? `${count} × ` : '1 × ';
+        if (targetSize >= 5000 && targetSize < 25000) str = `${qtyPrefix}${targetSize.toLocaleString()}-seed bag`;
+        else if (targetSize >= 25000) str = `${qtyPrefix}25k-seed bag`;
+        else if (targetSize === 1000) str = `${qtyPrefix}1M (1,000) seeds`;
+        else str = `${qtyPrefix}${targetSize.toLocaleString()}-seed pkt`;
+
+        // Conversion logic
+        if (meta && meta.seeds_per_oz) {
+            const ozEq = targetSize / meta.seeds_per_oz;
+            const ozEqStr = ozEq < 0.25 ? `${Math.round(ozEq * 100) / 100}oz` : `${Math.round(ozEq * 10) / 10}oz`;
+            return `${str} (~${ozEqStr} ea)`;
+        }
+        return str;
     }
 
     const totalOz = item.totalOz;
     if (totalOz <= 0) return null;
-    if (totalOz <= 0.2) return '1 × ¼oz packet';
-    if (totalOz <= 0.5) return '1 × ½oz packet';
-    if (totalOz <= 1.0) return '1 × 1oz packet';
-    if (totalOz <= 2.0) return `2 × 1oz packets`;
-    if (totalOz <= 4.0) return '1 × ¼lb bag';
-    if (totalOz <= 8.0) return '1 × ½lb bag';
-    if (totalOz <= 16.0) return '1 × 1lb bag';
-    if (totalOz <= 80.0) return '1 × 5lb bag';
-    if (totalOz <= 160.0) return '1 × 10lb bag';
-    return `${Math.ceil(totalOz / 160)} × 10lb bags`;
+
+    let targetOz = null;
+    let label = '';
+    let count = 1;
+
+    if (totalOz <= 0.2) { targetOz = 0.20; label = '¼oz packet'; }
+    else if (totalOz <= 0.5) { targetOz = 0.5; label = '½oz packet'; }
+    else if (totalOz <= 1.0) { targetOz = 1.0; label = '1oz packet'; }
+    else if (totalOz <= 2.0) { targetOz = 1.0; label = '1oz packet'; count = 2; }
+    else if (totalOz <= 4.0) { targetOz = 4.0; label = '¼lb bag'; }
+    else if (totalOz <= 8.0) { targetOz = 8.0; label = '½lb bag'; }
+    else if (totalOz <= 16.0) { targetOz = 16.0; label = '1lb bag'; }
+    else if (totalOz <= 80.0) { targetOz = 80.0; label = '5lb bag'; }
+    else if (totalOz <= 160.0) { targetOz = 160.0; label = '10lb bag'; }
+    else { targetOz = 160.0; label = '10lb bag'; count = Math.ceil(totalOz / 160); }
+
+    const qtyPrefix = count > 1 ? `${count} × ` : '1 × ';
+    const str = `${qtyPrefix}${label}${count > 1 ? 's' : ''}`;
+    
+    if (meta && meta.seeds_per_oz) {
+        const seedsEq = Math.round(targetOz * meta.seeds_per_oz);
+        return `${str} (~${seedsEq.toLocaleString()} seeds ea)`;
+    }
+    return str;
 }
 
 function fmtReq(item) {
-    if (item.reqType === 'seeds') return `${item.totalSeeds} seeds`;
+    const meta = item.cropId ? CROPS_MAP[item.cropId] : null;
+
+    if (item.reqType === 'seeds') {
+        const countStr = `${item.totalSeeds} seeds`;
+        if (meta && meta.seeds_per_oz) {
+            const ozEq = item.totalSeeds / meta.seeds_per_oz;
+            const ozEqStr = ozEq < 0.25 ? `${Math.round(ozEq * 100) / 100}oz` : `${Math.round(ozEq * 10) / 10}oz`;
+            return `${countStr} (~${ozEqStr})`;
+        }
+        return countStr;
+    }
+
     const oz = item.totalOz;
-    if (oz < 0.5) return `${Math.round(oz * 100) / 100}oz`;
-    return `${Math.round(oz * 10) / 10}oz`;
+    const ozStr = oz < 0.5 ? `${Math.round(oz * 100) / 100}oz` : `${Math.round(oz * 10) / 10}oz`;
+    if (meta && meta.seeds_per_oz) {
+        const seedsEq = Math.round(oz * meta.seeds_per_oz);
+        return `${ozStr} (~${seedsEq.toLocaleString()} seeds)`;
+    }
+    return ozStr;
 }
 
 // ─── Seed aggregation ─────────────────────────────────────────────────────────
@@ -337,7 +386,7 @@ const SeedCard = ({ item }) => {
                                         <Text style={{ color: Colors.mutedText }}> — {pd.blockName} • Bed {pd.bedNum}</Text>
                                     </Text>
                                     <Text style={styles.cardBreakdownVal}>
-                                        {pd.req.type === 'seeds' ? `${pd.req.val} seeds` : fmtReq({reqType: 'oz', totalOz: pd.req.val})}
+                                        {fmtReq({ reqType: pd.req.type, totalOz: pd.req.val, totalSeeds: pd.req.val, cropId: item.cropId })}
                                     </Text>
                                 </View>
                             ))}
