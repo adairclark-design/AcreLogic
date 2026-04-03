@@ -676,7 +676,9 @@ export function loadPlanCrops(planId) {
     if (!isWeb || !planId) return [];
     try {
         const raw = localStorage.getItem(`acrelogic_plan_crops_${planId}`);
-        return raw ? JSON.parse(raw) : [];
+        if (!raw) return [];
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : [];
     } catch { return []; }
 }
 

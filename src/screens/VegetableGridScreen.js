@@ -64,7 +64,10 @@ const CROPS = cropDbRaw.crops
 // ─── Frequency tracking (localStorage) ───────────────────────────────────────
 const FREQ_KEY = 'acrelogic_crop_frequency';
 function loadFrequency() {
-    try { return JSON.parse(localStorage.getItem(FREQ_KEY) ?? '{}'); } catch { return {}; }
+    try { 
+        const parsed = JSON.parse(localStorage.getItem(FREQ_KEY) ?? '{}'); 
+        return (parsed && typeof parsed === 'object') ? parsed : {};
+    } catch { return {}; }
 }
 function bumpFrequency(ids) {
     try {
@@ -200,8 +203,8 @@ export default function VegetableGridScreen({ navigation, route }) {
     const [cropFrequency, setCropFrequency] = useState({});
     React.useEffect(() => {
         setCropFrequency(loadFrequency());
-        // Scroll to top on every mount (fixes "starts mid-list" issue)
-        setTimeout(() => flatListRef.current?.scrollToOffset({ offset: 0, animated: false }), 50);
+        // Scroll to top removed to safely avoid React Native Web VirtualizedList layout race condition
+        // Setting it blindly with a 50ms timeout was intermittently corrupting layout state and blanking the grid.
     }, []);
 
     // Auto-save selections to localStorage so other tabs (Farm Layout, Planner) can reliably access them
