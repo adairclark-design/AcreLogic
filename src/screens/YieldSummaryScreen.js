@@ -270,6 +270,7 @@ export default function YieldSummaryScreen({ navigation, route }) {
                                                         : est.estimated_yield_lbs ? `${Math.round(est.estimated_yield_lbs)} lbs` : ''
                                                     }
                                                     {est.estimated_yield_bunches ? ` / ${Math.round(est.estimated_yield_bunches)} bunches` : ''}
+                                                    {` per harvest`}
                                                     {(est.harvest_count ?? 1) > 1 ? ` · ${est.harvest_count} ${harvestTerm(est.category, est.harvest_count)}` : ''}
                                                 </Text>
                                                 <Text style={styles.bedEstRevenue}>${fmtNum(Math.round(est.gross_revenue_mid ?? 0))}</Text>
@@ -374,7 +375,7 @@ const styles = StyleSheet.create({
     topCropRevenueAmount: { fontSize: Typography.md, fontWeight: Typography.bold, color: Colors.burntOrange },
     topCropRevenueRange: { fontSize: 10, color: Colors.mutedText },
 
-    bedBreakdownCard: { backgroundColor: Colors.cardBg, borderRadius: Radius.md, overflow: 'hidden', marginBottom: Spacing.sm },
+    bedBreakdownCard: { flex: 1, minWidth: 320, maxWidth: 500, backgroundColor: Colors.cardBg, borderRadius: Radius.md, overflow: 'hidden', marginBottom: Spacing.sm },
     bedBreakdownHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: Spacing.md, backgroundColor: 'rgba(45,79,30,0.06)', borderBottomWidth: 1, borderBottomColor: 'rgba(45,79,30,0.08)' },
     bedBreakdownTitle: { fontSize: Typography.sm, fontWeight: Typography.bold, color: Colors.primaryGreen },
     bedBreakdownTotal: { fontSize: Typography.sm, fontWeight: Typography.bold, color: Colors.burntOrange },

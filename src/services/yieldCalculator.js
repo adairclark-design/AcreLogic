@@ -73,9 +73,11 @@ export async function calculateBedYield(bedInfo, successions, farmProfile, prici
         const endDate = new Date(`${succ.end_date}T00:00:00`);
         const bedDaysUsed = Math.round((endDate - startDate) / (1000 * 60 * 60 * 24));
 
-        // Yield calculation (50ft bed)
-        const yieldLbs = calcYieldLbs(crop, BED_LENGTH_FT);
-        const yieldBunches = calcYieldBunches(crop, BED_LENGTH_FT);
+        // Yield calculation based on true linear row-feet
+        const bedLengthFt = typeof bedInfo === 'object' && bedInfo.bed_length_ft ? bedInfo.bed_length_ft : BED_LENGTH_FT;
+        const fraction = succ.coverage_fraction ?? 1.0;
+        const yieldLbs = calcYieldLbs(crop, bedLengthFt, fraction);
+        const yieldBunches = calcYieldBunches(crop, bedLengthFt, fraction);
 
         // Pricing — prefer live pricing override, then crop DB price, then static organic default
         const override = pricingOverrides[crop.id] ?? {};
@@ -87,16 +89,17 @@ export async function calculateBedYield(bedInfo, successions, farmProfile, prici
         const organicPriceLb = priceLb * organicMultiplier;
         const organicPriceBunch = priceBunch ? priceBunch * organicMultiplier : null;
 
-        // Yield range using per-category variance
+        // Yield range using per-category variance (These are PER HARVEST)
         const variance = YIELD_VARIANCE[crop.category] ?? DEFAULT_VARIANCE;
         const yieldLbsLow = Math.round(yieldLbs * variance.low);
         const yieldLbsHigh = Math.round(yieldLbs * variance.high);
         const yieldBunchesLow = yieldBunches ? Math.round(yieldBunches * variance.low) : null;
         const yieldBunchesHigh = yieldBunches ? Math.round(yieldBunches * variance.high) : null;
 
-        // Revenue: primary metric is by-lb; secondary by-bunch if applicable
-        const revenueLow = calculateRevenue(yieldLbsLow, yieldBunchesLow, organicPriceLb, organicPriceBunch);
-        const revenueHigh = calculateRevenue(yieldLbsHigh, yieldBunchesHigh, organicPriceLb, organicPriceBunch);
+        // Revenue: Multiply PER HARVEST yield by TOTAL harvests to estimate gross revenue
+        const harvestCount = crop.harvest_count ?? 1;
+        const revenueLow = calculateRevenue(yieldLbsLow * harvestCount, yieldBunchesLow ? yieldBunchesLow * harvestCount : null, organicPriceLb, organicPriceBunch);
+        const revenueHigh = calculateRevenue(yieldLbsHigh * harvestCount, yieldBunchesHigh ? yieldBunchesHigh * harvestCount : null, organicPriceLb, organicPriceBunch);
         const revenueMid = Math.round((revenueLow + revenueHigh) / 2);
 
         const csaLbsPerShare = crop.csa_lbs_per_share ?? 1.0;
@@ -244,8 +247,8 @@ function buildYieldDisplayLine(crop, bedNumber, yieldLow, yieldHigh, yieldBunche
 
     // Show range if low and high differ meaningfully
     const yieldStr = yieldLow === yieldHigh
-        ? `${numberWithCommas(yieldHigh)} lbs${cutsLabel}`
-        : `${numberWithCommas(yieldLow)}–${numberWithCommas(yieldHigh)} lbs${cutsLabel}`;
+        ? `${numberWithCommas(yieldHigh)} lbs per harvest${cutsLabel}`
+        : `${numberWithCommas(yieldLow)}–${numberWithCommas(yieldHigh)} lbs per harvest${cutsLabel}`;
 
     const priceStr = priceBunch
         ? `$${priceLb.toFixed(2)}/lb | $${priceBunch.toFixed(2)}/bunch organic`
@@ -285,15 +288,19 @@ export function harvestTerm(category, count = 1) {
 
 // ─── Calculation Helpers ──────────────────────────────────────────────────────
 
-function calcYieldLbs(crop, bedLengthFt) {
+function calcYieldLbs(crop, bedLengthFt, fraction = 1.0) {
+    const rows = crop.rows_per_30in_bed ?? 1;
+    const linearFt = bedLengthFt * rows * fraction;
     const perFt = (crop.yield_lbs_per_100ft ?? 0) / 100;
-    return perFt * bedLengthFt;
+    return perFt * linearFt;
 }
 
-function calcYieldBunches(crop, bedLengthFt) {
+function calcYieldBunches(crop, bedLengthFt, fraction = 1.0) {
     if (!crop.yield_bunches_per_100ft) return null;
+    const rows = crop.rows_per_30in_bed ?? 1;
+    const linearFt = bedLengthFt * rows * fraction;
     const perFt = crop.yield_bunches_per_100ft / 100;
-    return perFt * bedLengthFt;
+    return perFt * linearFt;
 }
 
 function calculateRevenue(yieldLbs, yieldBunches, priceLb, priceBunch) {
