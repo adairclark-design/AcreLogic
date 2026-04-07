@@ -19,6 +19,20 @@ import {
     useWindowDimensions,
 } from 'react-native';
 import { Colors, Typography, Spacing, Radius, Shadows } from '../theme';
+
+// ─── Stripe redirect helper ───────────────────────────────────────────────────
+// Stamps the purchased tier into localStorage BEFORE opening Stripe.
+// When Stripe redirects back (to any URL on this domain), AppNavigator detects
+// the pending flag and routes to SuccessScreen automatically — regardless of
+// whether the Stripe Payment Link has a custom success_url configured.
+function openStripeWithPendingFlag(stripeUrl, tier) {
+    try {
+        if (typeof localStorage !== 'undefined') {
+            localStorage.setItem('acrelogic_pending_tier', tier);
+        }
+    } catch {}
+    Linking.openURL(stripeUrl);
+}
 import HomeLogoButton from '../components/HomeLogoButton';
 
 // ─── Stripe Payment Links ─────────────────────────────────────────────────────
@@ -145,7 +159,7 @@ function TierCard({ tier, delay, billingMode }) {
             displayPrice = `$${SEASON_PASS_PRICE.toFixed(2)}`;
             displayPriceSub = `one-time · full year · (~$${MONTHLY_EQUIV}/mo)`;
             displayCta = 'Get Season Pass →';
-            displayOnPress = () => Linking.openURL(STRIPE_SEASON_PASS_URL);
+            displayOnPress = () => openStripeWithPendingFlag(STRIPE_SEASON_PASS_URL, 'premium');
             displayDisabled = false;
             badge = 'BEST VALUE';
             badgeColor = '#F59E0B';
@@ -340,7 +354,7 @@ const TIERS = [
         highlight: false,
         cta: 'Subscribe →',
         ctaDisabled: false,
-        onPress: () => Linking.openURL(STRIPE_BASIC_URL),
+        onPress: () => openStripeWithPendingFlag(STRIPE_BASIC_URL, 'basic'),
     },
     {
         key: 'premium',
@@ -351,7 +365,7 @@ const TIERS = [
         highlight: true,
         cta: 'Subscribe →',
         ctaDisabled: false,
-        onPress: () => Linking.openURL(STRIPE_PREMIUM_URL),
+        onPress: () => openStripeWithPendingFlag(STRIPE_PREMIUM_URL, 'premium'),
     },
 ];
 

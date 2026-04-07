@@ -20,21 +20,41 @@ export default function SuccessScreen({ route, navigation }) {
     const slideAnim = useRef(new Animated.Value(30)).current;
 
     useEffect(() => {
-        // 1. Parse which tier they bought from the URL (e.g. ?tier=premium)
+        // 1. Parse which tier they bought.
+        //    Priority: ?tier= URL param (if Stripe has a custom success_url set)
+        //    Fallback:  acrelogic_pending_tier (set by PricingScreen before opening Stripe)
         let boughtTier = TIER.PREMIUM;
         let pName = 'Premium';
 
         if (typeof window !== 'undefined' && window.location) {
             const params = new URLSearchParams(window.location.search);
-            if (params.get('tier') === 'basic') {
+            const urlTier = params.get('tier');
+            if (urlTier === 'basic') {
                 boughtTier = TIER.BASIC;
                 pName = 'Basic';
+            } else if (urlTier === 'premium') {
+                boughtTier = TIER.PREMIUM;
+                pName = 'Premium';
+            } else {
+                // No ?tier= param — check the localStorage pending flag
+                try {
+                    const pending = localStorage.getItem('acrelogic_pending_tier');
+                    if (pending === 'basic') {
+                        boughtTier = TIER.BASIC;
+                        pName = 'Basic';
+                    } else if (pending === 'premium') {
+                        boughtTier = TIER.PREMIUM;
+                        pName = 'Premium';
+                    }
+                } catch {}
             }
+            // Always clear the pending flag — it has been consumed
+            try { localStorage.removeItem('acrelogic_pending_tier'); } catch {}
         }
 
         setTierName(pName);
 
-        // 2. Artificially upgrade them in memory for this session
+        // 2. Upgrade them — persisted to localStorage so it survives refreshes
         setActiveTier(boughtTier);
 
         // 3. Animate the success message
