@@ -640,7 +640,7 @@ export default function BlockDetailScreen({ navigation, route }) {
                 const prevShelter = existing.shelterType ?? 'none';
                 if (prevShelter === type) return;
 
-                const getOffset = (t) => t === 'greenhouse' ? -42 : t === 'rowCover' ? -14 : 0;
+                const getOffset = (t) => t === 'greenhouse' ? -21 : t === 'rowCover' ? -7 : 0;
                 const delta = getOffset(type) - getOffset(prevShelter);
 
                 let updatedSuccs = existing.successions;

@@ -70,7 +70,12 @@ const BlockTile = ({ block, onPress, onLongPress }) => {
             <View style={styles.tileHeaderRow}>
                 <View style={styles.tileIconBg} />
                 <View style={{ flex: 1 }}>
-                    <Text style={styles.tileName}>{block.name}</Text>
+                    <Text style={styles.tileName} numberOfLines={2}>
+                        {block.name}
+                        {block.gridPosition?.label && (
+                            <Text style={styles.tileLocation}> · {block.gridPosition.label}</Text>
+                        )}
+                    </Text>
                     <Text style={styles.tileFamily}>{familyShort}</Text>
                 </View>
                 {occupancyPct > 0 && (
@@ -320,6 +325,12 @@ const styles = StyleSheet.create({
         fontSize: 10,
         color: Colors.mutedText,
         marginTop: 1,
+    },
+    tileLocation: {
+        fontSize: 13,
+        color: Colors.primaryGreen,
+        opacity: 0.6,
+        fontWeight: '700',
     },
     tilePct: {
         fontSize: 11,

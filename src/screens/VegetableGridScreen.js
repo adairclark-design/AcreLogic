@@ -5,6 +5,7 @@ import {
     TextInput,
     StyleSheet,
     TouchableOpacity,
+    ScrollView,
     useWindowDimensions,
     Animated,
     FlatList,
@@ -20,10 +21,6 @@ import CategorySidebar from '../components/CategorySidebar';
 import { formatCropDisplayName } from '../utils/cropDisplay';
 import { getCropEarliestActionOffset } from '../services/homeGardenCalculator';
 import GlobalNavBar from '../components/GlobalNavBar';
-import { loadPlanCrops, savePlanCrops } from '../services/persistence';
-import { useFocusEffect } from '@react-navigation/native';
-import { useCallback } from 'react';
-
 // ─── Responsive breakpoints ───────────────────────────────────────────────────
 function getBreakpoint(width) {
     if (width < 480) {
@@ -69,14 +66,6 @@ function loadFrequency() {
         return (parsed && typeof parsed === 'object') ? parsed : {};
     } catch { return {}; }
 }
-function bumpFrequency(ids) {
-    try {
-        const freq = loadFrequency();
-        for (const id of ids) freq[id] = (freq[id] ?? 0) + 1;
-        localStorage.setItem(FREQ_KEY, JSON.stringify(freq));
-    } catch { }
-}
-
 // ─── Crop Card ────────────────────────────────────────────────────────────────
 const CATEGORY_COLORS = {
     'Greens':     { bg: '#E8F5E9', text: '#1B5E20' },
@@ -96,108 +85,107 @@ const CATEGORY_COLORS = {
 };
 
 
-const CropCard = ({ crop, selected, onPress, onLongPress, cardWidth }) => {
-    const scaleAnim = useRef(new Animated.Value(1)).current;
+const CropCard = ({ crop, cardWidth }) => {
     const imgHeight = Math.round(cardWidth * 0.85); // square-ish photo
 
-    const handlePress = () => {
-        Animated.sequence([
-            Animated.spring(scaleAnim, { toValue: 0.92, useNativeDriver: true, speed: 50 }),
-            Animated.spring(scaleAnim, { toValue: 1, useNativeDriver: true, friction: 4 }),
-        ]).start();
-        onPress(crop.id);
-    };
-
     return (
-        <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
-            <TouchableOpacity
-                style={[
-                    styles.cropCard,
-                    Shadows.card,
-                    selected && styles.cropCardChosen,
-                ]}
-                onPress={handlePress}
-                onLongPress={() => selected && onLongPress(crop)}
-                delayLongPress={1500}
-                activeOpacity={selected ? 1 : 0.85}
-            >
-                {/* Crop photo */}
-                {CROP_IMAGES[crop.id]
-                    ? <Image
-                        source={CROP_IMAGES[crop.id]}
-                        style={[styles.cropImage, { height: imgHeight }]}
-                        resizeMode="cover"
-                    />
-                    : <View style={[styles.cropEmojiBox, { height: imgHeight }]}>
-                        <Text style={styles.cropEmoji}>{crop.emoji}</Text>
-                    </View>
-                }
-
-                <Text
-                    style={[styles.cropName, selected && styles.cropNameChosen]}
-                    numberOfLines={2}
-                >
-                    {formatCropDisplayName(crop.name, crop.variety)}
-                </Text>
-
-                {/* ── Quick-scan data badges ───────────────────────────────── */}
-                <View style={styles.cropBadgeRow}>
-                    {crop.dtm !== '—' && (
-                        <View style={styles.dtmPill}>
-                            <Text style={styles.dtmPillText}>{crop.dtm}</Text>
-                        </View>
-                    )}
-                    {crop.season === 'cool' && (
-                        <View style={[styles.seasonPill, styles.seasonPillCool]}>
-                            <Text style={styles.seasonPillText}>❄️ Cool</Text>
-                        </View>
-                    )}
-                    {crop.season === 'warm' && (
-                        <View style={[styles.seasonPill, styles.seasonPillWarm]}>
-                            <Text style={styles.seasonPillText}>☀️ Warm</Text>
-                        </View>
-                    )}
-                    {crop.type && (
-                        <View style={styles.typePill}>
-                            <Text style={styles.typePillText}>{crop.type}</Text>
-                        </View>
-                    )}
+        <View style={[styles.cropCard, Shadows.card]}>
+            {/* Crop photo */}
+            {CROP_IMAGES[crop.id]
+                ? <Image
+                    source={CROP_IMAGES[crop.id]}
+                    style={[styles.cropImage, { height: imgHeight }]}
+                    resizeMode="cover"
+                />
+                : <View style={[styles.cropEmojiBox, { height: imgHeight }]}>
+                    <Text style={styles.cropEmoji}>{crop.emoji}</Text>
                 </View>
+            }
 
-                {/* Selected overlay */}
-                {selected && (
-                    <View style={styles.chosenOverlay}>
-                        <Text style={styles.chosenCheckmark}>✓</Text>
+            <Text
+                style={styles.cropName}
+                numberOfLines={2}
+            >
+                {formatCropDisplayName(crop.name, crop.variety)}
+            </Text>
+
+            {/* ── Quick-scan data badges ───────────────────────────────── */}
+            <View style={styles.cropBadgeRow}>
+                {crop.dtm !== '—' && (
+                    <View style={styles.dtmPill}>
+                        <Text style={styles.dtmPillText}>{crop.dtm}</Text>
                     </View>
                 )}
-            </TouchableOpacity>
-        </Animated.View>
+                {crop.season === 'cool' && (
+                    <View style={[styles.seasonPill, styles.seasonPillCool]}>
+                        <Text style={styles.seasonPillText}>❄️ Cool</Text>
+                    </View>
+                )}
+                {crop.season === 'warm' && (
+                    <View style={[styles.seasonPill, styles.seasonPillWarm]}>
+                        <Text style={styles.seasonPillText}>☀️ Warm</Text>
+                    </View>
+                )}
+                {crop.type && (
+                    <View style={styles.typePill}>
+                        <Text style={styles.typePillText}>{crop.type}</Text>
+                    </View>
+                )}
+            </View>
+        </View>
     );
 };
 
 
+class ErrorBoundary extends React.Component {
+    constructor(props) {
+        super(props);
+        this.state = { hasError: false, errorMessage: '', errorStack: '' };
+    }
+    static getDerivedStateFromError(error) {
+        return {
+            hasError: true,
+            errorMessage: error?.message ?? String(error),
+            errorStack: error?.stack ?? '',
+        };
+    }
+    componentDidCatch(error, errorInfo) {
+        console.error('[VegetableGridScreen] Error caught by boundary:', error, errorInfo);
+    }
+    render() {
+        if (this.state.hasError) {
+            return (
+                <View style={{ flex: 1, justifyContent: 'center', alignItems: 'flex-start', backgroundColor: '#1a1a1a', padding: Spacing.xl }}>
+                    <Text style={{ fontSize: Typography.md, fontWeight: Typography.bold, color: '#FF6B6B', marginBottom: Spacing.sm }}>⚠ Component Crashed</Text>
+                    <Text style={{ fontSize: Typography.sm, fontWeight: Typography.bold, color: '#FFD93D', marginBottom: 4 }}>Error:</Text>
+                    <Text selectable style={{ fontSize: 12, color: '#FF6B6B', fontFamily: 'monospace', marginBottom: Spacing.md, backgroundColor: '#2a2a2a', padding: 10, borderRadius: 6, width: '100%' }}>
+                        {this.state.errorMessage}
+                    </Text>
+                    <Text style={{ fontSize: Typography.sm, fontWeight: Typography.bold, color: '#FFD93D', marginBottom: 4 }}>Stack:</Text>
+                    <Text selectable style={{ fontSize: 10, color: '#aaa', fontFamily: 'monospace', marginBottom: Spacing.xl, backgroundColor: '#2a2a2a', padding: 10, borderRadius: 6, width: '100%' }}>
+                        {this.state.errorStack}
+                    </Text>
+                    <TouchableOpacity onPress={() => this.setState({ hasError: false, errorMessage: '', errorStack: '' })} style={{ paddingHorizontal: 20, paddingVertical: 12, backgroundColor: Colors.primaryGreen, borderRadius: Radius.md }}>
+                        <Text style={{ color: Colors.white, fontWeight: Typography.semiBold }}>Restart View</Text>
+                    </TouchableOpacity>
+                </View>
+            );
+        }
+        return this.props.children;
+    }
+}
+
 // ─── Main Screen ─────────────────────────────────────────────────────────────
-export default function VegetableGridScreen({ navigation, route }) {
+function VegetableGridScreenInner({ navigation, route }) {
     const farmProfile = route?.params?.farmProfile ?? null;
     const planId = route?.params?.planId ?? null;
     
-    // Always trust the local persistence layer over route params as the single source of truth.
-    const [selectedCrops, setSelectedCrops] = useState(() => new Set(loadPlanCrops(planId) ?? []));
-
-    const loadedPlanIdRef = useRef(null);
-    // Force re-synchronization when returning from a different phase so stale route params don't wipe memory.
-    useFocusEffect(useCallback(() => {
-        if (planId) {
-            const stored = loadPlanCrops(planId) ?? [];
-            setSelectedCrops(new Set(stored));
-            loadedPlanIdRef.current = planId;
-        }
-    }, [planId]));
-    const [filterFn, setFilterFn]           = useState(() => () => true);  // driven by MegaMenuBar
-    const [contextMenuCrop, setContextMenuCrop] = useState(null);
+    // IMPORTANT: filterFn is stored as { fn: Function } — NOT as a raw function.
+    // React treats any function passed to setState() as a functional updater (calling it with
+    // the previous state), which would silently corrupt the stored filter function on every
+    // category change and eventually crash the filteredCrops sort. The object wrapper prevents this.
+    const [filterObj, setFilterObj] = useState({ fn: () => true });  // driven by CategorySidebar
     const [searchQuery, setSearchQuery] = useState('');
-
-    const flatListRef = useRef(null);
 
     // Load frequency on mount + scroll FlatList to top
     const [cropFrequency, setCropFrequency] = useState({});
@@ -207,12 +195,7 @@ export default function VegetableGridScreen({ navigation, route }) {
         // Setting it blindly with a 50ms timeout was intermittently corrupting layout state and blanking the grid.
     }, []);
 
-    // Auto-save selections to localStorage so other tabs (Farm Layout, Planner) can reliably access them
-    React.useEffect(() => {
-        if (planId && loadedPlanIdRef.current === planId) {
-            savePlanCrops(planId, Array.from(selectedCrops));
-        }
-    }, [selectedCrops, planId]);
+
 
     // Reactive screen width — updates on resize & orientation change
     const { width } = useWindowDimensions();
@@ -223,38 +206,22 @@ export default function VegetableGridScreen({ navigation, route }) {
     // Add an active label tracker for the sidebar
     const [activeFilterLabel, setActiveFilterLabel] = useState('All');
 
-    const toggleCrop = (id) => {
-        setSelectedCrops((prev) => {
-            const next = new Set(prev);
-            next.has(id) ? next.delete(id) : next.add(id);
-            return next;
-        });
-        // No scroll — keep the grid stable so the user stays where they were
-    };
 
-    const removeCrop = (id) => {
-        setSelectedCrops((prev) => {
-            const next = new Set(prev);
-            next.delete(id);
-            return next;
-        });
-        setContextMenuCrop(null);
-    };
 
     const filteredCrops = CROPS
-        .filter(filterFn)
+        .filter(filterObj.fn)
         .filter(c => !searchQuery.trim() ||
             c.name.toLowerCase().includes(searchQuery.trim().toLowerCase()) ||
             (c.variety ?? '').toLowerCase().includes(searchQuery.trim().toLowerCase())
         )
         .sort((a, b) => {
-            const offsetA = getCropEarliestActionOffset(a);
-            const offsetB = getCropEarliestActionOffset(b);
-            if (offsetA !== offsetB) return offsetA - offsetB;
+            try {
+                const offsetA = getCropEarliestActionOffset(a);
+                const offsetB = getCropEarliestActionOffset(b);
+                if (offsetA !== offsetB) return offsetA - offsetB;
+            } catch { /* defensive: never let sort throw */ }
             return (cropFrequency[b.id] ?? 0) - (cropFrequency[a.id] ?? 0) || a.name.localeCompare(b.name);
         });
-
-    const cardWidth = (width - Spacing.lg * 2 - Spacing.sm * (numColumns - 1)) / numColumns;
 
     return (
         <View style={styles.container}>
@@ -263,13 +230,6 @@ export default function VegetableGridScreen({ navigation, route }) {
                 farmProfile={farmProfile} 
                 planId={planId} 
                 activeRoute="VegetableGrid" 
-                rightAction={
-                    selectedCrops.size > 0 ? (
-                        <View style={styles.selectionBadge}>
-                            <Text style={styles.selectionCount}>{selectedCrops.size}</Text>
-                        </View>
-                    ) : null
-                }
             />
 
             {isDesktop ? (
@@ -280,13 +240,13 @@ export default function VegetableGridScreen({ navigation, route }) {
                         activeLabel={activeFilterLabel}
                         onFilterChange={({ label, filterFn }) => {
                             setActiveFilterLabel(label);
-                            setFilterFn(() => filterFn);
+                            setFilterObj({ fn: filterFn });
                         }}
                     />
                     <View style={styles.desktopMainContent}>
                         {/* Subtitle */}
                         <Text style={[styles.subheading, { paddingHorizontal: Spacing.md }]}>
-                            Tap crops to add them to your planning queue. Seeds will populate your beds.
+                            Browse the agronomic catalog to view crop spacings and harvest details.
                         </Text>
             
                         {/* Search bar */}
@@ -308,32 +268,17 @@ export default function VegetableGridScreen({ navigation, route }) {
                         </View>
             
                         {/* Grid */}
-                        <FlatList
-                            ref={flatListRef}
-                            data={filteredCrops}
-                            keyExtractor={(item) => item.id}
-                            numColumns={numColumns}
-                            key={numColumns}
-                            contentContainerStyle={[styles.grid, { paddingHorizontal: Spacing.md, paddingBottom: 140 }]}
-                            columnWrapperStyle={numColumns > 1 ? styles.gridRow : undefined}
+                        <ScrollView
                             showsVerticalScrollIndicator={false}
-                            style={Platform.OS === 'web' ? { overflowY: 'scroll', flex: 1 } : { flex: 1 }}
-                            initialNumToRender={24}
-                            maxToRenderPerBatch={24}
-                            windowSize={5}
-                            removeClippedSubviews={Platform.OS !== 'web'}
-                            renderItem={({ item }) => (
-                                <View style={{ width: cardWidth }}>
-                                    <CropCard
-                                        crop={item}
-                                        selected={selectedCrops.has(item.id)}
-                                        onPress={toggleCrop}
-                                        onLongPress={setContextMenuCrop}
-                                        cardWidth={cardWidth}
-                                    />
+                            style={Platform.OS === 'web' ? { overflowY: 'auto', flex: 1 } : { flex: 1 }}
+                            contentContainerStyle={[styles.grid, { paddingBottom: 60, flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center' }]}
+                        >
+                            {filteredCrops.map(item => (
+                                <View key={item.id} style={{ width: 160 }}>
+                                    <CropCard crop={item} cardWidth={160} />
                                 </View>
-                            )}
-                        />
+                            ))}
+                        </ScrollView>
                     </View>
                 </View>
             ) : (
@@ -341,7 +286,7 @@ export default function VegetableGridScreen({ navigation, route }) {
                 <View style={{ flex: 1 }}>
                     {/* Subtitle */}
                     <Text style={styles.subheading}>
-                        Tap crops to add them to your planning queue. Seeds will populate your beds.
+                        Browse the agronomic catalog to view crop spacings and harvest details.
                     </Text>
         
                     {/* Wrapping Mobile Filter Bar */}
@@ -350,7 +295,7 @@ export default function VegetableGridScreen({ navigation, route }) {
                         activeLabel={activeFilterLabel}
                         onFilterChange={({ label, filterFn }) => {
                             setActiveFilterLabel(label);
-                            setFilterFn(() => filterFn);
+                            setFilterObj({ fn: filterFn });
                         }}
                     />
         
@@ -373,117 +318,28 @@ export default function VegetableGridScreen({ navigation, route }) {
                     </View>
         
                     {/* Grid */}
-                    <FlatList
-                        ref={flatListRef}
-                        data={filteredCrops}
-                        keyExtractor={(item) => item.id}
-                        numColumns={numColumns}
-                        key={`mob-${numColumns}`}
-                        contentContainerStyle={[styles.grid, { paddingBottom: 140 }]}
-                        columnWrapperStyle={numColumns > 1 ? styles.gridRow : undefined}
+                    <ScrollView
                         showsVerticalScrollIndicator={false}
-                        style={Platform.OS === 'web' ? { overflowY: 'scroll', flex: 1 } : { flex: 1 }}
-                        initialNumToRender={24}
-                        maxToRenderPerBatch={24}
-                        windowSize={5}
-                        removeClippedSubviews={Platform.OS !== 'web'}
-                        renderItem={({ item }) => (
-                            <View style={{ width: cardWidth }}>
-                                <CropCard
-                                    crop={item}
-                                    selected={selectedCrops.has(item.id)}
-                                    onPress={toggleCrop}
-                                    onLongPress={setContextMenuCrop}
-                                    cardWidth={cardWidth}
-                                />
+                        style={Platform.OS === 'web' ? { overflowY: 'auto', flex: 1 } : { flex: 1 }}
+                        contentContainerStyle={[styles.grid, { paddingBottom: 60, flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center' }]}
+                    >
+                        {filteredCrops.map(item => (
+                            <View key={item.id} style={{ width: 140 }}>
+                                <CropCard crop={item} cardWidth={140} />
                             </View>
-                        )}
-                    />
+                        ))}
+                    </ScrollView>
                 </View>
             )}
-
-            {/* Sticky bottom bar — always visible Plan Crops button */}
-            <View style={styles.stickyFooter}>
-                {selectedCrops.size > 0 && (
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12, maxHeight: 40 }} contentContainerStyle={{ gap: 8, paddingHorizontal: 4 }}>
-                        {Array.from(selectedCrops).map(id => {
-                            const cropMeta = CROPS.find(c => c.id === id);
-                            if (!cropMeta) return null;
-                            return (
-                                <TouchableOpacity key={id} onPress={() => removeCrop(id)} style={styles.compactSelectionBox}>
-                                    <Text style={{ fontSize: 16 }}>{cropMeta.emoji}</Text>
-                                    <Text style={styles.compactSelectionText}>{cropMeta.name}</Text>
-                                    <View style={styles.compactSelectionRemove}><Text style={{fontSize: 9, color: '#FFF'}}>✕</Text></View>
-                                </TouchableOpacity>
-                            );
-                        })}
-                    </ScrollView>
-                )}
-                <TouchableOpacity
-                    style={[
-                        styles.continueBtn,
-                        Shadows.button,
-                        selectedCrops.size === 0 && styles.continueBtnDisabled,
-                    ]}
-                    onPress={() => {
-                        if (selectedCrops.size === 0) return;
-                        bumpFrequency(Array.from(selectedCrops));
-                        setCropFrequency(loadFrequency());
-                        // Carefully check if we launched from an active bed session!
-                        // If so, natively return to BedWorkspace with state intact instead of a disruptive pop to FarmDesigner.
-                        if (route?.params?.fromWorkspace) {
-                            navigation.navigate('BedWorkspace');
-                        } else {
-                            // Otherwise navigate natively back to Farm Layout grid.
-                            navigation.navigate('FarmDesigner', {
-                                farmProfile,
-                                planId,
-                            });
-                        }
-                    }}
-                    disabled={selectedCrops.size === 0}
-                >
-                    <Text style={styles.continueBtnText}>
-                        {selectedCrops.size === 0
-                            ? 'Select at least 1 crop'
-                            : `Plan ${selectedCrops.size} Crop${selectedCrops.size > 1 ? 's' : ''} →`}
-                    </Text>
-                </TouchableOpacity>
-            </View>
-
-            {/* Context Menu Modal — long press / right click to remove */}
-            <Modal
-                visible={!!contextMenuCrop}
-                transparent
-                animationType="fade"
-                onRequestClose={() => setContextMenuCrop(null)}
-            >
-                <TouchableOpacity
-                    style={styles.contextScrim}
-                    activeOpacity={1}
-                    onPress={() => setContextMenuCrop(null)}
-                >
-                    <View style={styles.contextMenu}>
-                        <Text style={styles.contextMenuTitle}>{contextMenuCrop?.name}</Text>
-                        <Text style={styles.contextMenuSub}>What would you like to do?</Text>
-                        <TouchableOpacity
-                            style={styles.contextMenuRemoveBtn}
-                            onPress={() => removeCrop(contextMenuCrop?.id)}
-                        >
-                            <Text style={styles.contextMenuRemoveText}>✕  Remove from selection</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                            style={styles.contextMenuCancelBtn}
-                            onPress={() => setContextMenuCrop(null)}
-                        >
-                            <Text style={styles.contextMenuCancelText}>Cancel</Text>
-                        </TouchableOpacity>
-                    </View>
-                </TouchableOpacity>
-            </Modal>
-
-
         </View>
+    );
+}
+
+export default function VegetableGridScreen(props) {
+    return (
+        <ErrorBoundary>
+            <VegetableGridScreenInner {...props} />
+        </ErrorBoundary>
     );
 }
 

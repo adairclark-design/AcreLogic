@@ -191,8 +191,8 @@ export async function getSuccessionCandidatesRanked(bedState, farmProfile, optio
     
     // Evaluate spring offset based on shelter
     let shelterSpringOffsetDays = 0;
-    if (shelterType === 'rowCover') shelterSpringOffsetDays = -14;
-    else if (shelterType === 'greenhouse') shelterSpringOffsetDays = -42;
+    if (shelterType === 'rowCover') shelterSpringOffsetDays = -7;
+    else if (shelterType === 'greenhouse') shelterSpringOffsetDays = -21;
 
     let nextStartDate = addDays(farmProfile.last_frost_date, shelterSpringOffsetDays); // Start from effective last frost if bed is empty
 
@@ -208,8 +208,8 @@ export async function getSuccessionCandidatesRanked(bedState, farmProfile, optio
 
     // Remaining frost-free days from nextStartDate
     let remainingDays = getRemainingFrostFreeDays(farmProfile, new Date(nextStartDate));
-    if (shelterType === 'rowCover') remainingDays += 14;
-    else if (shelterType === 'greenhouse') remainingDays += 42;
+    if (shelterType === 'rowCover') remainingDays += 7;
+    else if (shelterType === 'greenhouse') remainingDays += 21;
 
     // Detect season class for this window
     const seasonClass = forceSeasonClass ?? getSeasonClass(nextStartDate, lat);
@@ -329,8 +329,8 @@ async function scoreCrop(crop, previousCrop, successions, farmProfile, nextStart
     // ── evaluate specific crop start dates ──────────────────────────────────────
     let shelterSpringOffsetDays = 0;
     if (options && options.shelterType) {
-        if (options.shelterType === 'rowCover') shelterSpringOffsetDays = -14;
-        else if (options.shelterType === 'greenhouse') shelterSpringOffsetDays = -42;
+        if (options.shelterType === 'rowCover') shelterSpringOffsetDays = -7;
+        else if (options.shelterType === 'greenhouse') shelterSpringOffsetDays = -21;
     }
     const effectiveLastFrost = addDays(farmProfile.last_frost_date, shelterSpringOffsetDays);
 
@@ -346,8 +346,8 @@ async function scoreCrop(crop, previousCrop, successions, farmProfile, nextStart
     let actualRemainingDays = getRemainingFrostFreeDays(farmProfile, new Date(cropStartDate));
     // Re-add shelter offsets to actual timeline
     if (options && options.shelterType) {
-        if (options.shelterType === 'rowCover') actualRemainingDays += 14;
-        else if (options.shelterType === 'greenhouse') actualRemainingDays += 42;
+        if (options.shelterType === 'rowCover') actualRemainingDays += 7;
+        else if (options.shelterType === 'greenhouse') actualRemainingDays += 21;
     }
 
     // ── 4. Season class fit ─────────────────────────────────────────────────

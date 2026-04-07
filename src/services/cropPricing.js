@@ -303,7 +303,6 @@ export const CROP_RETAIL_PRICES = {
     cilantro_slow_bolt: 4.00, // [researched]
     vietnamese_coriander: 7.00, // [researched]
     culantro: 6.00, // [researched]
-    mint_peppermint: 8.00, // [researched]
     mint_apple: 7.00, // [researched]
     korean_mint: 8.00, // [researched]
     lemon_verbena: 14.00, // [researched]

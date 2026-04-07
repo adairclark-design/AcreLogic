@@ -18,6 +18,7 @@
 
 import { getCropById, getYieldEstimates } from './database';
 import { fetchOrganicPrice } from './climateService';
+import { LBS_PER_BUNCH } from '../constants/cropConstants';
 
 const BED_LENGTH_FT = 50;
 
@@ -77,7 +78,13 @@ export async function calculateBedYield(bedInfo, successions, farmProfile, prici
         const bedLengthFt = typeof bedInfo === 'object' && bedInfo.bed_length_ft ? bedInfo.bed_length_ft : BED_LENGTH_FT;
         const fraction = succ.coverage_fraction ?? 1.0;
         const yieldLbs = calcYieldLbs(crop, bedLengthFt, fraction);
-        const yieldBunches = calcYieldBunches(crop, bedLengthFt, fraction);
+        
+        let yieldBunches = calcYieldBunches(crop, bedLengthFt, fraction);
+        const cropLbsPerBunch = crop.lbs_per_bunch ?? LBS_PER_BUNCH[crop.category] ?? null;
+        // Dynamic Bunch logic fallback
+        if (yieldBunches === null && cropLbsPerBunch) {
+            yieldBunches = yieldLbs / cropLbsPerBunch;
+        }
 
         // Pricing — prefer live pricing override, then crop DB price, then static organic default
         const override = pricingOverrides[crop.id] ?? {};
@@ -89,17 +96,18 @@ export async function calculateBedYield(bedInfo, successions, farmProfile, prici
         const organicPriceLb = priceLb * organicMultiplier;
         const organicPriceBunch = priceBunch ? priceBunch * organicMultiplier : null;
 
-        // Yield range using per-category variance (These are PER HARVEST)
+        // Yield range using per-category variance (These represent the TOTAL seasonal yield across all harvests)
         const variance = YIELD_VARIANCE[crop.category] ?? DEFAULT_VARIANCE;
         const yieldLbsLow = Math.round(yieldLbs * variance.low);
         const yieldLbsHigh = Math.round(yieldLbs * variance.high);
         const yieldBunchesLow = yieldBunches ? Math.round(yieldBunches * variance.low) : null;
         const yieldBunchesHigh = yieldBunches ? Math.round(yieldBunches * variance.high) : null;
 
-        // Revenue: Multiply PER HARVEST yield by TOTAL harvests to estimate gross revenue
+        // Revenue: Calculate gross revenue natively off the Total Seasonal Yield.
+        // DO NOT multiply by harvestCount, as yieldLbs and yieldBunches are already cumulative.
         const harvestCount = crop.harvest_count ?? 1;
-        const revenueLow = calculateRevenue(yieldLbsLow * harvestCount, yieldBunchesLow ? yieldBunchesLow * harvestCount : null, organicPriceLb, organicPriceBunch);
-        const revenueHigh = calculateRevenue(yieldLbsHigh * harvestCount, yieldBunchesHigh ? yieldBunchesHigh * harvestCount : null, organicPriceLb, organicPriceBunch);
+        const revenueLow = calculateRevenue(yieldLbsLow, yieldBunchesLow, organicPriceLb, organicPriceBunch);
+        const revenueHigh = calculateRevenue(yieldLbsHigh, yieldBunchesHigh, organicPriceLb, organicPriceBunch);
         const revenueMid = Math.round((revenueLow + revenueHigh) / 2);
 
         const csaLbsPerShare = crop.csa_lbs_per_share ?? 1.0;
@@ -247,8 +255,8 @@ function buildYieldDisplayLine(crop, bedNumber, yieldLow, yieldHigh, yieldBunche
 
     // Show range if low and high differ meaningfully
     const yieldStr = yieldLow === yieldHigh
-        ? `${numberWithCommas(yieldHigh)} lbs per harvest${cutsLabel}`
-        : `${numberWithCommas(yieldLow)}–${numberWithCommas(yieldHigh)} lbs per harvest${cutsLabel}`;
+        ? `${numberWithCommas(yieldHigh)} lbs total${cutsLabel}`
+        : `${numberWithCommas(yieldLow)}–${numberWithCommas(yieldHigh)} lbs total${cutsLabel}`;
 
     const priceStr = priceBunch
         ? `$${priceLb.toFixed(2)}/lb | $${priceBunch.toFixed(2)}/bunch organic`

@@ -81,7 +81,7 @@ function PlanCard({ plan, onPress, onDelete }) {
     const loc = plan.farmProfile?.address ?? plan.farmProfile?.city ?? plan.farmProfile?._userInput ?? null;
 
     return (
-        <Animated.View style={[{ width: Platform.OS === 'web' ? 'calc(50% - 6px)' : '48%', marginBottom: Spacing.sm }, { opacity: fade, transform: [{ translateY: slideY }] }]}>
+        <Animated.View style={[{ width: CARD_W }, { opacity: fade, transform: [{ translateY: slideY }] }]}>
             <TouchableOpacity
                 style={[styles.planCard, Shadows.card]}
                 onPress={() => onPress(plan)}
@@ -367,7 +367,8 @@ const styles = StyleSheet.create({
     planGrid: {
         flexDirection: 'row',
         flexWrap: 'wrap',
-        justifyContent: 'space-between',
+        justifyContent: 'flex-start',
+        gap: 12,
         width: '100%',
     },
 

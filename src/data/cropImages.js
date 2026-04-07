@@ -269,7 +269,6 @@ const CROP_IMAGES = {
   'milk_thistle': require('../../assets/crops/milk_thistle.jpg'),
   'milo': require('../../assets/crops/milo.jpg'),
   'mint_apple': require('../../assets/crops/mint_apple.png'),
-  'mint_peppermint': require('../../assets/crops/mint_peppermint.png'),
   'mint_spearmint': require('../../assets/crops/mint_spearmint.png'),
   'mizuna_standard': require('../../assets/crops/mizuna_standard.jpg'),
   'monarda': require('../../assets/crops/monarda.jpg'),

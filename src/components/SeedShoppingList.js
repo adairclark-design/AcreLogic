@@ -91,7 +91,6 @@ const CROP_SPECS_OVERRIDE = {
     dill_fernleaf:         { seedsPerPacket: 400, price: 3.49, unit: 'seeds' },
     chives_standard:       { seedsPerPacket: 200, price: 3.49, unit: 'seeds' },
     mint_spearmint:        { seedsPerPacket: 100, price: 3.99, unit: 'seeds' },
-    mint_peppermint:       { seedsPerPacket: 100, price: 3.99, unit: 'seeds' },
     mint_apple:            { seedsPerPacket: 100, price: 3.99, unit: 'seeds' },
     lemon_balm:            { seedsPerPacket: 200, price: 3.99, unit: 'seeds' },
     // ── Nightshade: fine-scale corrections ───────────────────────────────────

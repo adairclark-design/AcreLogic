@@ -227,10 +227,15 @@ export default function YieldSummaryScreen({ navigation, route }) {
                                                 const sumLow = bedEsts.reduce((s, e) => s + (e.yield_lbs_low ?? e.estimated_yield_lbs ?? 0), 0);
                                                 const sumHigh = bedEsts.reduce((s, e) => s + (e.yield_lbs_high ?? e.estimated_yield_lbs ?? 0), 0);
                                                 const yieldStr = sumLow === sumHigh ? `${fmtNum(sumHigh)} lbs` : `${fmtNum(sumLow)}–${fmtNum(sumHigh)} lbs`;
+
+                                                const bunchLow = bedEsts.reduce((s, e) => s + (e.yield_bunches_low ?? e.estimated_yield_bunches ?? 0), 0);
+                                                const bunchHigh = bedEsts.reduce((s, e) => s + (e.yield_bunches_high ?? e.estimated_yield_bunches ?? 0), 0);
+                                                const bunchStr = bunchHigh > 0 ? (bunchLow === bunchHigh ? ` / ${fmtNum(bunchHigh)} bunches` : ` / ${fmtNum(bunchLow)}–${fmtNum(bunchHigh)} bunches`) : '';
+
                                                 const priceStr = livePrices[crop.crop_name]
                                                     ? `$${livePrices[crop.crop_name].price_per_lb.toFixed(2)}/lb 📈`
                                                     : `$${(crop.price_per_lb ?? 0).toFixed(2)}/lb est.`;
-                                                return `${yieldStr} · ${crop.bed_slots} beds · ${priceStr}`;
+                                                return `${yieldStr}${bunchStr} · ${crop.bed_slots} beds · ${priceStr}`;
                                             })()}
                                         </Text>
                                     </View>
@@ -266,11 +271,14 @@ export default function YieldSummaryScreen({ navigation, route }) {
                                                 <Text style={styles.bedEstCrop}>{est.crop_name}</Text>
                                                 <Text style={styles.bedEstDetail}>
                                                     {est.yield_lbs_low != null && est.yield_lbs_high != null
-                                                        ? est.yield_lbs_low === est.yield_lbs_high ? `${est.yield_lbs_high} lbs` : `${est.yield_lbs_low}–${est.yield_lbs_high} lbs`
-                                                        : est.estimated_yield_lbs ? `${Math.round(est.estimated_yield_lbs)} lbs` : ''
+                                                        ? est.yield_lbs_low === est.yield_lbs_high ? `${fmtNum(est.yield_lbs_high)} lbs` : `${fmtNum(est.yield_lbs_low)}–${fmtNum(est.yield_lbs_high)} lbs`
+                                                        : est.estimated_yield_lbs ? `${fmtNum(est.estimated_yield_lbs)} lbs` : ''
                                                     }
-                                                    {est.estimated_yield_bunches ? ` / ${Math.round(est.estimated_yield_bunches)} bunches` : ''}
-                                                    {` per harvest`}
+                                                    {est.yield_bunches_low != null && est.yield_bunches_high != null
+                                                        ? est.yield_bunches_low === est.yield_bunches_high ? ` / ${fmtNum(est.yield_bunches_high)} bunches` : ` / ${fmtNum(est.yield_bunches_low)}–${fmtNum(est.yield_bunches_high)} bunches`
+                                                        : est.estimated_yield_bunches ? ` / ${fmtNum(est.estimated_yield_bunches)} bunches` : ''
+                                                    }
+                                                    {` total`}
                                                     {(est.harvest_count ?? 1) > 1 ? ` · ${est.harvest_count} ${harvestTerm(est.category, est.harvest_count)}` : ''}
                                                 </Text>
                                                 <Text style={styles.bedEstRevenue}>${fmtNum(Math.round(est.gross_revenue_mid ?? 0))}</Text>

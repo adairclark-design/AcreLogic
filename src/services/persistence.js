@@ -673,9 +673,10 @@ export function createFarmPlan(name, farmProfile) {
 // Transient state for selected crops inside a plan
 
 export function loadPlanCrops(planId) {
-    if (!isWeb || !planId) return [];
+    if (!isWeb) return [];
     try {
-        const raw = localStorage.getItem(`acrelogic_plan_crops_${planId}`);
+        const targetId = planId || 'global_library';
+        const raw = localStorage.getItem(`acrelogic_plan_crops_${targetId}`);
         if (!raw) return [];
         const parsed = JSON.parse(raw);
         return Array.isArray(parsed) ? parsed : [];
@@ -683,9 +684,10 @@ export function loadPlanCrops(planId) {
 }
 
 export function savePlanCrops(planId, cropIds) {
-    if (!isWeb || !planId) return;
+    if (!isWeb) return;
     try {
-        localStorage.setItem(`acrelogic_plan_crops_${planId}`, JSON.stringify(cropIds));
+        const targetId = planId || 'global_library';
+        localStorage.setItem(`acrelogic_plan_crops_${targetId}`, JSON.stringify(cropIds));
     } catch (e) {
         console.warn('[Persistence] savePlanCrops failed:', e);
     }

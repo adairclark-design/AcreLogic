@@ -10,13 +10,13 @@
  *
  * When editing an existing block, Step 1 is skipped automatically.
  */
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useMemo } from 'react';
 import {
     View, Text, StyleSheet, TextInput, TouchableOpacity,
     ScrollView, Animated, Platform, Switch,
 } from 'react-native';
 import { Colors, Typography, Spacing, Radius, Shadows } from '../theme';
-import { saveBlock } from '../services/persistence';
+import { saveBlock, loadBlocks } from '../services/persistence';
 import {
     calculateBedsFromDimensions, blockSummaryLine,
     generateBlockId, GRID_POSITIONS, FAMILY_OPTIONS,
@@ -81,6 +81,35 @@ export default function BlockSetupWizard({ route, navigation }) {
     const selectedCropIds = route?.params?.selectedCropIds ?? [];
     // prefill: data passed from FarmSatelliteScreen after drawing a polygon
     const prefill = route?.params?.prefill ?? null;
+
+    // ── Existing-block collision data ─────────────────────────────────────────
+    // Load all blocks that belong to this plan and exclude the one being edited.
+    // Used to grey out occupied grid positions and warn about duplicate names.
+    const existingPlanBlocks = useMemo(() => {
+        const all = loadBlocks();
+        const peers = planId ? all.filter(b => b.planId === planId) : all;
+        return peers.filter(b => b.id !== (existingBlock?.id ?? '__none__'));
+    }, [planId, existingBlock?.id]);
+
+    // Set of "col_row" strings for occupied positions
+    const takenPositions = useMemo(() => {
+        const s = new Set();
+        existingPlanBlocks.forEach(b => {
+            if (b.gridPosition != null) {
+                s.add(`${b.gridPosition.col}_${b.gridPosition.row}`);
+            }
+        });
+        return s;
+    }, [existingPlanBlocks]);
+
+    // Set of lowercase block names already in use
+    const takenNames = useMemo(() => {
+        const s = new Set();
+        existingPlanBlocks.forEach(b => {
+            if (b.name) s.add(b.name.trim().toLowerCase());
+        });
+        return s;
+    }, [existingPlanBlocks]);
 
     const [step, setStep] = useState(0);
     const slideAnim = useRef(new Animated.Value(0)).current;
@@ -244,6 +273,45 @@ export default function BlockSetupWizard({ route, navigation }) {
     };
 
     const handleSave = () => {
+        // ── Collision guard ───────────────────────────────────────────────────
+        // Catch any conflicts that may have been typed after passing the wizard.
+        if (!isEditing && isDuplicate) {
+            const count = parseInt(dupeCountStr) || 2;
+            const seenNames = new Set();
+            const seenPos  = new Set();
+            for (let i = 0; i < count; i++) {
+                const rawName = dupeNames[i]?.trim();
+                const name = (rawName || `${blockName.trim() || 'Block'} ${String.fromCharCode(65 + i)}`).toLowerCase();
+                if (takenNames.has(name) || seenNames.has(name)) {
+                    alert(`A block named "${name}" already exists on this farm. Please choose a unique name.`);
+                    return;
+                }
+                seenNames.add(name);
+                const pos = dupeGridPositions[i];
+                if (pos) {
+                    const key = `${pos.col}_${pos.row}`;
+                    if (takenPositions.has(key) || seenPos.has(key)) {
+                        alert(`Grid position "${pos.label}" is already occupied. Please choose a different location.`);
+                        return;
+                    }
+                    seenPos.add(key);
+                }
+            }
+        } else if (!isEditing) {
+            const name = blockName.trim().toLowerCase();
+            if (name && takenNames.has(name)) {
+                alert(`A block named "${blockName.trim()}" already exists on this farm. Please choose a unique name.`);
+                return;
+            }
+            if (gridPos) {
+                const key = `${gridPos.col}_${gridPos.row}`;
+                if (takenPositions.has(key)) {
+                    alert(`Grid position "${gridPos.label}" is already occupied by another block.`);
+                    return;
+                }
+            }
+        }
+
         const baseBlock = {
             inputMode,
             bedCount: effectiveBedCount,
@@ -335,19 +403,25 @@ export default function BlockSetupWizard({ route, navigation }) {
 
                     {dupeNames.map((name, idx) => {
                         // Positions taken by OTHER blocks in this batch (not self)
-                        const takenByOthers = new Set(
+                        const takenByBatch = new Set(
                             dupeGridPositions
                                 .filter((p, i) => i !== idx && p)
                                 .map(p => `${p.col}_${p.row}`)
                         );
                         const myPos = dupeGridPositions[idx];
+
+                        // Duplicate name check: taken by farm OR by another block in this batch
+                        const resolvedName = name.trim() || `${blockName.trim() || 'Block'} ${String.fromCharCode(65 + idx)}`;
+                        const isNameDuplicate = takenNames.has(resolvedName.toLowerCase()) ||
+                            dupeNames.some((n, i) => i !== idx && (n.trim() || `${blockName.trim() || 'Block'} ${String.fromCharCode(65 + i)}`).toLowerCase() === resolvedName.toLowerCase());
+
                         return (
                             <View key={idx} style={styles.dupeBlockCard}>
                                 {/* Block label + name field */}
                                 <View style={styles.dupeBlockHeader}>
                                     <Text style={styles.dupeBadge}>{String.fromCharCode(65 + idx)}</Text>
                                     <TextInput
-                                        style={[styles.fieldInput, { flex: 1 }]}
+                                        style={[styles.fieldInput, { flex: 1 }, isNameDuplicate && styles.fieldInputError]}
                                         value={name}
                                         onChangeText={val => updateDupeName(idx, val)}
                                         placeholder={`e.g. ${blockName.trim() || 'Block'} ${String.fromCharCode(65 + idx)}`}
@@ -355,6 +429,9 @@ export default function BlockSetupWizard({ route, navigation }) {
                                         keyboardType="default"
                                     />
                                 </View>
+                                {isNameDuplicate && (
+                                    <Text style={styles.duplicateWarning}>⚠️ Name already in use — choose a unique name</Text>
+                                )}
 
                                 {/* Mini grid position picker with extended rows + cols */}
                                 <View style={styles.dupeGridWrap}>
@@ -362,14 +439,18 @@ export default function BlockSetupWizard({ route, navigation }) {
                                     <View style={styles.dupeGrid}>
                                         {buildAllPositions().map(pos => {
                                             const isSelected = myPos?.label === pos.label;
-                                            const isTaken = takenByOthers.has(`${pos.col}_${pos.row}`);
+                                            // Grey out: taken by this farm OR by another block in this batch
+                                            const isTakenByFarm  = takenPositions.has(`${pos.col}_${pos.row}`);
+                                            const isTakenByBatch = takenByBatch.has(`${pos.col}_${pos.row}`);
+                                            const isTaken = isTakenByFarm || isTakenByBatch;
                                             return (
                                                 <TouchableOpacity
                                                     key={pos.label}
                                                     style={[
                                                         styles.dupeGridCell,
                                                         isSelected && styles.dupeGridCellActive,
-                                                        isTaken && styles.dupeGridCellTaken,
+                                                        isTakenByFarm && styles.dupeGridCellOccupied,
+                                                        !isTakenByFarm && isTakenByBatch && styles.dupeGridCellTaken,
                                                         { width: `${Math.floor(96 / totalGridCols)}%` },
                                                     ]}
                                                     onPress={() => !isTaken && updateDupeGridPos(idx, pos)}
@@ -380,7 +461,7 @@ export default function BlockSetupWizard({ route, navigation }) {
                                                         isSelected && styles.dupeGridCellTextActive,
                                                         isTaken && styles.dupeGridCellTextTaken,
                                                     ]}>
-                                                        {pos.label}
+                                                        {pos.label}{isTakenByFarm ? ' ✕' : ''}
                                                     </Text>
                                                 </TouchableOpacity>
                                             );
@@ -429,13 +510,17 @@ export default function BlockSetupWizard({ route, navigation }) {
             <Text style={styles.stepTitle}>Name Your Block</Text>
             <Text style={styles.stepSubtitle}>What do you call this section of your farm?</Text>
             <TextInput
-                style={styles.bigInput}
+                style={[styles.bigInput, !isEditing && blockName.trim() && takenNames.has(blockName.trim().toLowerCase()) && styles.bigInputError]}
                 value={blockName}
                 onChangeText={setBlockName}
                 placeholder="e.g. Block A, North Field, Hoop House..."
                 placeholderTextColor={Colors.mutedText}
                 autoFocus
             />
+            {/* Live duplicate name warning (single-block flow) */}
+            {!isEditing && blockName.trim() && takenNames.has(blockName.trim().toLowerCase()) && (
+                <Text style={styles.duplicateWarning}>⚠️ A block with this name already exists — choose a unique name</Text>
+            )}
             <Text style={styles.fieldLabel}>Crop Family Assignment (optional)</Text>
             <Text style={styles.fieldHint}>Dedicating a block to one family makes rotation tracking across seasons automatic.</Text>
             <ChipSelect
@@ -444,22 +529,35 @@ export default function BlockSetupWizard({ route, navigation }) {
                 onSelect={setFamilyAssignment}
             />
             <Text style={[styles.fieldLabel, { marginTop: Spacing.md }]}>Grid Position on Farm Map</Text>
+            {takenPositions.size > 0 && (
+                <Text style={styles.fieldHint}>Greyed slots (✕) are already occupied by blocks on this farm.</Text>
+            )}
             <View style={styles.gridPicker}>
-                {buildAllPositions().map(pos => (
-                    <TouchableOpacity
-                        key={pos.label}
-                        style={[
-                            styles.gridCell,
-                            gridPos?.label === pos.label && styles.gridCellActive,
-                            { width: `${Math.floor(96 / totalGridCols)}%` },
-                        ]}
-                        onPress={() => setGridPos(pos)}
-                    >
-                        <Text style={[styles.gridCellText, gridPos?.label === pos.label && styles.gridCellTextActive]}>
-                            {pos.label}
-                        </Text>
-                    </TouchableOpacity>
-                ))}
+                {buildAllPositions().map(pos => {
+                    const isOccupied = takenPositions.has(`${pos.col}_${pos.row}`);
+                    const isSelected = gridPos?.label === pos.label;
+                    return (
+                        <TouchableOpacity
+                            key={pos.label}
+                            style={[
+                                styles.gridCell,
+                                isSelected && styles.gridCellActive,
+                                isOccupied && styles.gridCellOccupied,
+                                { width: `${Math.floor(96 / totalGridCols)}%` },
+                            ]}
+                            onPress={() => !isOccupied && setGridPos(pos)}
+                            activeOpacity={isOccupied ? 1 : 0.7}
+                        >
+                            <Text style={[
+                                styles.gridCellText,
+                                isSelected && styles.gridCellTextActive,
+                                isOccupied && styles.gridCellTextOccupied,
+                            ]}>
+                                {pos.label}{isOccupied ? ' ✕' : ''}
+                            </Text>
+                        </TouchableOpacity>
+                    );
+                })}
             </View>
             {/* + Add Row / + Add Column for extended positions */}
             <View style={styles.addBtnsRow}>
@@ -725,8 +823,11 @@ const styles = StyleSheet.create({
     gridPicker: { flexDirection: 'row', flexWrap: 'wrap', gap: 2 },
     gridCell: { width: '22%', paddingVertical: 1, borderRadius: Radius.sm, borderWidth: 1, borderColor: 'rgba(45,79,30,0.15)', alignItems: 'center', backgroundColor: 'rgba(45,79,30,0.04)' },
     gridCellActive: { backgroundColor: Colors.primaryGreen, borderColor: Colors.primaryGreen },
+    // Occupied by an existing farm block — not selectable
+    gridCellOccupied: { backgroundColor: 'rgba(180,30,30,0.07)', borderColor: 'rgba(180,30,30,0.25)', opacity: 0.55 },
     gridCellText: { fontSize: 7, fontWeight: '700', color: Colors.primaryGreen },
     gridCellTextActive: { color: Colors.cream },
+    gridCellTextOccupied: { color: '#B01818', fontWeight: '800' },
 
     // ── + Add Row / + Add Column buttons row ───────────────────────────────────
     addBtnsRow: {
@@ -844,8 +945,22 @@ const styles = StyleSheet.create({
         backgroundColor: 'rgba(45,79,30,0.04)',
     },
     dupeGridCellActive: { backgroundColor: Colors.primaryGreen, borderColor: Colors.primaryGreen },
+    // Taken by another card in the same batch
     dupeGridCellTaken: { backgroundColor: 'rgba(0,0,0,0.04)', borderColor: 'rgba(0,0,0,0.08)', opacity: 0.4 },
+    // Occupied by a pre-existing farm block
+    dupeGridCellOccupied: { backgroundColor: 'rgba(180,30,30,0.07)', borderColor: 'rgba(180,30,30,0.25)', opacity: 0.55 },
     dupeGridCellText: { fontSize: 10, fontWeight: '700', color: Colors.primaryGreen },
     dupeGridCellTextActive: { color: Colors.cream },
     dupeGridCellTextTaken: { color: Colors.mutedText },
+
+    // ── Inline duplicate-name warning ────────────────────────────────────────
+    duplicateWarning: {
+        fontSize: Typography.xs, fontWeight: '700',
+        color: '#B01818',
+        marginTop: -4,
+        paddingLeft: 2,
+    },
+    // Border highlight on conflicting name inputs
+    fieldInputError: { borderColor: '#B01818', borderWidth: 2 },
+    bigInputError:   { borderColor: '#B01818', borderWidth: 2.5 },
 });

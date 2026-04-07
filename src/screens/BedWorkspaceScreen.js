@@ -18,7 +18,7 @@ import {
 import { Colors, Typography, Spacing, Radius, Shadows } from '../theme';
 import { getSuccessionCandidatesRanked, autoGenerateSuccessions, AUTOFILL_STRATEGIES } from '../services/successionEngine';
 import { saveBedAssignment, getBedSuccessions, getCropById } from '../services/database';
-import { saveBedSuccessions, saveBedShelters, saveSeasonSnapshot, getPriorYearBedCrops, loadRotationHistory, loadSavedPlan, saveFarmProfile, saveBlockBeds, loadBlockBeds, loadPlanCrops } from '../services/persistence';
+import { saveBedSuccessions, saveBedShelters, saveSeasonSnapshot, getPriorYearBedCrops, loadRotationHistory, loadSavedPlan, saveFarmProfile, saveBlockBeds, loadBlockBeds, loadPlanCrops, savePlanCrops } from '../services/persistence';
 import { checkBedCompanions, checkBlockNeighborWarnings } from '../services/companionService';
 import { getIdealStartDate, addDays } from "../services/climateService";
 import { inferZoneFromFrostDates, getPeakCoverageInWindow } from '../services/farmUtils';
@@ -84,7 +84,12 @@ function fmtDateRange(start, end) {
 }
 
 // ─── Winter Grow Evaluation Helper ──────────────────────────────────────────────
-function checkIsWinterGrow(item, hasProtection, isFits, lat = 45) {
+function checkIsWinterGrow(item, hasProtection, isFits, lat = 45, shelterType = 'none') {
+    // Greenhouse beds are controlled environments — never flag as "Winter grow".
+    // The engine legitimately pushes greenhouse start_dates 42 days earlier (into winter months),
+    // but that is an indoor germination offset, NOT a cold-outdoor slow-grow situation.
+    if (shelterType === 'greenhouse') return false;
+
     const dStr = item.start_date;
     if (!dStr) return false;
     const m = new Date(dStr + (dStr.includes('T') ? '' : 'T12:00:00')).getMonth();
@@ -94,12 +99,12 @@ function checkIsWinterGrow(item, hasProtection, isFits, lat = 45) {
 
     const isSouthern = lat < 0;
     if (!isSouthern) {
-        if (m >= 2 && m <= 7) return false; // March-Aug NEVER
-        if (hasProtection && m === 8) return false; // Covered starts Oct (9)
-        return true; // Uncovered allows Sep (8). Both allow Oct+ and Jan/Feb
+        if (m >= 2 && m <= 7) return false; // March-Aug: never winter grow outdoors
+        if (hasProtection && m === 8) return false; // Row cover: Sep not flagged
+        return true; // Oct, Nov, Dec, Jan, Feb under no cover or row cover only
     } else {
-        if (m >= 8 || m <= 1) return false; // Sep-Feb NEVER
-        if (hasProtection && m === 2) return false; // Covered starts Apr (3)
+        if (m >= 8 || m <= 1) return false;
+        if (hasProtection && m === 2) return false;
         return true;
     }
 }
@@ -198,9 +203,9 @@ const BedRow = ({ bedNumber, successions, onPress, seasonStart, seasonEnd, first
                         {/* Succession bars */}
                         {successions.map((s, idx) => {
                             if (!s.start_date || !s.end_date) return null;
-                            const left = Math.max(0, daysBetween(seasonStart, s.start_date) / seasonDays);
+                            const trueLeft = daysBetween(seasonStart, s.start_date) / seasonDays;
                             const rawW = daysBetween(s.start_date, s.end_date) / seasonDays;
-                            const barW = Math.max(0.04, Math.min(rawW, 1 - left));
+                            const barW = Math.max(0.04, rawW); // Do not clamp to 1-left; allow actual physical length overflow
                             const color = cropColor(s.crop_id);
                             return (
                                 <View
@@ -208,7 +213,7 @@ const BedRow = ({ bedNumber, successions, onPress, seasonStart, seasonEnd, first
                                     style={[
                                         styles.ganttBar,
                                         {
-                                            left: `${left * 100}%`,
+                                            left: `${trueLeft * 100}%`,
                                             width: `${barW * 100}%`,
                                             backgroundColor: color.bg,
                                         },
@@ -589,7 +594,6 @@ const SuccessionDrawer = ({ visible, bedNumber, blockName, currentSuccessions, a
         if (!visible) {
             setSearchQuery('');
             setEditingIdx(null);
-            setSelectedCropId(null);
         }
         if (visible) setCoverageFraction(1.0);
     }, [visible, bedNumber]);
@@ -653,13 +657,10 @@ const SuccessionDrawer = ({ visible, bedNumber, blockName, currentSuccessions, a
         const hasSearch = searchQuery.trim().length >= 2;
         const q = hasSearch ? searchQuery.trim().toLowerCase() : '';
 
-        // Start with the raw candidates pool
+        // Start with the full candidates pool — NEVER filter by selectedCropIds here.
+        // selectedCropIds drives visual checkmarks only; hiding crops causes the
+        // multi-select regression where only the first selected crop is visible.
         let list = candidates;
-        
-        // Always limit to what the user selected in VegetableGridScreen (if they picked any)
-        if (selectedCropIds && selectedCropIds.length > 0) {
-            list = list.filter(c => selectedCropIds.includes(c.crop.id));
-        }
 
         if (hasSearch) {
             // IF SEARCHING: Bypass activeCategory and frostFilter UI toggles.
@@ -680,10 +681,10 @@ const SuccessionDrawer = ({ visible, bedNumber, blockName, currentSuccessions, a
                     list = list.filter(c => c.crop?.category === activeCategory);
                 }
             }
-            // If they are just casually browsing recommendations without selecting specific crops,
-            // cap the output to the top 20 so we don't overwhelm the visual list.
-            if (!selectedCropIds || selectedCropIds.length === 0) {
-                list = list.slice(0, 20);
+            // Cap default browse to top 40 so the list stays manageable.
+            // ONLY explicitly cap if the user hasn't curated their Phase 2 shortlist.
+            if (selectedCropIds.length === 0) {
+                list = list.slice(0, 40);
             }
         }
 
@@ -703,13 +704,11 @@ const SuccessionDrawer = ({ visible, bedNumber, blockName, currentSuccessions, a
     }, [candidates, frostFilter, searchQuery, isFillRemainingMode, fillRemainingDtm, activeCategory, selectedCropIds]);
 
     const sharedCoverageModal = (
-        <Modal
-            visible={!!pendingPlantItem}
-            transparent
-            animationType="fade"
-            onRequestClose={() => setPendingPlantItem(null)}
+        <View
+            style={[StyleSheet.absoluteFill, { zIndex: 9999, elevation: 9999 }]}
+            pointerEvents={pendingPlantItem ? 'auto' : 'none'}
         >
-            <View style={fpStyles.modalOverlay}>
+            {!!pendingPlantItem && <View style={fpStyles.modalOverlay}>
                 <View style={fpStyles.modalCard}>
                     <Text style={fpStyles.modalTitle}>
                         What fraction should {pendingPlantItem?.item?.crop?.name} fill?
@@ -742,6 +741,7 @@ const SuccessionDrawer = ({ visible, bedNumber, blockName, currentSuccessions, a
                                             onPlant({
                                                 ...finalPayload,
                                                 coverage_fraction: f.value,
+                                                is_winter_override: payload.isWinterCandidate,
                                                 dtm: payload.isWinterCandidate ? payload.winterDtm : payload.item.crop.dtm,
                                             });
                                         } else {
@@ -766,8 +766,8 @@ const SuccessionDrawer = ({ visible, bedNumber, blockName, currentSuccessions, a
                         <Text style={fpStyles.modalCancelText}>Cancel</Text>
                     </TouchableOpacity>
                 </View>
-            </View>
-        </Modal>
+            </View>}
+        </View>
     );
 
     // (Global coverage steps removed — now handled per-crop via SelectCoverageModal)
@@ -865,17 +865,18 @@ const SuccessionDrawer = ({ visible, bedNumber, blockName, currentSuccessions, a
                             const BAR_H = 34;
                             const GAP = 2;
 
-                            // Bounded year mapping for multi-year visual clarity
+                            // Unbounded year mapping — uses exact ms-based calendar math so bars
+                            // align precisely with the month header labels (no fixed /31 approximation).
+                            const yearStartMs = new Date(`${activeYear}-01-01T12:00:00`).getTime();
+                            const yearMs      = new Date(`${activeYear + 1}-01-01T12:00:00`).getTime() - yearStartMs;
+
                             const mapToYearFraction = (isoDate) => {
                                 if (!isoDate) return null;
-                                const [yStr, mStr, dStr] = isoDate.split('-');
-                                const year = parseInt(yStr, 10);
-                                const month = parseInt(mStr, 10) - 1; 
-                                const day = parseInt(dStr, 10);
-                                
-                                if (year < activeYear) return 0.0;
-                                if (year > activeYear) return 1.0;
-                                return (month + (day - 1) / 31) / 12;
+                                const dateMs = new Date(isoDate + 'T12:00:00').getTime();
+                                // Exact ms math vs Jan 1 of the active year.
+                                // Dates before Jan 1 → fraction < 0; dates after Dec 31 → fraction > 1.
+                                // This naturally handles cross-year bars without special-casing.
+                                return (dateMs - yearStartMs) / yearMs;
                             };
 
                             const startOfActiveYear = `${activeYear}-01-01`;
@@ -1173,20 +1174,29 @@ const SuccessionDrawer = ({ visible, bedNumber, blockName, currentSuccessions, a
                                             const d = new Date(iso + 'T12:00:00');
                                             return `${d.getMonth() + 1}/${d.getDate()}/${d.getFullYear()}`;
                                         };
+                                        const actualIgd = (s.start_date && s.end_date && s.end_date !== '9999-12-31')
+                                            ? Math.round((new Date(s.end_date + 'T12:00:00').getTime() - new Date(s.start_date + 'T12:00:00').getTime()) / 86400000)
+                                            : 0;
+                                        const actualHarvestDays = Math.max(0, actualIgd > 0 ? actualIgd - (s.dtm || 0) : (s.harvest_window_days ?? 0));
 
                                         return (
                                             <View style={{ marginTop: 8, paddingHorizontal: 4 }}>
                                                 {/* Expanded Crop Details Card */}
                                                 <View style={{ backgroundColor: '#F9FAFB', padding: 12, borderRadius: 8, marginBottom: 8, borderWidth: 1, borderColor: '#E5E7EB' }}>
-                                                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
-                                                        <Text style={{ fontSize: 14, fontWeight: '600', color: '#1F2937', flex: 1 }}>{cropLabel} {s.variety ? `(${s.variety})` : ''}</Text>
-                                                        <Text style={{ fontSize: 12, color: '#6B7280', fontWeight: '500', marginLeft: 8 }}>{s.dtm ? `${s.dtm} Days to Maturity` : 'Cover Crop'}</Text>
+                                                    <View style={{ marginBottom: 8 }}>
+                                                        <Text style={{ fontSize: 14, fontWeight: '600', color: '#1F2937' }}>{cropLabel} {s.variety ? `(${s.variety})` : ''}</Text>
                                                     </View>
                                                     
-                                                    <View style={{ flexDirection: 'row', gap: 24 }}>
+                                                    <View style={{ flexDirection: 'row', gap: 20, flexWrap: 'wrap' }}>
                                                         <View>
-                                                            <Text style={{ fontSize: 11, color: '#9CA3AF', textTransform: 'uppercase', marginBottom: 2 }}>Seed Type</Text>
+                                                            <Text style={{ fontSize: 11, color: '#9CA3AF', textTransform: 'uppercase', marginBottom: 2 }}>Sowing Type</Text>
                                                             <Text style={{ fontSize: 13, color: '#4B5563' }}>{dtMethod}</Text>
+                                                        </View>
+                                                        <View>
+                                                            <Text style={{ fontSize: 11, color: '#9CA3AF', textTransform: 'uppercase', marginBottom: 2 }}>DTM / Harvest</Text>
+                                                            <Text style={{ fontSize: 13, color: '#4B5563' }}>
+                                                                {s.dtm ? `${s.dtm}d growing` : '—'}{actualHarvestDays > 0 ? ` + ${actualHarvestDays}d harvest` : ''}
+                                                            </Text>
                                                         </View>
                                                         <View>
                                                             <Text style={{ fontSize: 11, color: '#9CA3AF', textTransform: 'uppercase', marginBottom: 2 }}>In Ground Window</Text>
@@ -1387,9 +1397,11 @@ const SuccessionDrawer = ({ visible, bedNumber, blockName, currentSuccessions, a
                             </View>
                         ) : displayedCandidates.length === 0 ? (
                             <Text style={fpStyles.tableEmpty}>
-                                {frostFilter
-                                    ? 'No frost-tolerant crops fit this window. Try removing the filter.'
-                                    : 'No eligible crops for this window. Consider a cover crop.'}
+                                {selectedCropIds && selectedCropIds.length === 0
+                                    ? 'No crops selected. Go to the Grid to add some.'
+                                    : frostFilter
+                                        ? 'No frost-tolerant crops fit this window. Try removing the filter.'
+                                        : 'No eligible crops for this window. Consider a cover crop.'}
                             </Text>
                         ) : (
                             displayedCandidates.map((item, rowIdx) => {
@@ -1417,7 +1429,7 @@ const SuccessionDrawer = ({ visible, bedNumber, blockName, currentSuccessions, a
                                 const isSpringWarm = item.crop.season === 'warm' && m >= 2 && m <= 7;
                                 const fits = rawFits || isSpringWarm;
                                 
-                                const isWinterCandidate = checkIsWinterGrow(item, hasProtection, fits, farmProfile?.lat);
+                                const isWinterCandidate = checkIsWinterGrow(item, hasProtection, fits, farmProfile?.lat, bedShelterType);
                                 const winterDtm = isWinterCandidate
                                     ? Math.round((item.crop.dtm ?? 60) * WINTER_DTM_MULTIPLIER)
                                     : null;
@@ -1464,7 +1476,10 @@ const SuccessionDrawer = ({ visible, bedNumber, blockName, currentSuccessions, a
                                             (bedFull || wouldExceed) && fpStyles.tableRowFull,
                                             !fits && !isWinterCandidate && fpStyles.tableRowWarning,
                                         ]}
-                                        onPress={() => {
+                                        onPress={(e) => {
+                                            // Stop the event from bubbling to any parent scrim or overlay
+                                            // that might intercept it and trigger onClose (the race condition)
+                                            e?.stopPropagation?.();
                                             if (bedFull) {
                                                 Alert.alert('Bed Full', 'This bed is fully planted during this timeframe. Remove an existing conflicting crop to make room.');
                                                 return;
@@ -1487,6 +1502,12 @@ const SuccessionDrawer = ({ visible, bedNumber, blockName, currentSuccessions, a
                                                 <Text style={[fpStyles.tableCropName, { flexShrink: 1 }]} numberOfLines={1}>
                                                     {item.crop.name}{item.crop.variety ? ` | ${item.crop.variety}` : ''}
                                                 </Text>
+                                                {/* ✓ Queued badge: shows the crop is in the active plan queue */}
+                                                {selectedCropIds && selectedCropIds.includes(item.crop.id) && (
+                                                    <View style={{ marginLeft: 6, backgroundColor: '#2E7D32', borderRadius: 10, paddingHorizontal: 5, paddingVertical: 1 }}>
+                                                        <Text style={{ fontSize: 10, color: '#fff', fontWeight: '700' }}>✓ Queued</Text>
+                                                    </View>
+                                                )}
                                             </View>
                                             {hasConflict && (
                                                 <Text style={fpStyles.tableConflictNote} numberOfLines={1}>
@@ -1527,7 +1548,15 @@ const SuccessionDrawer = ({ visible, bedNumber, blockName, currentSuccessions, a
                 pointerEvents={visible ? 'auto' : 'none'}
                 style={[styles.drawerScrim, { opacity }]}
             >
-                <TouchableOpacity style={{ flex: 1 }} onPress={onClose} />
+                {/* Guard: never fire onClose while the coverage-fraction modal is active
+                    (pendingPlantItem set) — that click belongs to the modal, not the scrim */}
+                <TouchableOpacity
+                    style={{ flex: 1 }}
+                    onPress={(e) => {
+                        e?.stopPropagation?.();
+                        if (!pendingPlantItem) onClose();
+                    }}
+                />
             </Animated.View>
             <Animated.View style={[styles.drawer, Shadows.drawer, { transform: [{ translateY }] }]}>
                 <View style={styles.drawerHandle} />
@@ -1816,8 +1845,18 @@ const SuccessionDrawer = ({ visible, bedNumber, blockName, currentSuccessions, a
                         style={{ flex: 1 }}
                         data={displayedCandidates}
                         keyExtractor={(item) => item.crop.id}
+                        keyboardShouldPersistTaps="handled"
                         contentContainerStyle={styles.drawerList}
-                                    renderItem={({ item }) => {
+                        ListEmptyComponent={
+                            <Text style={[fpStyles.tableEmpty, { marginTop: 40, paddingHorizontal: 20 }]}>
+                                {selectedCropIds && selectedCropIds.length === 0
+                                    ? 'No crops selected. Go to the Grid to add some.'
+                                    : frostFilter
+                                        ? 'No frost-tolerant crops fit this window. Try removing the filter.'
+                                        : 'No eligible crops for this window. Consider a cover crop.'}
+                            </Text>
+                        }
+                        renderItem={({ item }) => {
                             const existingIds = (currentSuccessions ?? []).map(s => s.crop_id).filter(Boolean);
                             const sameBedCheck = checkBedCompanions(item.crop.id, existingIds);
                             const neighborCheck = checkBlockNeighborWarnings(item.crop.id, bedNumber, allBedSuccessions ?? {});
@@ -1844,7 +1883,7 @@ const SuccessionDrawer = ({ visible, bedNumber, blockName, currentSuccessions, a
                             const isSpringWarm = item.crop.season === 'warm' && m >= 2 && m <= 7;
                             const effFits = rawFits || isSpringWarm;
                             
-                            const isWinterCandidate = checkIsWinterGrow(item, hasProtection, effFits, farmProfile?.lat);
+                            const isWinterCandidate = checkIsWinterGrow(item, hasProtection, effFits, farmProfile?.lat, bedShelterType);
                             const winterDtm = isWinterCandidate
                                 ? Math.round((item.crop.dtm ?? 60) * WINTER_DTM_MULTIPLIER)
                                 : null;
@@ -1875,7 +1914,11 @@ const SuccessionDrawer = ({ visible, bedNumber, blockName, currentSuccessions, a
                                             hasConflict && styles.cropListRowConflict,
                                             bedFull && styles.cropListRowFull,
                                         ]}
-                                        onPress={() => {
+                                        onPress={(e) => {
+                                            // Stop the event from bubbling up to the drawerScrim's
+                                            // TouchableOpacity, which would call onClose() and swallow
+                                            // the second click (the event-propagation race condition).
+                                            e?.stopPropagation?.();
                                             if (bedFull) return; // bed at capacity — do nothing
                                             setPendingPlantItem({
                                                 item,
@@ -1983,7 +2026,7 @@ export default function BedWorkspaceScreen({ navigation, route }) {
     const farmProfile = route?.params?.farmProfile ?? null;
     const planId = route?.params?.planId ?? route?.params?.block?.planId ?? null;
     
-    const [selectedCropIds, setSelectedCropIds] = useState([]);
+    const [selectedCropIds, setSelectedCropIds] = useState(() => loadPlanCrops(planId) ?? []);
     useFocusEffect(useCallback(() => {
         setSelectedCropIds(loadPlanCrops(planId) ?? []);
     }, [planId]));
@@ -2039,6 +2082,15 @@ export default function BedWorkspaceScreen({ navigation, route }) {
         if ('bedSuccessions' in params) {
             const fromParams = params.bedSuccessions;
             if (fromParams && Object.keys(fromParams).length > 0) return fromParams;
+            
+            // HYDRATION DEFENSE: If a browser refresh serialized the {} stale param from
+            // a previous component transition, check if localStorage holds active workspace data
+            // before blindly executing the wipe.
+            const saved = loadSavedPlan();
+            if (saved && saved.bedSuccessions && Object.keys(saved.bedSuccessions).length > 0) {
+                return saved.bedSuccessions;
+            }
+            
             return {}; // explicit empty = fresh start
         }
 
@@ -2047,6 +2099,10 @@ export default function BedWorkspaceScreen({ navigation, route }) {
         const saved = loadSavedPlan();
         return saved?.bedSuccessions ?? {};
     });
+    // Ref mirror — always holds the latest bedSuccessions so openBed / reloadDrawer
+    // never read a stale closure copy after plantCrop() calls setBedSuccessions().
+    const bedSuccessionsRef = useRef({});
+    useEffect(() => { bedSuccessionsRef.current = bedSuccessions; }, [bedSuccessions]);
     // ── Per-bed shelter type (Phase 2) ────────────────────────────────────────
     // 'none' | 'rowCover' | 'greenhouse'  — persisted in state, saved alongside successions
     const [bedShelter, setBedShelter] = useState(() => {
@@ -2226,7 +2282,7 @@ export default function BedWorkspaceScreen({ navigation, route }) {
         setDrawerCandidates([]);
 
         try {
-            const currentSuccessions = bedSuccessions[bedNumber] ?? [];
+            const currentSuccessions = bedSuccessionsRef.current[bedNumber] ?? [];
             const rawProfile = farmProfile ?? { frost_free_days: 170, last_frost_date: `${new Date().getFullYear()}-04-15`, first_frost_date: `${new Date().getFullYear()}-10-15`, lat: 45.5 };
             const currentShelter = shelterOverride !== undefined ? shelterOverride : (bedShelter[bedNumber] ?? 'none');
             const profile = buildEffectiveProfile(rawProfile, currentShelter);
@@ -2314,17 +2370,16 @@ export default function BedWorkspaceScreen({ navigation, route }) {
                 // Fitted crops first, out-of-season crops at bottom
                 setDrawerCandidates([...matching, ...missingCandidates]);
             } else {
-                // No Phase 2 filter — give the drawer access to all 200 candidates so the 
-                // user can freely search the database! The drawer internally limits the 
-                // default browsing view to the top 20 if they aren't searching.
-                setDrawerCandidates(engineCandidates);
+                // Strict Phase 2 Gatekeeping: if the library is empty, do NOT default to 200 dummy crops.
+                // Leave the drawer empty so the "No Crops Selected" UI triggers.
+                setDrawerCandidates([]);
             }
         } catch (err) {
             console.error('[BedWorkspace] Error loading candidates:', err);
         } finally {
             setDrawerLoading(false);
         }
-    }, [bedSuccessions, farmProfile, selectedCropIds, bedShelter]);
+    }, [farmProfile, selectedCropIds, bedShelter]);
 
     // Keep a ref to openBed that's always current — used by plantCrop and
     // editSuccessionCoverage so calls inside setState updaters always read
@@ -2527,6 +2582,16 @@ export default function BedWorkspaceScreen({ navigation, route }) {
         if (allWarnings.length > 0) {
             setCompanionAlert({ warnings: allWarnings });
         }
+        
+        // ── Persist implicit crop selections to library ─────────────────────
+        setSelectedCropIds(prev => {
+            if (!prev.includes(crop.id)) {
+                const newList = [...prev, crop.id];
+                savePlanCrops(planId, newList);
+                return newList;
+            }
+            return prev;
+        });
         // ───────────────────────────────────────────────────────────────────
 
         setBedSuccessions(prev => {
@@ -2675,14 +2740,16 @@ export default function BedWorkspaceScreen({ navigation, route }) {
         reloadDrawer(activeBed);
     }, [activeBed, reloadDrawer]);
 
-    // Plant an out-of-season crop with a row-cover/greenhouse protection warning.
+    // Plant an out-of-season crop with a conditional warning based on current shelter.
     // Uses Alert.alert (native on iOS/Android, browser confirm() on web via Expo polyfill).
     const handlePlantOutOfSeason = useCallback((candidateItem) => {
-        const cropName = candidateItem.crop.name;
-        const protectedMsg =
-            `“${cropName}” is outside the current frost-free window.\n\n` +
-            `It won’t perform well without a row cover or greenhouse.\n\n` +
-            `Add it anyway? It will be saved and counted in next year’s rotation history.`;
+        const cropName = candidateItem.crop?.name || candidateItem.name;
+        const currentShelter = bedShelter[activeBed] ?? 'none';
+        
+        const isProtected = currentShelter === 'greenhouse' || currentShelter === 'rowCover';
+        const protectedMsg = isProtected
+            ? `“${cropName}” is outside its standard growing window.\n\nAdd it anyway? It will be saved and counted in next year’s rotation history.`
+            : `“${cropName}” is outside the current frost-free window.\n\nIt won’t perform well without a row cover or greenhouse.\n\nAdd it anyway? It will be saved and counted in next year’s rotation history.`;
 
         Alert.alert(
             '🌿 Outside Growing Window',
@@ -2690,25 +2757,32 @@ export default function BedWorkspaceScreen({ navigation, route }) {
             [
                 { text: 'Cancel', style: 'cancel' },
                 {
-                    text: 'Yes, Add with Protection',
+                    text: isProtected ? 'Yes, Add Anyhow' : 'Yes, Add with Protection',
                     onPress: () => {
                         // Compute end_date from start_date + dtm if engine returned null
                         const profile = farmProfile ?? {};
                         const startDate = candidateItem.start_date ?? profile.first_frost_date ?? new Date().toISOString().slice(0, 10);
                         let endDate = candidateItem.end_date;
                         if (!endDate) {
-                            const dtm = candidateItem.dtm ?? candidateItem.crop.dtm ?? 60;
+                            const dtm = candidateItem.dtm ?? candidateItem.crop?.dtm ?? 60;
                             const start = new Date(startDate);
                             start.setDate(start.getDate() + dtm);
                             endDate = start.toISOString().slice(0, 10);
                         }
-                        plantCrop({ ...candidateItem, start_date: startDate, end_date: endDate, requires_protection: true, is_winter_override: true });
+                        
+                        plantCrop({ 
+                            ...candidateItem, 
+                            start_date: startDate, 
+                            end_date: endDate, 
+                            requires_protection: candidateItem.requires_protection ?? !isProtected, 
+                            is_winter_override: candidateItem.is_winter_override ?? false 
+                        });
                     },
                 },
             ],
             { cancelable: true }
         );
-    }, [farmProfile, plantCrop]);
+    }, [farmProfile, plantCrop, activeBed, bedShelter]);
 
     const handleGeneratePlan = () => {
         navigation.navigate('YieldSummary', {
@@ -3079,7 +3153,7 @@ export default function BedWorkspaceScreen({ navigation, route }) {
                     if (prevShelter === shelterType) return;
                     
                     // Shelter extensions implicitly define spring offset behavior mapping.
-                    const getOffset = (type) => type === 'greenhouse' ? -42 : type === 'rowCover' ? -14 : 0;
+                    const getOffset = (type) => type === 'greenhouse' ? -21 : type === 'rowCover' ? -7 : 0;
                     const delta = getOffset(shelterType) - getOffset(prevShelter);
 
                     setBedShelter(prev => ({ ...prev, [activeBed]: shelterType }));
@@ -3248,7 +3322,8 @@ const fpStyles = StyleSheet.create({
     },
     ganttMonthLabel: {
         flex: 1,
-        textAlign: 'center',
+        textAlign: 'left',
+        paddingLeft: 4,
         fontSize: 9,
         fontWeight: '800',
         color: '#73796D',
@@ -3514,9 +3589,9 @@ const fpStyles = StyleSheet.create({
 
     // ── Crop table ───────────────────────────────────────────────────────────
     tableCard: {
-        marginHorizontal: 12,
+        marginHorizontal: 'auto',
         marginTop: 12,
-        maxWidth: 760,
+        maxWidth: 1000,
         alignSelf: 'center',
         width: '100%',
         backgroundColor: '#FFFFFF',

@@ -1,7 +1,8 @@
-import React from 'react';
-import { Platform } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { Platform, ActivityIndicator, View } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
+import { loadNavigationState, saveNavigationState } from '../services/navigationSync';
 
 import HeroScreen from '../screens/HeroScreen';
 import LocationScreen from '../screens/LocationScreen';
@@ -51,8 +52,34 @@ function getInitialRoute() {
 const INITIAL_ROUTE = getInitialRoute();
 
 export default function AppNavigator() {
+    const [isReady, setIsReady] = useState(false);
+    const [initialState, setInitialState] = useState(undefined);
+
+    useEffect(() => {
+        const restoreState = async () => {
+            try {
+                const state = await loadNavigationState();
+                if (state) setInitialState(state);
+            } finally {
+                setIsReady(true);
+            }
+        };
+        restoreState();
+    }, []);
+
+    if (!isReady) {
+        return (
+            <View style={{ flex: 1, backgroundColor: '#14260C', justifyContent: 'center', alignItems: 'center' }}>
+                <ActivityIndicator size="large" color="#E8F5E9" />
+            </View>
+        );
+    }
+
     return (
-        <NavigationContainer>
+        <NavigationContainer
+            initialState={initialState}
+            onStateChange={saveNavigationState}
+        >
             <Stack.Navigator
                 initialRouteName={INITIAL_ROUTE}
                 screenOptions={{

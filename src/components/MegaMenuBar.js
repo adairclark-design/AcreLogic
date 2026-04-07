@@ -403,7 +403,7 @@ const styles = StyleSheet.create({
         fontSize: 12,
         fontWeight: Typography.semiBold,
         color: Colors.primaryGreen,
-        whiteSpace: 'nowrap',
+        ...(Platform.OS === 'web' ? { whiteSpace: 'nowrap' } : {}),
     },
     tabTextActive: { color: Colors.cream },
     tabChevron: {
@@ -428,7 +428,6 @@ const styles = StyleSheet.create({
         borderTopWidth: 0,
         paddingBottom: Spacing.md,
         zIndex: 99,
-        ...(Platform.OS === 'web' ? { boxShadow: '0 8px 24px rgba(0,0,0,0.12)' } : {}),
     },
     panelHeader: {
         flexDirection: 'row',

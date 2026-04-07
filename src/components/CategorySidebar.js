@@ -51,15 +51,15 @@ export default function CategorySidebar({ activeLabel, onFilterChange, isMobile 
                 </ScrollView>
 
                 {/* Render the open subcategories BELOW the scrolling pills */}
-                {openIndex != null && MEGA_CATEGORIES[openIndex].subcategories.length > 0 && (
+                {openIndex != null && MEGA_CATEGORIES[openIndex]?.subcategories?.length > 0 && (
                     <View style={styles.mobileSubTrayOuter}>
                         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.mobileSubTray}>
                             <TouchableOpacity 
-                            style={[styles.mobileSubChip, activeLabel === MEGA_CATEGORIES[openIndex].label && styles.mobileSubChipActive]} 
+                            style={[styles.mobileSubChip, activeLabel === MEGA_CATEGORIES[openIndex]?.label && styles.mobileSubChipActive]} 
                             onPress={() => selectTopAll(MEGA_CATEGORIES[openIndex])}
                         >
-                            <Text style={[styles.mobileSubChipText, activeLabel === MEGA_CATEGORIES[openIndex].label && styles.mobileSubChipTextActive]}>
-                                All {MEGA_CATEGORIES[openIndex].label} →
+                            <Text style={[styles.mobileSubChipText, activeLabel === MEGA_CATEGORIES[openIndex]?.label && styles.mobileSubChipTextActive]}>
+                                All {MEGA_CATEGORIES[openIndex]?.label} →
                             </Text>
                         </TouchableOpacity>
                         {MEGA_CATEGORIES[openIndex].subcategories.map(sub => (
@@ -82,8 +82,9 @@ export default function CategorySidebar({ activeLabel, onFilterChange, isMobile 
 
     // Desktop: Left Accordion Sidebar
     return (
-        <ScrollView style={styles.desktopSidebar} showsVerticalScrollIndicator={false}>
-            <Text style={styles.sidebarTitle}>Categories</Text>
+        <View style={styles.desktopSidebarWrapper}>
+            <ScrollView style={styles.desktopSidebar} showsVerticalScrollIndicator={false}>
+                <Text style={styles.sidebarTitle}>Categories</Text>
             {MEGA_CATEGORIES.map((cat, idx) => {
                 const isGroupActive = activeLabel === cat.label || cat.subcategories.some(s => s.label === activeLabel);
                 const isAllButton = cat.label === 'All';
@@ -137,35 +138,38 @@ export default function CategorySidebar({ activeLabel, onFilterChange, isMobile 
                     </View>
                 );
             })}
-        </ScrollView>
+            </ScrollView>
+        </View>
     );
 }
 
 const styles = StyleSheet.create({
-    emoji: { fontSize: 16, marginRight: 8, width: 22, textAlign: 'center' },
+    emoji: { fontSize: 14, marginRight: 4, width: 18, textAlign: 'center', lineHeight: 14 },
     
     // --- Mobile Wrappable Pills ---
     mobileContainerOuter: {
         backgroundColor: Colors.white,
         borderBottomWidth: 1,
         borderBottomColor: 'rgba(45,79,30,0.1)',
-        paddingVertical: 8,
+        paddingVertical: 2,
+        minHeight: 24,
     },
     mobilePillsRow: {
         flexDirection: 'row',
-        paddingHorizontal: Spacing.md,
-        gap: 6,
+        paddingHorizontal: Spacing.sm,
+        gap: 4,
         alignItems: 'center',
     },
     mobilePill: {
         flexDirection: 'row',
         alignItems: 'center',
-        paddingVertical: 5,
-        paddingHorizontal: 10,
-        borderRadius: Radius.full,
+        paddingVertical: 2,
+        paddingHorizontal: 6,
+        borderRadius: Radius.sm,
         backgroundColor: '#f9f9fa',
         borderWidth: 1,
         borderColor: '#e5e7eb',
+        minHeight: 20,
     },
     mobilePillActive: {
         backgroundColor: Colors.primaryGreen,
@@ -175,55 +179,66 @@ const styles = StyleSheet.create({
         backgroundColor: 'rgba(45,79,30,0.08)',
         borderColor: 'rgba(45,79,30,0.3)',
     },
-    mobilePillEmoji: { fontSize: 11, marginRight: 4 },
+    mobilePillEmoji: { fontSize: 14, marginRight: 2, lineHeight: 14 },
     mobilePillText: {
-        fontSize: 11,
+        fontSize: 14,
         fontWeight: Typography.semiBold,
         color: Colors.primaryGreen,
+        lineHeight: 14,
     },
     mobilePillTextActive: { color: Colors.cream },
     
     mobileSubTrayOuter: {
         backgroundColor: 'rgba(45,79,30,0.03)',
-        marginTop: 8,
+        marginTop: 2,
         borderTopWidth: 1,
         borderBottomWidth: 1,
         borderColor: 'rgba(45,79,30,0.1)',
+        minHeight: 24,
     },
     mobileSubTray: {
-        paddingVertical: 10,
-        paddingHorizontal: Spacing.md,
+        paddingVertical: 2,
+        paddingHorizontal: Spacing.sm,
         flexDirection: 'row',
-        gap: 6,
+        gap: 4,
     },
     mobileSubChip: {
         backgroundColor: Colors.white,
-        paddingVertical: 4,
-        paddingHorizontal: 10,
-        borderRadius: Radius.full,
+        paddingVertical: 2,
+        paddingHorizontal: 6,
+        borderRadius: Radius.sm,
         borderWidth: 1,
         borderColor: 'rgba(45,79,30,0.15)',
+        minHeight: 20,
     },
     mobileSubChipActive: {
         backgroundColor: Colors.primaryGreen,
         borderColor: Colors.primaryGreen,
     },
     mobileSubChipText: {
-        fontSize: 11,
+        fontSize: 14,
         color: Colors.primaryGreen,
         fontWeight: Typography.medium,
+        lineHeight: 14,
     },
     mobileSubChipTextActive: { color: Colors.cream },
 
     // --- Desktop Accordion Sidebar ---
-    desktopSidebar: {
-        width: 260,
+    desktopSidebarWrapper: {
+        width: 180,
+        maxWidth: 180,
+        minWidth: 180,
+        flexShrink: 0,
+        flexGrow: 0,
         backgroundColor: Colors.white,
         borderRightWidth: 1,
         borderRightColor: 'rgba(45,79,30,0.12)',
         height: '100%',
-        paddingVertical: Spacing.lg,
-        paddingHorizontal: Spacing.sm,
+    },
+    desktopSidebar: {
+        flex: 1,
+        paddingVertical: Spacing.sm,
+        paddingHorizontal: 4,
     },
     sidebarTitle: {
         fontSize: Typography.xs,
@@ -231,20 +246,21 @@ const styles = StyleSheet.create({
         textTransform: 'uppercase',
         letterSpacing: 1.5,
         color: Colors.mutedText,
-        paddingHorizontal: Spacing.md,
-        marginBottom: Spacing.md,
+        paddingHorizontal: 4,
+        marginBottom: Spacing.sm,
     },
     sidebarGroup: {
-        marginBottom: 2,
+        marginBottom: 1,
     },
     desktopNavRow: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        paddingVertical: 10,
-        paddingHorizontal: Spacing.sm,
-        borderRadius: Radius.md,
-        ...(Platform.OS === 'web' ? { cursor: 'pointer', transition: 'background-color 0.15s' } : {}),
+        paddingVertical: 2,
+        paddingHorizontal: 4,
+        borderRadius: Radius.sm,
+        minHeight: 20,
+        ...(Platform.OS === 'web' ? { cursor: 'pointer', transitionDuration: '0.15s', transitionProperty: 'backgroundColor' } : {}),
     },
     desktopNavRowActive: {
         backgroundColor: 'rgba(45,79,30,0.08)',
@@ -260,39 +276,43 @@ const styles = StyleSheet.create({
         fontSize: 14,
         fontWeight: Typography.medium,
         color: Colors.darkText,
+        lineHeight: 14,
+        maxWidth: 100,
     },
     desktopNavTitleActive: {
         color: Colors.primaryGreen,
         fontWeight: Typography.bold,
     },
     chevron: {
-        fontSize: 18,
+        fontSize: 14,
         color: Colors.mutedText,
-        lineHeight: 20,
+        lineHeight: 14,
     },
     chevronOpen: {
         transform: [{ rotate: '90deg' }],
         color: Colors.primaryGreen,
     },
     desktopSubList: {
-        paddingLeft: 38,
-        paddingTop: 4,
-        paddingBottom: 8,
-        gap: 2,
+        paddingLeft: 24,
+        paddingTop: 1,
+        paddingBottom: 2,
+        gap: 0,
     },
     desktopSubItem: {
-        paddingVertical: 8,
-        paddingHorizontal: 8,
-        borderRadius: 6,
+        paddingVertical: 2,
+        paddingHorizontal: 4,
+        borderRadius: Radius.sm,
+        minHeight: 18,
         ...(Platform.OS === 'web' ? { cursor: 'pointer' } : {}),
     },
     desktopSubItemActive: {
         backgroundColor: Colors.primaryGreen,
     },
     desktopSubText: {
-        fontSize: 13,
+        fontSize: 14,
         color: Colors.mutedText,
         fontWeight: Typography.medium,
+        lineHeight: 14,
     },
     desktopSubTextActive: {
         color: Colors.cream,

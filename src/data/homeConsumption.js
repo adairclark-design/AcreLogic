@@ -682,7 +682,6 @@ const HOME_CONSUMPTION = {
     cilantro_slow_bolt:     { lbs_per_person_season: 2,  unit_label: 'lbs', notes: '[est.] Same as cilantro_santo; slow-bolt cultivar, identical consumption target.' },
     vietnamese_coriander:   { lbs_per_person_season: 1,  unit_label: 'lbs', notes: '[est.] Specialty herb for pho and SE Asian dishes; accent volume. 1 lb/person.' },
     culantro:               { lbs_per_person_season: 1,  unit_label: 'lbs', notes: '[est.] Tropical cilantro relative; very intense, used in small amounts.' },
-    mint_peppermint:        { lbs_per_person_season: 1,  unit_label: 'lbs', notes: '[est.] Same as mint_spearmint but primarily for tea. 1 lb/person.' },
     mint_apple:             { lbs_per_person_season: 0.5, unit_label: 'lbs', notes: '[est.] Milder mint; accent use in drinks and desserts. 0.5 lbs/person.' },
     korean_mint:            { lbs_per_person_season: 0.5, unit_label: 'lbs', notes: '[est.] Anise-mint flavour; specialty tea herb. Very low volume needed.' },
     lemon_verbena:          { lbs_per_person_season: 0.3, unit_label: 'lbs', notes: '[est.] Strong citrus-lemon flavour; used in tiny amounts for tea and cocktails.' },
