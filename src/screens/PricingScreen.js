@@ -12,7 +12,8 @@
  *   - UpgradeModal "See Plans →" button
  *   - (future) Account / Settings screen
  */
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useEffect, useState, useCallback } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import {
     View, Text, StyleSheet, TouchableOpacity,
     ScrollView, Animated, Platform, Linking,
@@ -249,7 +250,7 @@ function MobileTierCard({ tier, billingMode }) {
             displayPrice = `$${SEASON_PASS_PRICE.toFixed(2)}`;
             displayPriceSub = 'one-time';
             displayCta = 'Get Season Pass →';
-            displayOnPress = () => Linking.openURL(STRIPE_SEASON_PASS_URL);
+            displayOnPress = () => openStripeWithPendingFlag(STRIPE_SEASON_PASS_URL, 'premium');
             displayDisabled = false;
             badge = 'BEST VALUE';
             badgeColor = '#F59E0B';
@@ -385,6 +386,25 @@ export default function PricingScreen({ navigation }) {
             Animated.spring(headerSlide, { toValue: 0, tension: 45, friction: 8, useNativeDriver: true }),
         ]).start();
     }, []);
+
+    // ─── Stripe return guard ────────────────────────────────────────────────────────
+    // Fires EVERY TIME PricingScreen becomes the active screen — including the
+    // critical 'tab return' scenario where the user paid in a new Stripe tab and
+    // then closed it / came back to this tab. getInitialRoute() already ran once
+    // at cold-boot and won't re-run, so this useFocusEffect is the only hook
+    // that can catch a mid-session Stripe return.
+    useFocusEffect(useCallback(() => {
+        if (typeof localStorage === 'undefined') return;
+        try {
+            const pending = localStorage.getItem('acrelogic_pending_tier');
+            if (pending === 'basic' || pending === 'premium') {
+                // DO NOT remove the flag here — SuccessScreen reads & clears it.
+                // Navigate to SuccessScreen immediately without clearing so that
+                // SuccessScreen can identify the correct tier.
+                navigation.replace('Success');
+            }
+        } catch {}
+    }, [navigation]));
 
     return (
         <View style={styles.container}>
