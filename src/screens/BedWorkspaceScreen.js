@@ -310,7 +310,7 @@ const OverheadGrid = ({ bedSuccessions, onPressBed, onLongPressBed }) => {
     return (
         <View style={styles.grid}>
             {beds.map(bedNum => {
-                const succs = bedSuccessions[bedNum] ?? [];
+                const succs = bedSuccessions[String(bedNum)] ?? [];
                 const primary = succs[0];
                 const color = primary ? cropColor(primary.crop_id) : null;
                 const extraCount = succs.length > 1 ? succs.length - 1 : 0;
@@ -400,9 +400,8 @@ const OverheadGrid = ({ bedSuccessions, onPressBed, onLongPressBed }) => {
 
 
 // ─── Succession Drawer ────────────────────────────────────────────────────────
-const SuccessionDrawer = ({ visible, bedNumber, blockName, currentSuccessions, allBedSuccessions, candidates, loading, frostFreeDays, onClose, onPlant, onPlantOutOfSeason, onRemoveSuccession, onShiftDates, fillRemainingDtm, onEditCoverage, bedShelterType, onSetShelter, farmProfile, fullPage, selectedCropIds = [], targetGap, onSetTargetGap }) => {
+const SuccessionDrawer = ({ visible, bedNumber, blockName, currentSuccessions, allBedSuccessions, candidates, loading, frostFreeDays, onClose, onPlant, onPlantOutOfSeason, onRemoveSuccession, onShiftDates, fillRemainingDtm, onEditCoverage, bedShelterType, onSetShelter, farmProfile, fullPage, selectedCropIds = [], targetGap, onSetTargetGap, activeYear, setActiveYear }) => {
     const [frostFilter, setFrostFilter] = React.useState(false);
-    const [activeYear, setActiveYear] = React.useState(new Date().getFullYear());
     const [searchQuery, setSearchQuery] = React.useState('');
     const [activeCategory, setActiveCategory] = React.useState('All');
     const [coverageFraction, setCoverageFraction] = React.useState(1.0);
@@ -708,9 +707,17 @@ const SuccessionDrawer = ({ visible, bedNumber, blockName, currentSuccessions, a
             style={[StyleSheet.absoluteFill, { zIndex: 9999, elevation: 9999 }]}
             pointerEvents={pendingPlantItem ? 'auto' : 'none'}
         >
-            {!!pendingPlantItem && <View style={fpStyles.modalOverlay}>
-                <View style={fpStyles.modalCard}>
-                    <Text style={fpStyles.modalTitle}>
+            {!!pendingPlantItem && (
+                <TouchableOpacity 
+                    style={fpStyles.modalOverlay} 
+                    activeOpacity={1} 
+                    onPress={() => setPendingPlantItem(null)}
+                >
+                    <TouchableOpacity 
+                        style={fpStyles.modalCard}
+                        activeOpacity={1}
+                    >
+                        <Text style={fpStyles.modalTitle}>
                         What fraction should {pendingPlantItem?.item?.crop?.name} fill?
                     </Text>
                     <Text style={fpStyles.modalSubtitle}>
@@ -762,11 +769,12 @@ const SuccessionDrawer = ({ visible, bedNumber, blockName, currentSuccessions, a
                         })}
                     </View>
                     
-                    <TouchableOpacity style={fpStyles.modalCancel} onPress={() => setPendingPlantItem(null)}>
-                        <Text style={fpStyles.modalCancelText}>Cancel</Text>
+                        <TouchableOpacity style={fpStyles.modalCancel} onPress={() => setPendingPlantItem(null)}>
+                            <Text style={fpStyles.modalCancelText}>Cancel</Text>
+                        </TouchableOpacity>
                     </TouchableOpacity>
-                </View>
-            </View>}
+                </TouchableOpacity>
+            )}
         </View>
     );
 
@@ -840,6 +848,7 @@ const SuccessionDrawer = ({ visible, bedNumber, blockName, currentSuccessions, a
                     <View style={fpStyles.ganttCard}>
                         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, paddingHorizontal: 4 }}>
                             <Text style={{ fontSize: 13, fontWeight: '700', color: '#1B3B1A', letterSpacing: 0.5 }}>TIMELINE PLAN</Text>
+                            <Text style={{ fontSize: 10, color: 'blue', maxWidth: 100 }} numberOfLines={2}>DBG: Cnt={currentSuccessions?.length ?? 'none'}, ActYr={activeYear}</Text>
                             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16, backgroundColor: '#E8F5E9', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 20 }}>
                                 <TouchableOpacity onPress={() => setActiveYear(y => y - 1)} hitSlop={{top:10,bottom:10,left:10,right:10}}>
                                     <Text style={{ fontSize: 18, color: '#2E7D32', fontWeight: 'bold' }}>‹</Text>
@@ -872,11 +881,16 @@ const SuccessionDrawer = ({ visible, bedNumber, blockName, currentSuccessions, a
 
                             const mapToYearFraction = (isoDate) => {
                                 if (!isoDate) return null;
-                                const dateMs = new Date(isoDate + 'T12:00:00').getTime();
-                                // Exact ms math vs Jan 1 of the active year.
-                                // Dates before Jan 1 → fraction < 0; dates after Dec 31 → fraction > 1.
-                                // This naturally handles cross-year bars without special-casing.
-                                return (dateMs - yearStartMs) / yearMs;
+                                const d = new Date(isoDate + 'T12:00:00');
+                                const year = d.getFullYear();
+                                const month = d.getMonth(); // 0-11
+                                const day = d.getDate();
+                                const daysInMonth = new Date(year, month + 1, 0).getDate(); // Automatically handles leap years
+                                
+                                const monthFrac = month + (day - 1) / daysInMonth;
+                                const yearOffset = (year - activeYear) * 12;
+                                
+                                return (yearOffset + monthFrac) / 12;
                             };
 
                             const startOfActiveYear = `${activeYear}-01-01`;
@@ -912,7 +926,7 @@ const SuccessionDrawer = ({ visible, bedNumber, blockName, currentSuccessions, a
                             
                             // Find interactive gaps
                             const interactiveGaps = [];
-                            const frostDate = farmProfile?.last_frost_date || '2026-04-01';
+                            const frostDate = farmProfile?.last_frost_date || `${activeYear}-04-01`;
                             const frostMs = new Date(frostDate + 'T12:00:00').getTime();
                             
                             // 1. Gaps BEFORE and BETWEEN crops in established lanes
@@ -1036,7 +1050,7 @@ const SuccessionDrawer = ({ visible, bedNumber, blockName, currentSuccessions, a
                                                         if (editingIdx !== null) {
                                                             const crop = currentSuccessions[editingIdx];
                                                             if (crop && crop.start_date && onShiftDates) {
-                                                                const days = Math.round((new Date((gap.start_date || '2026-05-01') + 'T12:00:00').getTime() - new Date(crop.start_date + 'T12:00:00').getTime()) / 86400000);
+                                                                const days = Math.round((new Date((gap.start_date || `${activeYear}-05-01`) + 'T12:00:00').getTime() - new Date(crop.start_date + 'T12:00:00').getTime()) / 86400000);
                                                                 onShiftDates(editingIdx, days);
                                                                 setEditingIdx(null);
                                                             }
@@ -1424,7 +1438,7 @@ const SuccessionDrawer = ({ visible, bedNumber, blockName, currentSuccessions, a
                                 const rpb = item.crop.rows_per_30in_bed ?? '—';
                                 const irs = item.crop.in_row_spacing_in ? `${item.crop.in_row_spacing_in}"` : '—';
                                 const rawFits = item.fits ?? true;
-                                const dStr = item.start_date || '2026-05-01';
+                                const dStr = item.start_date || `${activeYear}-05-01`;
                                 const m = new Date(dStr + (dStr.includes('T') ? '' : 'T12:00:00')).getMonth();
                                 const isSpringWarm = item.crop.season === 'warm' && m >= 2 && m <= 7;
                                 const fits = rawFits || isSpringWarm;
@@ -1436,13 +1450,40 @@ const SuccessionDrawer = ({ visible, bedNumber, blockName, currentSuccessions, a
 
                                 const cropRemainingCoverage = (() => {
                                     if (!currentSuccessions || currentSuccessions.length === 0) return 1.0;
+                                    
+                                    const fallbackStartStr = farmProfile?.last_frost_date || `${activeYear}-04-15`;
+                                    const fallbackStart = `${activeYear}-${fallbackStartStr.length > 5 ? fallbackStartStr.slice(5) : '04-15'}`;
+                                    const computedStartDate = item.start_date || fallbackStart;
+                                    
+                                    const computedEndDate = item.end_date || (() => {
+                                        const dtm = winterDtm ?? item.dtm ?? item.crop?.dtm ?? 60;
+                                        const date = new Date(computedStartDate);
+                                        if (isNaN(date)) return '9999-12-31';
+                                        date.setDate(date.getDate() + dtm);
+                                        return date.toISOString().slice(0, 10);
+                                    })();
+
                                     let cStart, cEnd;
                                     if (targetGap) {
-                                        cStart = targetGap.start_date;
-                                        cEnd = targetGap.end_date ?? '9999-12-31';
+                                        // Belt-and-suspenders: if the targetGap window is already at
+                                        // 100% coverage, fall back to the crop's own natural dates so
+                                        // crops planned for OTHER time windows remain selectable.
+                                        const gapPeak = getPeakCoverageInWindow(
+                                            currentSuccessions,
+                                            targetGap.start_date,
+                                            targetGap.end_date ?? computedEndDate
+                                        );
+                                        if (gapPeak >= 0.99) {
+                                            // The targeted gap is full — evaluate against this crop's own window
+                                            cStart = computedStartDate;
+                                            cEnd = computedEndDate;
+                                        } else {
+                                            cStart = targetGap.start_date;
+                                            cEnd = targetGap.end_date ?? computedEndDate;
+                                        }
                                     } else {
-                                        cStart = item.start_date ?? farmProfile?.last_frost_date;
-                                        cEnd = item.end_date ?? '9999-12-31';
+                                        cStart = computedStartDate;
+                                        cEnd = computedEndDate;
                                     }
                                     const peak = getPeakCoverageInWindow(currentSuccessions, cStart, cEnd);
                                     return Math.max(0, 1.0 - peak);
@@ -1878,7 +1919,7 @@ const SuccessionDrawer = ({ visible, bedNumber, blockName, currentSuccessions, a
 
 
                             const rawFits = item.fits ?? false;
-                            const dStr = item.start_date || '2026-05-01';
+                            const dStr = item.start_date || `${activeYear}-05-01`;
                             const m = new Date(dStr + (dStr.includes('T') ? '' : 'T12:00:00')).getMonth();
                             const isSpringWarm = item.crop.season === 'warm' && m >= 2 && m <= 7;
                             const effFits = rawFits || isSpringWarm;
@@ -1892,8 +1933,22 @@ const SuccessionDrawer = ({ visible, bedNumber, blockName, currentSuccessions, a
                                 if (!currentSuccessions || currentSuccessions.length === 0) return 1.0;
                                 let cStart, cEnd;
                                 if (targetGap) {
-                                    cStart = targetGap.start_date;
-                                    cEnd = targetGap.end_date ?? '9999-12-31';
+                                    // Belt-and-suspenders: if the targetGap window is already at
+                                    // 100% coverage, fall back to the crop's own natural dates so
+                                    // crops planned for OTHER time windows remain selectable.
+                                    const gapPeak = getPeakCoverageInWindow(
+                                        currentSuccessions,
+                                        targetGap.start_date,
+                                        targetGap.end_date ?? '9999-12-31'
+                                    );
+                                    if (gapPeak >= 0.99) {
+                                        // The targeted gap is full — evaluate against this crop's own window
+                                        cStart = item.start_date ?? farmProfile?.last_frost_date;
+                                        cEnd = item.end_date ?? '9999-12-31';
+                                    } else {
+                                        cStart = targetGap.start_date;
+                                        cEnd = targetGap.end_date ?? '9999-12-31';
+                                    }
                                 } else {
                                     cStart = item.start_date ?? farmProfile?.last_frost_date;
                                     cEnd = item.end_date ?? '9999-12-31';
@@ -1972,8 +2027,15 @@ const SuccessionDrawer = ({ visible, bedNumber, blockName, currentSuccessions, a
                     animationType="fade"
                     onRequestClose={() => setSelectedDiagramCrop(null)}
                 >
-                    <View style={fpStyles.modalOverlay}>
-                        <View style={fpStyles.modalCard}>
+                    <TouchableOpacity 
+                        style={fpStyles.modalOverlay}
+                        activeOpacity={1}
+                        onPress={() => setSelectedDiagramCrop(null)}
+                    >
+                        <TouchableOpacity 
+                            style={fpStyles.modalCard}
+                            activeOpacity={1}
+                        >
                             <Text style={fpStyles.modalTitle}>
                                 {selectedDiagramCrop?.crop_name ?? selectedDiagramCrop?.name}
                             </Text>
@@ -2010,11 +2072,11 @@ const SuccessionDrawer = ({ visible, bedNumber, blockName, currentSuccessions, a
                                 </View>
                             </View>
 
-                            <TouchableOpacity style={fpStyles.modalCancel} onPress={() => setSelectedDiagramCrop(null)}>
-                                <Text style={[fpStyles.modalCancelText, { color: '#1B3B1A' }]}>Close</Text>
-                            </TouchableOpacity>
-                        </View>
-                    </View>
+                                <TouchableOpacity style={fpStyles.modalCancel} onPress={() => setSelectedDiagramCrop(null)}>
+                                    <Text style={[fpStyles.modalCancelText, { color: '#1B3B1A' }]}>Close</Text>
+                                </TouchableOpacity>
+                        </TouchableOpacity>
+                    </TouchableOpacity>
                 </Modal>
         </OuterWrap>
     );
@@ -2027,6 +2089,7 @@ export default function BedWorkspaceScreen({ navigation, route }) {
     const planId = route?.params?.planId ?? route?.params?.block?.planId ?? null;
     
     const [selectedCropIds, setSelectedCropIds] = useState(() => loadPlanCrops(planId) ?? []);
+    const [activeYear, setActiveYear] = useState(() => new Date().getFullYear());
     useFocusEffect(useCallback(() => {
         setSelectedCropIds(loadPlanCrops(planId) ?? []);
     }, [planId]));
@@ -2036,7 +2099,7 @@ export default function BedWorkspaceScreen({ navigation, route }) {
     const frostFreeDays = farmProfile?.frost_free_days ?? 170;
 
     const [drawerOpen, setDrawerOpen] = useState(() => singleBedMode ? true : false);
-    const [activeBed, setActiveBed] = useState(() => singleBedMode && initialBedNum ? initialBedNum : null);
+    const [activeBed, setActiveBed] = useState(() => singleBedMode && initialBedNum ? String(initialBedNum) : null);
     const [showGrid, setShowGrid] = useState(false);
     const [showAIPlanModal, setShowAIPlanModal] = useState(false);
     const [calendarEntries, setCalendarEntries] = useState([]);
@@ -2137,30 +2200,46 @@ export default function BedWorkspaceScreen({ navigation, route }) {
 
     const loadedBlockIdRef = useRef(null);
 
-    // Force re-synchronization when returning from a different screen so stale state doesn't wipe localStorage.
+    // Synchronize block bed data on every focus.
+    // Strategy: always read from localStorage (authoritative, always fresh), then MERGE
+    // with in-memory state. In-memory wins for the active bed so any crops planted in
+    // the current session are never evicted by a stale route.params snapshot.
     useFocusEffect(useCallback(() => {
         if (singleBedMode && blockParam?.id) {
-            let convertedSuccs = {};
-            let convertedShelter = {};
+            let persistedSuccs = {};
+            let persistedShelter = {};
             try {
-                let source = route.params?.initialBedData;
-                if (!source || Object.keys(source).length === 0) {
-                    source = loadBlockBeds(blockParam.id);
-                }
+                // Always read from localStorage — never trust route.params?.initialBedData
+                // which is frozen at navigation-call-time and goes stale immediately.
+                const source = loadBlockBeds(blockParam.id);
                 if (source && Object.keys(source).length > 0) {
                     for (const [bedNum, val] of Object.entries(source)) {
-                        convertedSuccs[bedNum] = val?.successions ?? (Array.isArray(val) ? val : []);
+                        persistedSuccs[String(bedNum)] = val?.successions ?? (Array.isArray(val) ? val : []);
                         if (val?.shelterType && val.shelterType !== 'none') {
-                            convertedShelter[bedNum] = val.shelterType;
+                            persistedShelter[String(bedNum)] = val.shelterType;
                         }
                     }
                 }
             } catch {}
-            setBedSuccessions(convertedSuccs);
-            setBedShelter(convertedShelter);
+
+            // Merge: persisted data is the base; in-memory state wins per-bed so that
+            // crops planted in this session (not yet written back) are not lost.
+            setBedSuccessions(prev => {
+                const merged = { ...persistedSuccs };
+                // For each bed already in memory, keep the in-memory version if it has
+                // more successions than what was persisted (i.e. an unsaved plant just happened).
+                for (const [bedNum, inMemSuccs] of Object.entries(prev)) {
+                    const key = String(bedNum);
+                    if (inMemSuccs.length > (merged[key]?.length ?? 0)) {
+                        merged[key] = inMemSuccs;
+                    }
+                }
+                return merged;
+            });
+            setBedShelter(prev => ({ ...persistedShelter, ...prev }));
             loadedBlockIdRef.current = blockParam.id;
         }
-    }, [singleBedMode, blockParam?.id, route.params?.initialBedData]));
+    }, [singleBedMode, blockParam?.id]));
 
     // ── 8-bed mode shelter save ──────────────────────────────────────────────
     // Save bedShelter to localStorage continuously
@@ -2175,7 +2254,11 @@ export default function BedWorkspaceScreen({ navigation, route }) {
     // never reads. In singleBedMode, sync both so the bed list refreshes on back.
     useEffect(() => {
         if (!singleBedMode || !blockParam?.id) return;
-        if (loadedBlockIdRef.current !== blockParam.id) return; // Prevent overwriting with stale cross-block state
+        // Guard: only skip the cross-save if readback has NOT yet happened for this block.
+        // On mount, useFocusEffect runs before this useEffect fires, so loadedBlockIdRef.current
+        // is already set to blockParam.id by the time plants are persisted. If it's still null,
+        // the screen just mounted and we should allow the first write-back.
+        if (loadedBlockIdRef.current !== null && loadedBlockIdRef.current !== blockParam.id) return;
         // Convert { [bedNum]: succession[] } → { [bedNum]: { successions, shelterType } }
         const blockFormat = {};
         for (const [bedNum, succs] of Object.entries(bedSuccessions)) {
@@ -2216,10 +2299,11 @@ export default function BedWorkspaceScreen({ navigation, route }) {
 
     function buildEffectiveProfile(profile, shelterType) {
         const ext = SHELTER_EXT[shelterType ?? 'none'] ?? 0;
-        if (!ext || !profile) return profile;
+        if (!profile) return profile;
         const shiftDate = (iso, days) => {
             if (!iso) return iso;
-            const d = new Date(iso + 'T12:00:00');
+            const baseIso = `${activeYear}-${iso.slice(5)}`;
+            const d = new Date(baseIso + 'T12:00:00');
             d.setDate(d.getDate() + days);
             return d.toISOString().split('T')[0];
         };
@@ -2275,16 +2359,17 @@ export default function BedWorkspaceScreen({ navigation, route }) {
         setNoteBed(bedNumber);
     }, []);
 
-    const openBed = useCallback(async (bedNumber, shelterOverride) => {
-        setActiveBed(bedNumber);
+    const openBed = useCallback(async (bedNumber, shelterOverride, forcedSuccessions = null) => {
+        const bedKey = String(bedNumber);
+        setActiveBed(bedKey);
         setDrawerOpen(true);
         setDrawerLoading(true);
         setDrawerCandidates([]);
 
         try {
-            const currentSuccessions = bedSuccessionsRef.current[bedNumber] ?? [];
-            const rawProfile = farmProfile ?? { frost_free_days: 170, last_frost_date: `${new Date().getFullYear()}-04-15`, first_frost_date: `${new Date().getFullYear()}-10-15`, lat: 45.5 };
-            const currentShelter = shelterOverride !== undefined ? shelterOverride : (bedShelter[bedNumber] ?? 'none');
+            const currentSuccessions = forcedSuccessions ?? bedSuccessionsRef.current[bedKey] ?? [];
+            const rawProfile = farmProfile ?? { frost_free_days: 170, last_frost_date: `${activeYear}-04-15`, first_frost_date: `${activeYear}-10-15`, lat: 45.5 };
+            const currentShelter = shelterOverride !== undefined ? shelterOverride : (bedShelter[bedKey] ?? 'none');
             const profile = buildEffectiveProfile(rawProfile, currentShelter);
 
             // ── Find the earliest unfilled window ─────────────────────────────────────
@@ -2379,7 +2464,7 @@ export default function BedWorkspaceScreen({ navigation, route }) {
         } finally {
             setDrawerLoading(false);
         }
-    }, [farmProfile, selectedCropIds, bedShelter]);
+    }, [farmProfile, selectedCropIds, bedShelter, activeYear]);
 
     // Keep a ref to openBed that's always current — used by plantCrop and
     // editSuccessionCoverage so calls inside setState updaters always read
@@ -2396,8 +2481,8 @@ export default function BedWorkspaceScreen({ navigation, route }) {
     }, []); // intentionally runs once on mount only
 
     // reloadDrawer: keep drawer open and refresh candidates with latest state
-    const reloadDrawer = useCallback((bedNumber) => {
-        openBedRef.current(bedNumber);
+    const reloadDrawer = useCallback((bedNumber, forcedSuccessions = null) => {
+        openBedRef.current(bedNumber, undefined, forcedSuccessions);
         setDrawerOpen(true);
     }, []);
 
@@ -2430,8 +2515,20 @@ export default function BedWorkspaceScreen({ navigation, route }) {
 
     const plantCrop = useCallback(async (candidateItem) => {
         let { crop, start_date, end_date, targetGap } = candidateItem;
-        const currentSuccessions = bedSuccessions[activeBed] ?? [];
+        const bedKey = String(activeBed);
+        const currentSuccessions = bedSuccessions[bedKey] ?? [];
         const requestedCoverage = candidateItem.coverage_fraction ?? 1.0;
+
+        // Fallback: Extremely defensive checks to ensure we never push a date-less crop
+        if (!start_date) {
+            const baseStr = farmProfile?.last_frost_date || `${activeYear}-04-15`;
+            start_date = `${activeYear}-${baseStr.slice(5)}`;
+        }
+        if (!end_date) {
+            const sObj = new Date(start_date);
+            sObj.setDate(sObj.getDate() + (candidateItem.dtm ?? crop?.dtm ?? 0) + (crop?.harvest_window_days ?? 0));
+            end_date = sObj.toISOString().slice(0, 10);
+        }
 
         // ── Target Gap Override vs Auto-Nestling ──────────────────────────────
         if (targetGap) {
@@ -2594,48 +2691,64 @@ export default function BedWorkspaceScreen({ navigation, route }) {
         });
         // ───────────────────────────────────────────────────────────────────
 
-        setBedSuccessions(prev => {
-            const updated = { ...prev, [activeBed]: [...(prev[activeBed] ?? []), newSuccession] };
+        // ── Fix: Evaluate side effects on the projected state FIRST ───────
+        const projectedList = [...(currentSuccessions ?? []), newSuccession];
+        const currentPeak = getPeakCoverageInWindow(projectedList, start_date, end_date ?? '9999-12-31');
 
-            // ── Partial-coverage: stay open and prompt for the rest ──────────────
-            const currentPeak = getPeakCoverageInWindow(updated[activeBed], start_date, end_date ?? '9999-12-31');
+        if (currentPeak < 0.99) {
+            // Bed still has capacity — keep drawer open in fill-remaining mode.
+            setFillRemainingDtm(crop.dtm ?? null);
+        } else {
+            setFillRemainingDtm(null);
+        }
 
-            if (currentPeak < 0.99) {
-                // Bed still has capacity — keep drawer open in fill-remaining mode.
-                setFillRemainingDtm(crop.dtm ?? null);
-            } else {
-                setFillRemainingDtm(null);
+        // If target gap reaches 100% full, clear it so the drawer re-evaluates
+        if (targetGap) {
+            const gapPeak = getPeakCoverageInWindow(projectedList, targetGap.start_date, targetGap.end_date ?? '9999-12-31');
+            if (gapPeak >= 0.99) {
+                setTargetGap(null);
             }
+        }
 
-            return updated;
+        // Apply state AFTER side effects, preventing React aborted renders
+        setBedSuccessions(prev => {
+            return { ...prev, [bedKey]: projectedList };
         });
 
-        // Reload drawer with latest state — uses ref so openBed always has
-        // the post-update bedSuccessions without stale-closure issues.
-        reloadDrawer(activeBed);
-    }, [activeBed, bedSuccessions, planId, reloadDrawer]);
+        // Reload drawer with latest state — explicit pass guarantees no stale closures
+        reloadDrawer(bedKey, projectedList);
+    }, [activeBed, bedSuccessions, planId, reloadDrawer, activeYear]);
 
     // Remove a succession by index from the active bed (called from drawer)
     const removeSuccessionFromBed = useCallback((idx) => {
+        const bedKey = String(activeBed);
+        const currentList = bedSuccessionsRef.current[bedKey] ?? [];
+        const updatedList = [...currentList];
+        updatedList.splice(idx, 1);
+
         setBedSuccessions(prev => {
-            const updated = [...(prev[activeBed] ?? [])];
-            updated.splice(idx, 1);
-            return { ...prev, [activeBed]: updated };
+            return { ...prev, [bedKey]: updatedList };
         });
-    }, [activeBed]);
+        reloadDrawer(bedKey, updatedList);
+    }, [activeBed, reloadDrawer]);
 
     const shiftSuccessionDates = useCallback((idx, days) => {
+        const bedKey = String(activeBed);
+        const currentList = bedSuccessionsRef.current[bedKey] ?? [];
+        if (!currentList[idx]) return;
+        
+        const updatedList = [...currentList];
+        updatedList[idx] = {
+            ...updatedList[idx],
+            start_date: updatedList[idx].start_date ? addDays(updatedList[idx].start_date, days) : null,
+            end_date: updatedList[idx].end_date ? addDays(updatedList[idx].end_date, days) : null,
+        };
+
         setBedSuccessions(prev => {
-            const updated = [...(prev[activeBed] ?? [])];
-            if (!updated[idx]) return prev;
-            updated[idx] = {
-                ...updated[idx],
-                start_date: updated[idx].start_date ? addDays(updated[idx].start_date, days) : null,
-                end_date: updated[idx].end_date ? addDays(updated[idx].end_date, days) : null,
-            };
-            return { ...prev, [activeBed]: updated };
+            return { ...prev, [bedKey]: updatedList };
         });
-    }, [activeBed]);
+        reloadDrawer(bedKey, updatedList);
+    }, [activeBed, reloadDrawer]);
 
 
     const handleAutoFill = useCallback(async (strategyId, filters) => {
@@ -2643,10 +2756,10 @@ export default function BedWorkspaceScreen({ navigation, route }) {
         //  (A) empty          → full auto-fill (pick primary + generate chain)
         //  (B) partial/manual → append auto-successions after the last existing crop
         //  (C) fully-planned  → skip entirely (don't overwrite user's complete plan)
-        const hasManualCrops = (n) => (bedSuccessions[n] ?? []).some(s => !s.is_auto_generated);
+        const hasManualCrops = (n) => (bedSuccessions[String(n)] ?? []).some(s => !s.is_auto_generated);
 
         const emptyBedsToFill = Array.from({ length: NUM_BEDS }, (_, i) => i + 1)
-            .filter(n => (bedSuccessions[n] ?? []).length === 0);
+            .filter(n => (bedSuccessions[String(n)] ?? []).length === 0);
 
         const partialBedsToComplete = Array.from({ length: NUM_BEDS }, (_, i) => i + 1)
             .filter(n => hasManualCrops(n)); // has manual crops → complete the rest
@@ -2658,8 +2771,8 @@ export default function BedWorkspaceScreen({ navigation, route }) {
 
         const profile = farmProfile ?? {
             frost_free_days: 170,
-            last_frost_date:  `${new Date().getFullYear()}-04-15`,
-            first_frost_date: `${new Date().getFullYear()}-10-15`,
+            last_frost_date:  `${activeYear}-04-15`,
+            first_frost_date: `${activeYear}-10-15`,
             lat: 45.5,
         };
 
@@ -2668,7 +2781,7 @@ export default function BedWorkspaceScreen({ navigation, route }) {
         // Beds that already have a full plan (not empty, not partial)
         const alreadyFullBeds = Array.from({ length: NUM_BEDS }, (_, i) => i + 1)
             .filter(n => !emptyBedsToFill.includes(n) && !partialBedsToComplete.includes(n))
-            .map(n => ({ bed_number: n, successions: bedSuccessions[n] ?? [] }));
+            .map(n => ({ bed_number: n, successions: bedSuccessions[String(n)] ?? [] }));
 
         // ── Step 1: auto-fill empty beds (existing logic) ────────────────────
         const autoFilled = await autoFillRemainingBeds(
@@ -2693,7 +2806,7 @@ export default function BedWorkspaceScreen({ navigation, route }) {
         const maxRepeat = strat.maxRepeat ?? 3;
 
         for (const bedNum of partialBedsToComplete) {
-            const existingSuccs = bedSuccessions[bedNum] ?? [];
+            const existingSuccs = bedSuccessions[String(bedNum)] ?? [];
             const lastSucc = existingSuccs[existingSuccs.length - 1];
             if (!lastSucc?.end_date) continue;
 
@@ -2709,7 +2822,7 @@ export default function BedWorkspaceScreen({ navigation, route }) {
             );
 
             if (addedSuccessions.length > 0) {
-                updatedSuccessions[bedNum] = [...existingSuccs, ...addedSuccessions];
+                updatedSuccessions[String(bedNum)] = [...existingSuccs, ...addedSuccessions];
                 // Update farm count so subsequent partial beds avoid the same crops
                 for (const s of addedSuccessions) {
                     if (s.crop_id) farmCropCount[s.crop_id] = (farmCropCount[s.crop_id] ?? 0) + 1;
@@ -2719,7 +2832,7 @@ export default function BedWorkspaceScreen({ navigation, route }) {
 
         setBedSuccessions(updatedSuccessions);
         setShowStrategyPicker(false);
-    }, [bedSuccessions, farmProfile, autoFillFilters]);
+    }, [bedSuccessions, farmProfile, autoFillFilters, activeYear]);
 
     const handleRevertAutoFill = useCallback(() => {
         if (!preAutoFillSnapshot) return;
@@ -2730,18 +2843,20 @@ export default function BedWorkspaceScreen({ navigation, route }) {
     // Edit the coverage_fraction of an existing succession in the active bed.
     // Triggers a drawer reload so the user sees the refreshed "Current Plan".
     const editSuccessionCoverage = useCallback((idx, newFraction) => {
+        const bedKey = String(activeBed);
         setBedSuccessions(prev => {
-            const updated = [...(prev[activeBed] ?? [])];
+            const updated = [...(prev[bedKey] ?? [])];
             if (!updated[idx]) return prev;
             updated[idx] = { ...updated[idx], coverage_fraction: newFraction };
-            return { ...prev, [activeBed]: updated };
+            return { ...prev, [bedKey]: updated };
         });
         // Reload drawer so updated coverage badge shows immediately
-        reloadDrawer(activeBed);
+        reloadDrawer(bedKey);
     }, [activeBed, reloadDrawer]);
 
     // Plant an out-of-season crop with a conditional warning based on current shelter.
-    // Uses Alert.alert (native on iOS/Android, browser confirm() on web via Expo polyfill).
+    // NOTE: Alert.alert with button-callback arrays is silently dropped on Expo Web.
+    // We use window.confirm() on web and Alert.alert on native so the crop always plants.
     const handlePlantOutOfSeason = useCallback((candidateItem) => {
         const cropName = candidateItem.crop?.name || candidateItem.name;
         const currentShelter = bedShelter[activeBed] ?? 'none';
@@ -2751,38 +2866,52 @@ export default function BedWorkspaceScreen({ navigation, route }) {
             ? `“${cropName}” is outside its standard growing window.\n\nAdd it anyway? It will be saved and counted in next year’s rotation history.`
             : `“${cropName}” is outside the current frost-free window.\n\nIt won’t perform well without a row cover or greenhouse.\n\nAdd it anyway? It will be saved and counted in next year’s rotation history.`;
 
-        Alert.alert(
-            '🌿 Outside Growing Window',
-            protectedMsg,
-            [
-                { text: 'Cancel', style: 'cancel' },
-                {
-                    text: isProtected ? 'Yes, Add Anyhow' : 'Yes, Add with Protection',
-                    onPress: () => {
-                        // Compute end_date from start_date + dtm if engine returned null
-                        const profile = farmProfile ?? {};
-                        const startDate = candidateItem.start_date ?? profile.first_frost_date ?? new Date().toISOString().slice(0, 10);
-                        let endDate = candidateItem.end_date;
-                        if (!endDate) {
-                            const dtm = candidateItem.dtm ?? candidateItem.crop?.dtm ?? 60;
-                            const start = new Date(startDate);
-                            start.setDate(start.getDate() + dtm);
-                            endDate = start.toISOString().slice(0, 10);
-                        }
-                        
-                        plantCrop({ 
-                            ...candidateItem, 
-                            start_date: startDate, 
-                            end_date: endDate, 
-                            requires_protection: candidateItem.requires_protection ?? !isProtected, 
-                            is_winter_override: candidateItem.is_winter_override ?? false 
-                        });
+        // Shared plant action — extracted so both web and native paths call the same code
+        const doPlantCrop = () => {
+            const profile = farmProfile ?? {};
+            let startDate = candidateItem.start_date;
+            if (!startDate) {
+                const baseStr = profile.first_frost_date || profile.last_frost_date || `${activeYear}-04-15`;
+                startDate = `${activeYear}-${baseStr.slice(5)}`;
+            }
+            let endDate = candidateItem.end_date;
+            if (!endDate) {
+                const dtm = candidateItem.dtm ?? candidateItem.crop?.dtm ?? 60;
+                const start = new Date(startDate);
+                start.setDate(start.getDate() + dtm);
+                endDate = start.toISOString().slice(0, 10);
+            }
+            plantCrop({
+                ...candidateItem,
+                start_date: startDate,
+                end_date: endDate,
+                requires_protection: candidateItem.requires_protection ?? !isProtected,
+                is_winter_override: candidateItem.is_winter_override ?? false,
+            });
+        };
+
+        if (Platform.OS === 'web') {
+            // Alert.alert multi-button callbacks are silently dropped on web —
+            // window.confirm() is guaranteed to work in all browsers.
+            const confirmMsg = `🌿 Outside Growing Window\n\n${protectedMsg}`;
+            if (window.confirm(confirmMsg)) {
+                doPlantCrop();
+            }
+        } else {
+            Alert.alert(
+                '🌿 Outside Growing Window',
+                protectedMsg,
+                [
+                    { text: 'Cancel', style: 'cancel' },
+                    {
+                        text: isProtected ? 'Yes, Add Anyhow' : 'Yes, Add with Protection',
+                        onPress: doPlantCrop,
                     },
-                },
-            ],
-            { cancelable: true }
-        );
-    }, [farmProfile, plantCrop, activeBed, bedShelter]);
+                ],
+                { cancelable: true }
+            );
+        }
+    }, [farmProfile, plantCrop, activeBed, bedShelter, activeYear]);
 
     const handleGeneratePlan = () => {
         navigation.navigate('YieldSummary', {
@@ -2981,14 +3110,14 @@ export default function BedWorkspaceScreen({ navigation, route }) {
                     <BedRow
                         key={bedNum}
                         bedNumber={bedNum}
-                        successions={bedSuccessions[bedNum] ?? []}
+                        successions={bedSuccessions[String(bedNum)] ?? []}
                         onPress={openBed}
                         onLongPress={() => handleBedLongPress(bedNum)}
                         delayLongPress={600}
                         seasonStart={seasonStart}
                         seasonEnd={seasonEnd}
                         firstFrostDate={seasonEnd}
-                        shelterType={bedShelter[bedNum] ?? 'none'}
+                        shelterType={bedShelter[String(bedNum)] ?? 'none'}
                         priorCrops={getPriorYearBedCrops(bedNum)}
                     />
                 ))}
@@ -3126,7 +3255,7 @@ export default function BedWorkspaceScreen({ navigation, route }) {
                 visible={drawerOpen}
                 bedNumber={activeBed}
                 blockName={blockParam?.name ?? route?.params?.blockName ?? null}
-                currentSuccessions={activeBed ? (bedSuccessions[activeBed] ?? []) : []}
+                currentSuccessions={activeBed ? (bedSuccessions[String(activeBed)] ?? []) : []}
                 allBedSuccessions={bedSuccessions}
                 candidates={drawerCandidates}
                 loading={drawerLoading}
@@ -3145,22 +3274,23 @@ export default function BedWorkspaceScreen({ navigation, route }) {
                 onShiftDates={shiftSuccessionDates}
                 onEditCoverage={editSuccessionCoverage}
                 fillRemainingDtm={fillRemainingDtm}
-                bedShelterType={activeBed ? (bedShelter[activeBed] ?? 'none') : 'none'}
+                bedShelterType={activeBed ? (bedShelter[String(activeBed)] ?? 'none') : 'none'}
                 onSetShelter={(shelterType) => {
                     if (!activeBed) return;
                     
-                    const prevShelter = bedShelter[activeBed] ?? 'none';
+                    const bedKey = String(activeBed);
+                    const prevShelter = bedShelter[bedKey] ?? 'none';
                     if (prevShelter === shelterType) return;
                     
                     // Shelter extensions implicitly define spring offset behavior mapping.
                     const getOffset = (type) => type === 'greenhouse' ? -21 : type === 'rowCover' ? -7 : 0;
                     const delta = getOffset(shelterType) - getOffset(prevShelter);
 
-                    setBedShelter(prev => ({ ...prev, [activeBed]: shelterType }));
+                    setBedShelter(prev => ({ ...prev, [bedKey]: shelterType }));
                     
                     if (delta !== 0) {
                         setBedSuccessions(prev => {
-                            const bedSuccs = prev[activeBed] || [];
+                            const bedSuccs = prev[bedKey] || [];
                             if (bedSuccs.length === 0) return prev;
                             
                             const updated = bedSuccs.map(succ => ({
@@ -3169,7 +3299,7 @@ export default function BedWorkspaceScreen({ navigation, route }) {
                                 end_date: succ.end_date ? addDays(succ.end_date, delta) : succ.end_date
                             }));
                             
-                            return { ...prev, [activeBed]: updated };
+                            return { ...prev, [bedKey]: updated };
                         });
                     }
 
@@ -3178,6 +3308,8 @@ export default function BedWorkspaceScreen({ navigation, route }) {
                 farmProfile={farmProfile}
                 fullPage={singleBedMode}
                 selectedCropIds={selectedCropIds}
+                activeYear={activeYear}
+                setActiveYear={setActiveYear}
             />
 
             {/* ── AI Plan Generator Modal ── */}
