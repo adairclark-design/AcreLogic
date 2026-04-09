@@ -1441,7 +1441,14 @@ const SuccessionDrawer = ({ visible, bedNumber, blockName, currentSuccessions, a
                                 const dStr = item.start_date || `${activeYear}-05-01`;
                                 const m = new Date(dStr + (dStr.includes('T') ? '' : 'T12:00:00')).getMonth();
                                 const isSpringWarm = item.crop.season === 'warm' && m >= 2 && m <= 7;
-                                const fits = rawFits || isSpringWarm;
+                                // isInFarmWindow: the engine placed this crop at/after the farm's own last_frost_date.
+                                // checkAgronomicViability uses hardcoded Apr-20/May-15 thresholds that pre-date
+                                // the farm's actual frost profile. If the suggested planting date is within the
+                                // farm's real growing season, honour it — don't push it through handlePlantOutOfSeason.
+                                const _lfMD = farmProfile?.last_frost_date?.slice(5); // "MM-DD"
+                                const _itemMD = item.start_date?.slice(5);
+                                const isInFarmWindow = _itemMD && _lfMD ? _itemMD >= _lfMD : false;
+                                const fits = rawFits || isSpringWarm || isInFarmWindow;
                                 
                                 const isWinterCandidate = checkIsWinterGrow(item, hasProtection, fits, farmProfile?.lat, bedShelterType);
                                 const winterDtm = isWinterCandidate
@@ -1922,7 +1929,12 @@ const SuccessionDrawer = ({ visible, bedNumber, blockName, currentSuccessions, a
                             const dStr = item.start_date || `${activeYear}-05-01`;
                             const m = new Date(dStr + (dStr.includes('T') ? '' : 'T12:00:00')).getMonth();
                             const isSpringWarm = item.crop.season === 'warm' && m >= 2 && m <= 7;
-                            const effFits = rawFits || isSpringWarm;
+                            // isInFarmWindow: engine placed crop at/after the farm's real last_frost_date.
+                            // Hardcoded checkAgronomicViability thresholds don't account for farm-specific frost profiles.
+                            const _lfMD2 = farmProfile?.last_frost_date?.slice(5);
+                            const _itemMD2 = item.start_date?.slice(5);
+                            const isInFarmWindow2 = _itemMD2 && _lfMD2 ? _itemMD2 >= _lfMD2 : false;
+                            const effFits = rawFits || isSpringWarm || isInFarmWindow2;
                             
                             const isWinterCandidate = checkIsWinterGrow(item, hasProtection, effFits, farmProfile?.lat, bedShelterType);
                             const winterDtm = isWinterCandidate
