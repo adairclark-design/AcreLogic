@@ -126,7 +126,7 @@ export default function BlockSetupWizard({ route, navigation }) {
     const [blockWidFt, setBlockWidFt] = useState(String(existingBlock?.blockWidthFt ?? prefill?.blockWidthFt ?? ''));
 
     const [bedWidthFt, setBedWidthFt] = useState(String(existingBlock?.bedWidthFt ?? '2.5'));
-    const [pathwayFt, setPathwayFt] = useState(String(existingBlock?.pathwayWidthFt ?? '4'));
+    const [pathwayFt, setPathwayFt] = useState(String(existingBlock?.pathwayWidthFt ?? '1'));
     // N/S bisecting pathway: auto-enabled when coming from satellite (user's requested default)
     const [bisectEnabled, setBisectEnabled] = useState(existingBlock?.bisectingRoad?.enabled ?? (prefill ? true : false));
     const [bisectOrient, setBisectOrient] = useState(existingBlock?.bisectingRoad?.orientation ?? 'NS');
@@ -235,7 +235,7 @@ export default function BlockSetupWizard({ route, navigation }) {
             blockLengthFt: parseFloat(blockLenFt) || 0,
             blockWidthFt: parseFloat(blockWidFt) || 0,
             bedWidthFt: parseFloat(bedWidthFt) || 2.5,
-            pathwayWidthFt: parseFloat(pathwayFt) || 4,
+            pathwayWidthFt: parseFloat(pathwayFt) || 1,
             bisectingRoad: {
                 enabled: bisectEnabled,
                 orientation: bisectOrient,
@@ -317,7 +317,7 @@ export default function BlockSetupWizard({ route, navigation }) {
             bedCount: effectiveBedCount,
             bedLengthFt: effectiveBedLen,
             bedWidthFt: parseFloat(bedWidthFt) || 2.5,
-            pathwayWidthFt: parseFloat(pathwayFt) || 4,
+            pathwayWidthFt: parseFloat(pathwayFt) || 1,
             blockLengthFt: inputMode === 'dimensions' ? (parseFloat(blockLenFt) || null) : null,
             blockWidthFt: inputMode === 'dimensions' ? (parseFloat(blockWidFt) || null) : null,
             bisectingRoad: { enabled: bisectEnabled, orientation: bisectOrient, widthFt: parseFloat(bisectWidFt) || 14 },
@@ -624,7 +624,7 @@ export default function BlockSetupWizard({ route, navigation }) {
                 <Text style={[styles.fieldLabel, { flex: 1 }]}>Pathways</Text>
             </View>
             <FieldRow label="Bed width" unit="ft" value={bedWidthFt} onChangeText={setBedWidthFt} placeholder="2.5" />
-            <FieldRow label="Pathway width between beds" unit="ft" value={pathwayFt} onChangeText={setPathwayFt} placeholder="4" />
+            <FieldRow label="Pathway width between beds" unit="ft" value={pathwayFt} onChangeText={setPathwayFt} placeholder="1" />
 
             <View style={styles.bisectRow}>
                 <View style={{ flex: 1 }}>

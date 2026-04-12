@@ -29,8 +29,8 @@ import { calculateGardenPlan, getCropEarliestActionOffset } from '../services/ho
 import { fetchFarmProfile } from '../services/climateService';
 import UpgradeModal from '../components/UpgradeModal';
 import CROP_IMAGES from '../data/cropImages';
+import CategorySidebar from '../components/CategorySidebar';
 import { exportFamilyPlan } from '../services/planExporter';
-import MegaMenuBar from '../components/MegaMenuBar';
 import SharedCropCard from '../components/SharedCropCard';
 import ActionCalendar from '../components/ActionCalendar';
 import SeedShoppingList from '../components/SeedShoppingList';
@@ -71,7 +71,7 @@ import CROPS_DATA from '../data/crops.json';
 const CROPS = CROPS_DATA.crops ?? [];
 
 // Filter out cover crops — not relevant to family planting
-const PLANTABLE_CROPS = CROPS; // Cover Crops included — visible under the "Cover Crops" MegaMenuBar tab
+const PLANTABLE_CROPS = CROPS; // Cover Crops included — visible under the "Cover Crops" CategorySidebar tab
 
 // ─── CropCard (compact grid card — mirrors Market Farm layout) ───────────────
 // CropCard is now SharedCropCard — see src/components/SharedCropCard.js
@@ -139,14 +139,10 @@ function SettingsBar({ gardenProfile, onProfileFetched, familySize, onAdjustFami
                         style={styles.settingsStepInput}
                         value={familyDraft}
                         onChangeText={txt => setFamilyDraft(txt.replace(/[^0-9]/g, ''))}
-                        onBlur={() => {
-                            const n = parseInt(familyDraft, 10);
-                            const clamped = Number.isFinite(n) && n >= 1 ? n : familySize;
-                            setFamilyDraft(String(clamped));
-                            if (clamped !== familySize) onSetFamily(clamped);
-                        }}
+                        onSubmitEditing={() => onSetFamily(parseInt(familyDraft, 10) || 1)}
+                        onBlur={() => onSetFamily(parseInt(familyDraft, 10) || 1)}
                         keyboardType="number-pad"
-                        maxLength={3}
+                        returnKeyType="done"
                         selectTextOnFocus
                         textAlign="center"
                     />
@@ -208,7 +204,7 @@ function SettingsBar({ gardenProfile, onProfileFetched, familySize, onAdjustFami
 }
 
 // ─── Report Card (one per crop in Step 2) ────────────────────────────────────
-function ReportCard({ item, cardWidth }) {
+function ReportCard({ item, cardWidth, onDelete }) {
     const isFlower = item.isFlower;
     const GAP = 8; // matches Spacing.sm
     return (
@@ -239,6 +235,17 @@ function ReportCard({ item, cardWidth }) {
                     <Text style={styles.reportCropName}>{item.cropName}</Text>
                     {formatVarietyLabel(item.variety) ? <Text style={styles.reportVariety}>{formatVarietyLabel(item.variety)}</Text> : null}
                 </View>
+                {/* Delete (×) button — top-right of header; undo toast provides recovery */}
+                {onDelete ? (
+                    <TouchableOpacity
+                        onPress={() => onDelete(item.cropId, item.cropName)}
+                        style={styles.reportDeleteBtn}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                        accessibilityLabel={`Remove ${item.cropName} from plan`}
+                    >
+                        <Text style={styles.reportDeleteBtnText}>×</Text>
+                    </TouchableOpacity>
+                ) : null}
             </View>
 
 
@@ -463,6 +470,7 @@ function getPlanColumns(viewportWidth) {
 export default function FamilyPlannerScreen({ navigation }) {
     const GAP = Spacing.sm; // 8px
     const { width } = useWindowDimensions();
+    const isDesktop = width >= 1024;
     // Step 1 crop grid — compact (matches Market Farm)
     const cropNumColumns = getCropGridColumns(width);
     const cropCardWidth  = Math.floor((width - Spacing.lg * 2 - GAP * (cropNumColumns - 1)) / cropNumColumns);
@@ -500,7 +508,9 @@ export default function FamilyPlannerScreen({ navigation }) {
             return saved ? new Set(JSON.parse(saved)) : new Set();
         } catch { return new Set(); }
     });
-    const [filterFn, setFilterFn]           = useState(() => () => true);  // from MegaMenuBar
+    // IMPORTANT: filterFn is stored as { fn: Function } — NOT as a raw function to prevent React functional updater issues.
+    const [filterObj, setFilterObj]         = useState({ fn: () => true });
+    const [activeFilterLabel, setActiveFilterLabel] = useState('All');
     const [searchQuery, setSearchQuery]     = useState('');
     const [upgradeModalVisible, setUpgradeModalVisible] = useState(false);
     const [upgradeBlockedBy, setUpgradeBlockedBy]       = useState(null);
@@ -605,43 +615,18 @@ export default function FamilyPlannerScreen({ navigation }) {
     }, []);
 
 
-    // ── CSS Grid via injected <style> tag ─────────────────────────────────────
-    // RN Web's style pipeline (inline styles AND DOM ref) gets transformed by
-    // the Metro/Webpack build, stripping complex CSS grid values. Injecting a
-    // real <style> element into document.head is fully outside that pipeline.
-    useEffect(() => {
-        if (Platform.OS !== 'web') return;
-        const STYLE_ID = 'acrelogic-crop-grid-style';
-        let el = document.getElementById(STYLE_ID);
-        if (!el) {
-            el = document.createElement('style');
-            el.id = STYLE_ID;
-            document.head.appendChild(el);
-        }
-        el.textContent = [
-            `.acrelogic-crop-grid {`,
-            `  display: grid !important;`,
-            `  grid-template-columns: repeat(${cropNumColumns}, 1fr) !important;`,
-            `  gap: 8px !important;`,
-            `  width: 100% !important;`,
-            `}`,
-        ].join('\n');
-        return () => {
-            const existing = document.getElementById(STYLE_ID);
-            if (existing) existing.remove();
-        };
-    }, [cropNumColumns]);
-
-
+    // CSS grid injection removed — we now use Flex+Wrap via ScrollView
     const limits = LIMITS[activeTier] ?? LIMITS[TIER.FREE];
 
     const filteredCrops = PLANTABLE_CROPS
-        .filter(filterFn)
+        .filter(filterObj.fn)
         .filter(c => !searchQuery.trim() || c.name.toLowerCase().includes(searchQuery.toLowerCase()) || (c.variety ?? '').toLowerCase().includes(searchQuery.toLowerCase()))
         .sort((a, b) => {
-            const offsetA = getCropEarliestActionOffset(a);
-            const offsetB = getCropEarliestActionOffset(b);
-            if (offsetA !== offsetB) return offsetA - offsetB;
+            try {
+                const offsetA = getCropEarliestActionOffset(a);
+                const offsetB = getCropEarliestActionOffset(b);
+                if (offsetA !== offsetB) return offsetA - offsetB;
+            } catch { /* defensive */ }
             return a.name.localeCompare(b.name);
         });
 
@@ -874,53 +859,105 @@ export default function FamilyPlannerScreen({ navigation }) {
                             selectedCount={selectedIds.size}
                         />
 
-                        {/* Mega category menu */}
-                        <MegaMenuBar
-                            onFilterChange={({ filterFn }) =>
-                                setFilterFn(() => filterFn)
-                            }
-                        />
-
-                        {/* Search bar \u2014 always visible below mega menu */}
-                        <View style={styles.searchRow}>
-                            <Text style={styles.searchIcon}>🔍</Text>
-                            <TextInput
-                                style={styles.searchInput}
-                                value={searchQuery}
-                                onChangeText={setSearchQuery}
-                                placeholder="Search crops..."
-                                placeholderTextColor={Colors.mutedText}
-                                clearButtonMode="while-editing"
-                            />
-                            {searchQuery.length > 0 && (
-                                <TouchableOpacity onPress={() => setSearchQuery('')} style={{ paddingHorizontal: 8 }}>
-                                    <Text style={{ color: Colors.mutedText, fontSize: 16 }}>✕</Text>
-                                </TouchableOpacity>
-                            )}
-                        </View>
-
-                        {/* Crop grid */}
-                        <FlatList
-                            ref={listRef}
-                            data={filteredCrops}
-                            keyExtractor={item => item.id}
-                            numColumns={cropNumColumns}
-                            key={cropNumColumns}
-                            contentContainerStyle={[styles.grid, { paddingBottom: 120 }]}
-                            columnWrapperStyle={cropNumColumns > 1 ? { gap: Spacing.sm, marginBottom: Spacing.sm } : undefined}
-                            showsVerticalScrollIndicator={false}
-                            style={Platform.OS === 'web' ? { overflowY: 'scroll', flex: 1 } : { flex: 1 }}
-                            renderItem={({ item }) => (
-                                <View style={{ width: cropCardWidth }}>
-                                    <CropCard
-                                        crop={item}
-                                        selected={selectedIds.has(item.id)}
-                                        onPress={toggleCrop}
-                                        cardWidth={cropCardWidth}
-                                    />
+                        {isDesktop ? (
+                            <View style={styles.desktopRow}>
+                                <CategorySidebar 
+                                    isMobile={false}
+                                    activeLabel={activeFilterLabel}
+                                    onFilterChange={({ label, filterFn }) => {
+                                        setActiveFilterLabel(label);
+                                        setFilterObj({ fn: filterFn });
+                                    }}
+                                />
+                                <View style={styles.desktopMainContent}>
+                                    {/* Search bar */}
+                                    <View style={[styles.searchRow, { marginHorizontal: Spacing.md, marginTop: Spacing.sm }]}>
+                                        <Text style={styles.searchIcon}>🔍</Text>
+                                        <TextInput
+                                            style={styles.searchInput}
+                                            value={searchQuery}
+                                            onChangeText={setSearchQuery}
+                                            placeholder="Search crops..."
+                                            placeholderTextColor={Colors.mutedText}
+                                            clearButtonMode="while-editing"
+                                        />
+                                        {searchQuery.length > 0 && (
+                                            <TouchableOpacity onPress={() => setSearchQuery('')} style={{ paddingHorizontal: 8 }}>
+                                                <Text style={{ color: Colors.mutedText, fontSize: 16 }}>✕</Text>
+                                            </TouchableOpacity>
+                                        )}
+                                    </View>
+                        
+                                    {/* Crop grid */}
+                                    <ScrollView
+                                        showsVerticalScrollIndicator={false}
+                                        style={Platform.OS === 'web' ? { overflowY: 'auto', flex: 1 } : { flex: 1 }}
+                                        contentContainerStyle={[styles.grid, { paddingBottom: 120, flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center' }]}
+                                        keyboardShouldPersistTaps="handled"
+                                    >
+                                        {filteredCrops.map(item => (
+                                            <View key={item.id} style={{ width: 160 }}>
+                                                <SharedCropCard
+                                                    crop={item}
+                                                    cardWidth={160}
+                                                    selected={selectedIds.has(item.id)}
+                                                    onPress={toggleCrop}
+                                                    friendlyMode={true}
+                                                />
+                                            </View>
+                                        ))}
+                                    </ScrollView>
                                 </View>
-                            )}
-                        />
+                            </View>
+                        ) : (
+                            <View style={{ flex: 1 }}>
+                                <CategorySidebar 
+                                    isMobile={true}
+                                    activeLabel={activeFilterLabel}
+                                    onFilterChange={({ label, filterFn }) => {
+                                        setActiveFilterLabel(label);
+                                        setFilterObj({ fn: filterFn });
+                                    }}
+                                />
+                                {/* Search bar */}
+                                <View style={styles.searchRow}>
+                                    <Text style={styles.searchIcon}>🔍</Text>
+                                    <TextInput
+                                        style={styles.searchInput}
+                                        value={searchQuery}
+                                        onChangeText={setSearchQuery}
+                                        placeholder="Search crops..."
+                                        placeholderTextColor={Colors.mutedText}
+                                        clearButtonMode="while-editing"
+                                    />
+                                    {searchQuery.length > 0 && (
+                                        <TouchableOpacity onPress={() => setSearchQuery('')} style={{ paddingHorizontal: 8 }}>
+                                            <Text style={{ color: Colors.mutedText, fontSize: 16 }}>✕</Text>
+                                        </TouchableOpacity>
+                                    )}
+                                </View>
+                        
+                                {/* Crop grid */}
+                                <ScrollView
+                                    showsVerticalScrollIndicator={false}
+                                    style={Platform.OS === 'web' ? { overflowY: 'auto', flex: 1 } : { flex: 1 }}
+                                    contentContainerStyle={[styles.grid, { paddingBottom: 120, flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center' }]}
+                                    keyboardShouldPersistTaps="handled"
+                                >
+                                    {filteredCrops.map(item => (
+                                        <View key={item.id} style={{ width: 140 }}>
+                                            <SharedCropCard
+                                                crop={item}
+                                                cardWidth={140}
+                                                selected={selectedIds.has(item.id)}
+                                                onPress={toggleCrop}
+                                                friendlyMode={true}
+                                            />
+                                        </View>
+                                    ))}
+                                </ScrollView>
+                            </View>
+                        )}
 
                         {/* Sticky footer */}
                         <View style={styles.footer}>
@@ -1073,7 +1110,7 @@ export default function FamilyPlannerScreen({ navigation }) {
                                                         marginRight: colIdx < rowItems.length - 1 ? 8 : 0,
                                                     }}
                                                 >
-                                                    <ReportCard item={item} />
+                                                    <ReportCard item={item} cardWidth={cardWidth} onDelete={deleteCropFromPlan} />
                                                 </View>
                                             ))}
                                         </View>
@@ -1712,6 +1749,21 @@ const styles = StyleSheet.create({
     },
     reportVariety: { fontSize: Typography.xs, color: Colors.warmTan, marginTop: 1 },
 
+    reportDeleteBtn: {
+        marginLeft: 4,
+        alignSelf: 'flex-start',
+        backgroundColor: 'rgba(255,255,255,0.18)',
+        borderRadius: 12,
+        paddingHorizontal: 7,
+        paddingVertical: 2,
+    },
+    reportDeleteBtnText: {
+        fontSize: 14,
+        fontWeight: '700',
+        color: Colors.cream,
+        lineHeight: 18,
+    },
+
     reportMetrics: {
         flexDirection: 'row',
         justifyContent: 'space-around',
@@ -1831,5 +1883,12 @@ const styles = StyleSheet.create({
         fontSize: Typography.xs,
         color: Colors.mutedText,
         lineHeight: 18,
+    },    // ── Layout Modifiers ───────────────────────────────────────────────────────
+    desktopRow: {
+        flex: 1,
+        flexDirection: 'row',
+    },
+    desktopMainContent: {
+        flex: 1,
     },
 });

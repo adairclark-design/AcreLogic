@@ -59,8 +59,8 @@ export function checkAgronomicViability(cropSeason, plantDateStr, shelterType = 
         }
     } else { // 'uncovered'
         if (cropSeason === 'cool') {
-            const fits = md >= 4.20 && md <= 9.15; // Apr 20 - Sep 15
-            return { fits, reason: fits ? 'Uncovered: Cool crop in window (Late Apr-Mid Sep)' : 'Uncovered: Cool crop outside window (Late Apr-Mid Sep)' };
+            const fits = md >= 3.15 && md <= 10.31; // Mar 15 - Oct 31
+            return { fits, reason: fits ? 'Uncovered: Cool crop in window (Mid Mar-Oct)' : 'Uncovered: Cool crop outside window (Mid Mar-Oct)' };
         }
         if (cropSeason === 'warm') {
             const fits = md >= 5.15 && md <= 6.30; // May 15 - Jun 30
@@ -357,25 +357,7 @@ async function scoreCrop(crop, previousCrop, successions, farmProfile, nextStart
         reasons.push(`${seasonClass === 'cool' ? 'Cool' : 'Warm'} season match ✓`);
     }
 
-    // ── 4b. Agronomic Viability Window Check ────────────────────────────────
-    // Use the explicit planting window schedules instead of arbitrary math penalties
-    const viability = checkAgronomicViability(crop.season, cropStartDate, options?.shelterType || 'uncovered');
-    
-    if (!viability.fits) {
-        score -= 40; // Soft penalty to put it at the bottom, but the crop is never "locked out"
-        warnings.push(`⚠️ ${viability.reason}`);
-    }
-
-    // ── 5. Family diversity bonus (check entire bed history) ─────────────────
-    const usedCategories = new Set(successions.map(s => s.category).filter(Boolean));
-    const prevCropId = successions[successions.length - 1]?.crop_id;
-    const isFastRepeat = crop.feed_class === 'light' && crop.dtm <= 60 && crop.id === prevCropId;
-    if (!usedCategories.has(crop.category) || isFastRepeat) {
-        score += ROTATION_SCORES.diverse_family_bonus;
-        if (!usedCategories.has(crop.category)) reasons.push('New crop family in this bed ✓');
-    }
-
-    // ── 6. Overwinter capabilities & Grace logic ──────────────────────────────
+    // ── 4b. Overwinter capabilities & Grace logic ────────────────────────────────
     // Determine overwinter survivability from deep contextual hints to counteract database limitations
     const noteHint = ((crop.frost_note || '') + ' ' + (crop.notes || '') + ' ' + (crop.description || '')).toLowerCase();
     const isExplicitOverwinter = crop.overwinter_cover === true || 
@@ -385,6 +367,27 @@ async function scoreCrop(crop, previousCrop, successions, farmProfile, nextStart
     const isMassiveHardyCrop = crop.dtm >= 180 && crop.hard_frost === true;
     const canOverwinter = crop.feed_class === 'cover_crop' || isExplicitOverwinter || isMassiveHardyCrop;
     
+    // ── 5. Agronomic Viability Window Check ────────────────────────────────
+    // Use the explicit planting window schedules instead of arbitrary math penalties
+    const viability = checkAgronomicViability(crop.season, cropStartDate, options?.shelterType || 'uncovered');
+    
+    // Prevent false-positive 'out-of-season' warnings if the crop natively requires/provides overwinter protection
+    const inheritsProtection = canOverwinter || isExplicitOverwinter;
+
+    if (!viability.fits && !inheritsProtection) {
+        score -= 40; // Soft penalty to put it at the bottom, but the crop is never "locked out"
+        warnings.push(`⚠️ ${viability.reason}`);
+    }
+
+    // ── 6. Family diversity bonus (check entire bed history) ─────────────────
+    const usedCategories = new Set(successions.map(s => s.category).filter(Boolean));
+    const prevCropId = successions[successions.length - 1]?.crop_id;
+    const isFastRepeat = crop.feed_class === 'light' && crop.dtm <= 60 && crop.id === prevCropId;
+    if (!usedCategories.has(crop.category) || isFastRepeat) {
+        score += ROTATION_SCORES.diverse_family_bonus;
+        if (!usedCategories.has(crop.category)) reasons.push('New crop family in this bed ✓');
+    }
+
     // Evaluate length of grow against remaining days (purely suggestive now)
     const totalDaysNeeded = crop.dtm + (crop.harvest_window_days ?? 0);
     
@@ -454,8 +457,10 @@ async function scoreCrop(crop, previousCrop, successions, farmProfile, nextStart
         start_date: cropStartDate,
         end_date: endDate,
         remaining_days_after: canOverwinter ? 0 : Math.max(0, actualRemainingDays - (crop.dtm + (crop.harvest_window_days ?? 0))),
-        fits: canOverwinter ? true : viability.fits,
+        fits: inheritsProtection ? true : viability.fits,
         season_class: seasonClass,
+        requires_protection: inheritsProtection,
+        is_winter_override: inheritsProtection, // Sync with timeline UI logic
     };
 }
 

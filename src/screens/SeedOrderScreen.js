@@ -30,6 +30,20 @@ const CROPS_MAP = Object.fromEntries(cropData.crops.map(c => [c.id, c]));
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
+const ESTIMATED_SEEDS_PER_OZ = {
+    'Greens': 25000,
+    'Root': 12000,
+    'Brassica': 8000,
+    'Allium': 7000,
+    'Fruiting': 8000,
+    'Legume': 120, 
+    'Herbs': 80000, 
+    'Flowers': 10000,
+    'Cover': 1000,
+    'Tuber': 100
+};
+
+
 function fmtDate(iso) {
     if (!iso) return '—';
     const d = new Date(iso + 'T12:00:00');
@@ -85,12 +99,12 @@ function recommendPackets(item) {
         const qtyPrefix = count > 1 ? `${count} × ` : '1 × ';
         if (targetSize >= 5000 && targetSize < 25000) str = `${qtyPrefix}${targetSize.toLocaleString()}-seed bag`;
         else if (targetSize >= 25000) str = `${qtyPrefix}25k-seed bag`;
-        else if (targetSize === 1000) str = `${qtyPrefix}1M (1,000) seeds`;
         else str = `${qtyPrefix}${targetSize.toLocaleString()}-seed pkt`;
 
         // Conversion logic
-        if (meta && meta.seeds_per_oz) {
-            const ozEq = targetSize / meta.seeds_per_oz;
+        const density = (meta && meta.seeds_per_oz) ? meta.seeds_per_oz : (ESTIMATED_SEEDS_PER_OZ[item.category] || 10000);
+        if (density) {
+            const ozEq = targetSize / density;
             const ozEqStr = ozEq < 0.25 ? `${Math.round(ozEq * 100) / 100}oz` : `${Math.round(ozEq * 10) / 10}oz`;
             return `${str} (~${ozEqStr} ea)`;
         }
@@ -118,8 +132,9 @@ function recommendPackets(item) {
     const qtyPrefix = count > 1 ? `${count} × ` : '1 × ';
     const str = `${qtyPrefix}${label}${count > 1 ? 's' : ''}`;
     
-    if (meta && meta.seeds_per_oz) {
-        const seedsEq = Math.round(targetOz * meta.seeds_per_oz);
+    const density = (meta && meta.seeds_per_oz) ? meta.seeds_per_oz : (ESTIMATED_SEEDS_PER_OZ[item.category] || 10000);
+    if (density) {
+        const seedsEq = Math.round(targetOz * density);
         return `${str} (~${seedsEq.toLocaleString()} seeds ea)`;
     }
     return str;
@@ -130,8 +145,9 @@ function fmtReq(item) {
 
     if (item.reqType === 'seeds') {
         const countStr = `${item.totalSeeds} seeds`;
-        if (meta && meta.seeds_per_oz) {
-            const ozEq = item.totalSeeds / meta.seeds_per_oz;
+        const density = (meta && meta.seeds_per_oz) ? meta.seeds_per_oz : (ESTIMATED_SEEDS_PER_OZ[item.category] || 10000);
+        if (density) {
+            const ozEq = item.totalSeeds / density;
             const ozEqStr = ozEq < 0.25 ? `${Math.round(ozEq * 100) / 100}oz` : `${Math.round(ozEq * 10) / 10}oz`;
             return `${countStr} (~${ozEqStr})`;
         }
@@ -140,8 +156,9 @@ function fmtReq(item) {
 
     const oz = item.totalOz;
     const ozStr = oz < 0.5 ? `${Math.round(oz * 100) / 100}oz` : `${Math.round(oz * 10) / 10}oz`;
-    if (meta && meta.seeds_per_oz) {
-        const seedsEq = Math.round(oz * meta.seeds_per_oz);
+    const density = (meta && meta.seeds_per_oz) ? meta.seeds_per_oz : (ESTIMATED_SEEDS_PER_OZ[item.category] || 10000);
+    if (density) {
+        const seedsEq = Math.round(oz * density);
         return `${ozStr} (~${seedsEq.toLocaleString()} seeds)`;
     }
     return ozStr;
@@ -368,7 +385,7 @@ const SeedCard = ({ item }) => {
                     <View style={styles.cardDeadlineRow}>
                         <Text style={styles.cardSectionTitle}>ORDER DEADLINE:</Text>
                         <Text style={[styles.cardDateText, isUrgent && styles.cardDateUrgent]}>
-                            {isUrgent ? '⚡ MUST ORDER BY:' : '📅 PURCHASE BY:'} {fmtDate(item.earliestBuyDate)}
+                            {isUrgent ? '⚡ BEST ORDER DATE:' : '📅 BEST ORDER DATE:'} {fmtDate(item.earliestBuyDate)}
                         </Text>
                     </View>
                 )}
@@ -415,7 +432,23 @@ export default function SeedOrderScreen({ navigation, route }) {
 
     const totalCrops = seedList.length;
     const totalOzAll = seedList.reduce((s, r) => s + r.totalOz, 0);
-    const totalSeedsAll = seedList.reduce((s, r) => s + r.totalSeeds, 0);
+    const totalTPSeedsAll = seedList.reduce((s, r) => s + r.totalSeeds, 0);
+    
+    // Also compute "Total System Seeds" by adding the transplant seeds to 
+    // the approximated seed count derived from the totalOz required. 
+    // This gives a truer sense of scale (e.g. 1.2M seeds vs just the 3000 tomato seeds).
+    let trueTotalSeeds = totalTPSeedsAll;
+    seedList.forEach(item => {
+        if (item.totalOz > 0) {
+            const density = CROPS_MAP[item.cropId]?.seeds_per_oz || ESTIMATED_SEEDS_PER_OZ[item.category] || 10000;
+            trueTotalSeeds += (item.totalOz * density);
+        }
+    });
+    const formattedTrueTotal = trueTotalSeeds > 1000000 
+        ? `${(trueTotalSeeds / 1000000).toFixed(1)}M` 
+        : `${Math.round(trueTotalSeeds).toLocaleString()}`;
+
+
     const waves = groupIntoWaves(seedList);
 
     const today = new Date().toISOString().slice(0, 10);
@@ -424,7 +457,7 @@ export default function SeedOrderScreen({ navigation, route }) {
     );
 
     const handleCopy = useCallback(() => {
-        const text = formatOrderForCopy(waves, totalCrops, totalOzAll, totalSeedsAll);
+        const text = formatOrderForCopy(waves, totalCrops, totalOzAll, trueTotalSeeds);
         if (Platform.OS === 'web') {
             navigator.clipboard?.writeText(text).catch(() => {});
         } else {
@@ -432,7 +465,7 @@ export default function SeedOrderScreen({ navigation, route }) {
         }
         setCopied(true);
         setTimeout(() => setCopied(false), 3000);
-    }, [waves, totalCrops, totalOzAll, totalSeedsAll]);
+    }, [waves, totalCrops, totalOzAll, trueTotalSeeds]);
 
     return (
         <View style={styles.container}>
@@ -459,11 +492,11 @@ export default function SeedOrderScreen({ navigation, route }) {
                 <View style={[styles.summaryChip, { flex: 1.5 }]}>
                     <Text style={[styles.summaryChipNum, { fontSize: Typography.xs }]}>
                         {totalOzAll > 0 ? `${Math.round(totalOzAll * 10) / 10}oz` : ''}
-                        {totalOzAll > 0 && totalSeedsAll > 0 ? ' / ' : ''}
-                        {totalSeedsAll > 0 ? `${totalSeedsAll} seeds` : ''}
-                        {totalOzAll === 0 && totalSeedsAll === 0 ? '0' : ''}
+                        {totalOzAll > 0 && totalTPSeedsAll > 0 ? ' / ' : ''}
+                        {totalTPSeedsAll > 0 ? `${totalTPSeedsAll.toLocaleString()} TP seeds` : ''}
+                        {totalOzAll === 0 && totalTPSeedsAll === 0 ? '0' : ''}
                     </Text>
-                    <Text style={styles.summaryChipLabel}>Total Needed</Text>
+                    <Text style={styles.summaryChipLabel}>~{formattedTrueTotal} total seeds</Text>
                 </View>
                 <View style={styles.summaryChip}>
                     <Text style={styles.summaryChipNum}>{waves.length}</Text>
@@ -605,14 +638,14 @@ const styles = StyleSheet.create({
     waveLabel: { fontSize: Typography.base, fontWeight: '800', color: Colors.cream },
     waveCount: { fontSize: Typography.xs, color: 'rgba(255,255,255,0.7)', fontWeight: '600' },
 
-    // ── Wide Fluid Seed Card ──────────────────────────────────────────────────────
+    // ── Narrower Seed Card (Reduced ~30%) ──────────────────────────────────────────
     seedCard: {
         backgroundColor: '#FCFCF9', 
         borderRadius: Radius.md, 
-        padding: 14,
+        padding: 10,
         flex: 1,
-        minWidth: 300,
-        maxWidth: 450, // Prevents a single card stretching entirely across ultra-wides, maintaining nice columns
+        minWidth: 210,
+        maxWidth: 320, // Prevents a single card stretching entirely across ultra-wides, maintaining nice columns
         borderWidth: 1.5, 
         borderColor: 'rgba(45,79,30,0.1)',
     },
@@ -620,35 +653,35 @@ const styles = StyleSheet.create({
     
     cardHeader: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 },
     cardImage: { width: 40, height: 40, borderRadius: 6, backgroundColor: 'rgba(45,79,30,0.06)' },
-    cardEmoji: { fontSize: 32, lineHeight: 40, textAlign: 'center' },
+    cardEmoji: { fontSize: 26, lineHeight: 32, textAlign: 'center' },
     cardHeaderInfo: { flex: 1, justifyContent: 'center' },
-    cardName: { fontSize: 18, fontWeight: '900', color: Colors.primaryGreen },
-    cardVariety: { fontSize: 13, color: Colors.mutedText },
+    cardName: { fontSize: 16, fontWeight: '900', color: Colors.primaryGreen },
+    cardVariety: { fontSize: 11, color: Colors.mutedText },
     
     cardBody: { gap: 6 },
-    cardSectionTitle: { fontSize: 10, fontWeight: '800', color: Colors.mutedText, letterSpacing: 1.2, marginTop: 4 },
+    cardSectionTitle: { fontSize: 9, fontWeight: '800', color: Colors.mutedText, letterSpacing: 1.2, marginTop: 4 },
     
     cardBadgesRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 4 },
     cardOzBadge: {
         flexDirection: 'row', alignItems: 'center', backgroundColor: Colors.primaryGreen, 
         paddingHorizontal: 8, paddingVertical: 4, borderRadius: Radius.sm,
     },
-    cardOzText: { fontSize: 13, fontWeight: '900', color: Colors.cream },
-    cardTpText: { fontSize: 11, fontWeight: '700', color: 'rgba(255,255,255,0.7)' },
+    cardOzText: { fontSize: 12, fontWeight: '900', color: Colors.cream },
+    cardTpText: { fontSize: 10, fontWeight: '700', color: 'rgba(255,255,255,0.7)' },
     
     cardPacketBadge: {
         backgroundColor: 'rgba(255,165,0,0.15)', paddingHorizontal: 8, paddingVertical: 4, 
         borderRadius: Radius.sm, borderWidth: 1, borderColor: 'rgba(255,165,0,0.3)',
     },
-    cardPacketText: { fontSize: 12, fontWeight: '800', color: '#92400E' },
+    cardPacketText: { fontSize: 11, fontWeight: '800', color: '#92400E' },
     
     cardDeadlineRow: { marginTop: 4, paddingVertical: 6, paddingHorizontal: 10, backgroundColor: 'rgba(0,0,0,0.03)', borderRadius: Radius.sm },
-    cardDateText: { fontSize: 14, color: Colors.primaryGreen, fontWeight: '800', marginTop: 2 },
+    cardDateText: { fontSize: 12, color: Colors.primaryGreen, fontWeight: '800', marginTop: 2 },
     cardDateUrgent: { color: '#B45309', fontWeight: '900' },
 
     cardBreakdownWrapper: { marginTop: 6, borderTopWidth: 1, borderTopColor: 'rgba(45,79,30,0.06)', paddingTop: 10 },
     cardBreakdownRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 4, gap: 6 },
     cardBreakdownDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: Colors.primaryGreen, opacity: 0.6 },
-    cardBreakdownText: { flex: 1, fontSize: 13, color: Colors.primaryGreen },
-    cardBreakdownVal: { fontSize: 12, fontWeight: '800', color: Colors.burntOrange }
+    cardBreakdownText: { flex: 1, fontSize: 11, color: Colors.primaryGreen },
+    cardBreakdownVal: { fontSize: 11, fontWeight: '800', color: Colors.burntOrange }
 });

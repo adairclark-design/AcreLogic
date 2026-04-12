@@ -22,6 +22,42 @@ import { Colors, Radius, Shadows, Spacing, Typography } from '../theme';
 import CROP_IMAGES from '../data/cropImages';
 import { formatCropDisplayName } from '../utils/cropDisplay';
 
+// ── Category color accents ────────────────────────────────────────────────────
+// Subtle top-border hue per crop family — improves at-a-glance scannability.
+const CATEGORY_COLORS = {
+    Greens:     '#4CAF78',  // fresh green
+    Brassica:   '#5B9BD5',  // cool blue
+    Allium:     '#9C73B5',  // soft purple
+    Nightshade: '#E05C5C',  // warm red
+    Cucurbit:   '#E8A838',  // amber
+    Legume:     '#5EB8C4',  // sky teal
+    Root:       '#C47A3A',  // earthy orange
+    Tuber:      '#B05E3A',  // terra cotta
+    Herb:       '#6BAE75',  // herb green
+    Flower:     '#D97DC4',  // florist pink
+    Fruit:      '#E0633A',  // berry orange
+    Grain:      '#C4A857',  // golden wheat
+    Specialty:  '#8B9E70',  // sage
+    'Cover Crop': '#7BAE8C', // muted green
+};
+
+// ── DTM speed indicator ───────────────────────────────────────────────────────
+function getDtmSpeed(dtm) {
+    if (!dtm || dtm > 365) return null;   // perennials / no data
+    if (dtm <= 45)  return { dot: '🟢', label: `${dtm}d`, title: 'Fast crop' };
+    if (dtm <= 80)  return { dot: '🟡', label: `${dtm}d`, title: 'Medium crop' };
+    return           { dot: '🔴', label: `${dtm}d`, title: 'Slow crop' };
+}
+
+// ── Seed type display ─────────────────────────────────────────────────────────
+function getSeedTypeLabel(seedType, friendlyMode) {
+    if (!seedType) return null;
+    if (!friendlyMode) return seedType;   // Market Farm: keep TP / DS
+    if (seedType === 'TP') return '🏠 Indoors';
+    if (seedType === 'DS') return '🌱 Direct Sow';
+    return seedType;
+}
+
 /** ─── Props ────────────────────────────────────────────────────────────────
  *  crop        — crop object from crops.json (or farm-store format)
  *  selected    — boolean
@@ -29,6 +65,8 @@ import { formatCropDisplayName } from '../utils/cropDisplay';
  *  cardWidth   — pixel width of the card (used to derive image height)
  *  onLongPress — optional; called with the full crop object when selected card
  *                is long-pressed (used by Market Farm for context menu)
+ *  friendlyMode — optional; when true (Feed My Family), translates TP/DS to
+ *                 plain-language labels for non-professional users
  */
 export default function SharedCropCard({
     crop,
@@ -36,13 +74,17 @@ export default function SharedCropCard({
     onPress,
     cardWidth,
     onLongPress,
+    friendlyMode = false,
 }) {
     const scaleAnim = useRef(new Animated.Value(1)).current;
     const imgHeight = cardWidth ? Math.round(cardWidth * 0.85) : 90;
 
     // ── Field normalisation: VegetableGridScreen uses crop.type,
     //    crops.json uses crop.seed_type — support both.
-    const seedType = crop.type ?? crop.seed_type;
+    const seedType     = crop.type ?? crop.seed_type;
+    const categoryColor = CATEGORY_COLORS[crop.category] ?? Colors.primaryGreen;
+    const dtmSpeed     = getDtmSpeed(crop.dtm);
+    const seedTypeLabel = getSeedTypeLabel(seedType, friendlyMode);
 
     const handlePress = () => {
         Animated.sequence([
@@ -59,6 +101,8 @@ export default function SharedCropCard({
                     styles.cropCard,
                     Shadows.card,
                     selected && styles.cropCardChosen,
+                    // Category color accent — subtle top border
+                    { borderTopColor: categoryColor, borderTopWidth: 3 },
                 ]}
                 onPress={handlePress}
                 onLongPress={onLongPress ? () => selected && onLongPress(crop) : undefined}
@@ -72,7 +116,7 @@ export default function SharedCropCard({
                         style={[styles.cropImage, { height: imgHeight }]}
                         resizeMode="cover"
                     />
-                    : <View style={[styles.cropEmojiBox, { height: imgHeight }]}>
+                    : <View style={[styles.cropEmojiBox, { height: imgHeight, borderTopColor: categoryColor, borderTopWidth: 0 }]}>
                         <Text style={styles.cropEmoji}>{crop.emoji ?? '🌿'}</Text>
                     </View>
                 }
@@ -86,14 +130,16 @@ export default function SharedCropCard({
 
                 {/* ── Quick-scan data badges ───────────────────────────── */}
                 <View style={styles.cropBadgeRow}>
-                    {crop.dtm != null && crop.dtm !== '—' && (
-                        <View style={styles.dtmPill}>
-                            <Text style={styles.dtmPillText}>{crop.dtm}d</Text>
+                    {/* Color-coded DTM speed */}
+                    {dtmSpeed && (
+                        <View style={[styles.dtmPill, { borderLeftColor: categoryColor, borderLeftWidth: 2 }]}>
+                            <Text style={styles.dtmDot}>{dtmSpeed.dot}</Text>
+                            <Text style={styles.dtmPillText}>{dtmSpeed.label}</Text>
                         </View>
                     )}
                     {crop.season === 'cool' && (
                         <View style={[styles.seasonPill, styles.seasonPillCool]}>
-                            <Text style={styles.seasonPillText}>❄️ Cool</Text>
+                            <Text style={styles.seasonPillText}>❌️ Cool</Text>
                         </View>
                     )}
                     {crop.season === 'warm' && (
@@ -101,9 +147,9 @@ export default function SharedCropCard({
                             <Text style={styles.seasonPillText}>☀️ Warm</Text>
                         </View>
                     )}
-                    {seedType && (
+                    {seedTypeLabel && (
                         <View style={styles.typePill}>
-                            <Text style={styles.typePillText}>{seedType}</Text>
+                            <Text style={styles.typePillText}>{seedTypeLabel}</Text>
                         </View>
                     )}
                 </View>
@@ -180,6 +226,13 @@ const styles = StyleSheet.create({
         borderRadius: 4,
         paddingVertical: 1,
         paddingHorizontal: 5,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 2,
+    },
+    dtmDot: {
+        fontSize: 7,
+        lineHeight: 10,
     },
     dtmPillText: {
         fontSize: 8,

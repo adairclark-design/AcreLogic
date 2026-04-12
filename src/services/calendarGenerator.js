@@ -166,10 +166,12 @@ export async function generateBedCalendar(bedNumber, successions, farmProfile, b
                 crop_id: crop.id,
                 crop_name: crop.name,
                 crop_variety: crop.variety,
+                crop_category: crop.category,
                 dtm: crop.dtm,
                 igd,
                 harvest_window_days: harvestWindow,
                 seed_amount_label: formatSeedAmount(crop, bedLengthFt, true),
+                seed_amount_oz: computeSeedOz(crop, bedLengthFt),
                 plant_count: computePlantCount(crop, bedLengthFt),
                 row_count: crop.rows_per_30in_bed,
                 spacing_label: formatSpacing(crop),
@@ -197,10 +199,12 @@ export async function generateBedCalendar(bedNumber, successions, farmProfile, b
             crop_id: crop.id,
             crop_name: crop.name,
             crop_variety: crop.variety,
+            crop_category: crop.category,
             dtm: crop.dtm,
             igd,
             harvest_window_days: harvestWindow,
             seed_amount_label: seedAmountLabel,
+            seed_amount_oz: computeSeedOz(crop, bedLengthFt),
             plant_count: isTransplant ? plantCount : null,
             row_count: isCoverCrop ? null : crop.rows_per_30in_bed,
             spacing_label: formatSpacing(crop),
@@ -297,6 +301,17 @@ function computePlantCount(crop, bedLengthFt) {
     const spacingIn = crop.in_row_spacing_in ?? 12;
     const rows = crop.rows_per_30in_bed ?? 1;
     return Math.floor((bedLengthFt * 12) / spacingIn) * rows;
+}
+
+/**
+ * Returns the raw seed weight in ounces (with germination/loss buffer)
+ * for use by the volume converter. Mirrors the math in formatSeedAmount
+ * but returns a plain number rather than a formatted string.
+ */
+export function computeSeedOz(crop, bedLengthFt = 50) {
+    if (crop.feed_class === 'cover_crop') return null; // volume not applicable to broadcast cover crops
+    const seedOz = (crop.seed_oz_per_100ft ?? 1) * (bedLengthFt / 100);
+    return seedOz * (1 + (crop.loss_buffer_pct ?? 20) / 100);
 }
 
 /**

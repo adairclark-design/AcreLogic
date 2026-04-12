@@ -80,7 +80,16 @@ function seedsPerCell(germRate) {
     return 3;
 }
 
-function withSeasonBuffer(n) { return Math.ceil((n ?? 0) * 1.20); }
+/**
+ * Unified seed quantity formula — single source of truth.
+ * target_plants = ceil(plantsNeeded * 1.20)  — 20% attrition buffer
+ * seeds_needed  = ceil(target_plants / germRate) — germination loss
+ * This is used identically in SeedShoppingList to ensure both tabs agree.
+ */
+function seedsNeeded(plantsNeeded, germRate) {
+    const targetPlants = Math.ceil((plantsNeeded ?? 0) * 1.20);
+    return Math.ceil(targetPlants / Math.max(germRate ?? 0.75, 0.01));
+}
 
 function traysNeeded(seeds, tray) {
     return tray.type === 'pot' ? seeds : Math.ceil(seeds / (tray.cells ?? 72));
@@ -303,17 +312,13 @@ function extractEvents(crops, firstFrost) {
 
         const germRate    = c.germRate ?? 0.75;
         const category    = c.category ?? '';
-        
-        let seeds = 0;
-        let perCell = null;
-        let plantsToGrow = withSeasonBuffer(c.plantsNeeded ?? 0);
 
-        if (c.seedType === 'TP') {
-            perCell = seedsPerCell(germRate);
-            seeds = plantsToGrow * perCell;
-        } else {
-            seeds = withSeasonBuffer(c.seedsToStart ?? c.plantsNeeded ?? 0);
-        }
+        // ── Unified formula (matches SeedShoppingList exactly) ────────────
+        // seeds = ceil(plantsNeeded * 1.20 / germRate)
+        const plantsNeededBase = c.plantsNeeded ?? 0;
+        const seeds       = c.seedType && !c._isSpecial ? seedsNeeded(plantsNeededBase, germRate) : 0;
+        const plantsToGrow = Math.ceil(plantsNeededBase * 1.20); // for tray sizing
+        const perCell     = c.seedType === 'TP' ? seedsPerCell(germRate) : null; // cosmetic thinning hint only
 
         const tray        = c.seedType === 'TP' ? recommendTray(category, c.familySize) : null;
         const traysCount  = tray && plantsToGrow > 0 ? traysNeeded(plantsToGrow, tray) : null;

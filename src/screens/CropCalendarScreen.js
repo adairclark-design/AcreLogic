@@ -9,6 +9,7 @@ import { generateBedCalendar } from '../services/calendarGenerator';
 import { loadBlocks, loadBlockBeds } from '../services/persistence';
 import GlobalNavBar from '../components/GlobalNavBar';
 import cropData from '../data/crops.json';
+import { formatSeedVolume } from '../utils/seedVolumeConverter';
 
 // ─── Event type config (Same as ActionCalendar with slight Farm tweaks) ──────
 const EVENT_TYPES = {
@@ -114,9 +115,86 @@ function traysNeeded(plants, tray) {
     return tray.type === 'pot' ? seedsToSow : Math.ceil(seedsToSow / (tray.cells ?? 128));
 }
 
+/**
+ * consolidateWeeklyEvents
+ * ───────────────────────────────────────────────────────────────────
+ * Merges events that share the same week + event type + crop name + variety
+ * into a single consolidated card with summed seed/plant counts.
+ * Preserves a `mergedBeds` array so the card can list all source locations.
+ */
+function consolidateWeeklyEvents(events) {
+    // Key: weekKey || type || cropName || variety (all 4 must match)
+    const keyFor = ev =>
+        `${ev.weekKey}||${ev.type}||${ev.cropName}||${ev.cropVariety ?? ''}`;
+
+    const groups = new Map();
+
+    for (const ev of events) {
+        const key = keyFor(ev);
+        if (!groups.has(key)) {
+            // First occurrence — seed the group with a copy and start mergedBeds list
+            groups.set(key, {
+                ...ev,
+                mergedBeds: [{ blockName: ev.blockName, bed_label: ev.bed_label }],
+            });
+        } else {
+            const g = groups.get(key);
+            // Sum numeric fields
+            g.plants         = (g.plants ?? 0)         + (ev.plants ?? 0);
+            g.totalSeeds     = (g.totalSeeds ?? 0)     + (ev.totalSeeds ?? 0);
+            g.seed_amount_oz = (g.seed_amount_oz ?? 0) + (ev.seed_amount_oz ?? 0);
+            // Use the earliest event date so the card sorts to the right slot
+            if (ev.date < g.date) g.date = ev.date;
+            // Propagate boolean flags with OR
+            g.wasRebased        = g.wasRebased        || ev.wasRebased;
+            g.rescuedViaNursery = g.rescuedViaNursery || ev.rescuedViaNursery;
+            // Track each source bed
+            g.mergedBeds.push({ blockName: ev.blockName, bed_label: ev.bed_label });
+        }
+    }
+
+    // After merging, recalculate tray counts with the summed plant count
+    return [...groups.values()].map(ev => {
+        if (ev.type === 'seed_start' && ev.tray && ev.plants) {
+            ev.traysCount = traysNeeded(ev.plants, ev.tray);
+        }
+        return ev;
+    });
+}
+
+// ─── Tray Options (full commercial market garden menu) ────────────────────────
+const TRAY_OPTIONS = [
+    { type: 'pot',   cells: 1,   label: '4" Pots',                 emoji: '🪴', note: 'Tomatoes, peppers, cucurbits' },
+    { type: 'tray',  cells: 32,  label: '32-cell flat',             emoji: '📦', note: 'Large starts, brassicas' },
+    { type: 'tray',  cells: 50,  label: '50-cell flat',             emoji: '📦', note: 'Cucurbits, squash' },
+    { type: 'tray',  cells: 72,  label: '72-cell flat',             emoji: '📦', note: 'Nightshades, standard' },
+    { type: 'tray',  cells: 98,  label: '98-cell flat',             emoji: '📦', note: 'Mid-size brassicas, kale' },
+    { type: 'tray',  cells: 128, label: '128-cell flat',            emoji: '📦', note: 'Lettuce, most crops' },
+    { type: 'tray',  cells: 144, label: '144-cell flat',            emoji: '📦', note: 'Herbs, medium crops' },
+    { type: 'tray',  cells: 200, label: '200-cell flat',            emoji: '📦', note: 'Basil, specialty greens' },
+    { type: 'tray',  cells: 288, label: '288-cell flat',            emoji: '📦', note: 'Alliums, onions, leeks' },
+    { type: 'tray',  cells: 512, label: '512-cell flat',            emoji: '📦', note: 'Micro starts, fine seeding' },
+    { type: 'paper', cells: 264, label: 'Paper Pot (2" spacing)',   emoji: '📜', note: 'Onions, scallions, spinach' },
+    { type: 'paper', cells: 132, label: 'Paper Pot (4" spacing)',   emoji: '📜', note: 'Salanova, beets, chard' },
+    { type: 'paper', cells: 88,  label: 'Paper Pot (6" spacing)',   emoji: '📜', note: 'Turnips, kohlrabi, larger' },
+];
+
 // ─── Components ───────────────────────────────────────────────────────────────
 function EventChip({ ev }) {
     const t = EVENT_TYPES[ev.type] ?? EVENT_TYPES.direct_seed;
+
+    // ── Tray Picker State (session-only, per-card) ──────────────────────────────
+    const [selectedTray, setSelectedTray] = useState(ev.tray ?? null);
+    const [trayPickerOpen, setTrayPickerOpen] = useState(false);
+
+    const seedsNeeded = ev.plants ? Math.ceil(ev.plants * 1.2) : 0;
+    const computedTraysCount = selectedTray
+        ? selectedTray.type === 'pot'
+            ? seedsNeeded
+            : Math.ceil(seedsNeeded / selectedTray.cells)
+        : ev.traysCount;
+    const trayUnit = selectedTray?.type === 'pot' ? 'pot' : 'tray';
+    const trayUnitPlural = selectedTray?.type === 'pot' ? 'pots' : 'trays';
 
     return (
         <View style={[styles.chip, { backgroundColor: t.bg, borderColor: t.border }]}>
@@ -130,10 +208,25 @@ function EventChip({ ev }) {
                 {ev.cropName}{ev.cropVariety ? ` · ${ev.cropVariety}` : ''}
             </Text>
             
-            {/* Explicit location tracking requirement */}
-            <View style={styles.locationBadge}>
-                <Text style={styles.locationText}>BLOCK {ev.blockName.toUpperCase()} · BED {(ev.bed_label || '').replace('Bed ', '')}</Text>
-            </View>
+            {/* Location badge — shows all merged beds when consolidated */}
+            {ev.mergedBeds && ev.mergedBeds.length > 1 ? (
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 3, marginBottom: 4, marginTop: 2 }}>
+                    {ev.mergedBeds.map((b, i) => (
+                        <View key={i} style={styles.locationBadge}>
+                            <Text style={styles.locationText}>
+                                {b.blockName.toUpperCase()} · {(b.bed_label || '').replace('Bed ', 'BED ')}
+                            </Text>
+                        </View>
+                    ))}
+                    <View style={styles.consolidatedBadge}>
+                        <Text style={styles.consolidatedText}>✦ Consolidated</Text>
+                    </View>
+                </View>
+            ) : (
+                <View style={styles.locationBadge}>
+                    <Text style={styles.locationText}>BLOCK {ev.blockName.toUpperCase()} · BED {(ev.bed_label || '').replace('Bed ', '')}</Text>
+                </View>
+            )}
 
             {/* Nursery-rescue / Rebased badges */}
             {ev.rescuedViaNursery && ev.type === 'buy_starts' ? (
@@ -148,19 +241,65 @@ function EventChip({ ev }) {
 
             {/* Volume/Weight of seeds requirement rendering */}
             {ev.type === 'direct_seed' && ev.seed_amount_label && (
-                <Text style={styles.chipExtra}>⚖️ {ev.seed_amount_label}</Text>
+                <>
+                    <Text style={styles.chipExtra}>⚖️ {ev.seed_amount_label}</Text>
+                    {ev.seed_amount_oz != null && (
+                        <Text style={styles.chipVolume}>
+                            {formatSeedVolume(ev.seed_amount_oz, ev.crop_id, ev.crop_category)}
+                        </Text>
+                    )}
+                </>
             )}
 
             {ev.plants != null && ev.plants > 0 && ev.type !== 'seed_start' && ev.type !== 'harvest' && (
                 <Text style={styles.chipExtra}>🪴 {ev.plants} plants</Text>
             )}
 
-            {ev.type === 'seed_start' && ev.tray ? (
+            {/* ── Seed Start: Tray Info + Interactive Picker ── */}
+            {ev.type === 'seed_start' && selectedTray ? (
                 <View style={styles.chipExpanded}>
-                    <Text style={styles.chipDetail}>🌱 {Math.ceil(ev.plants * 1.2)} seeds required</Text>
-                    <Text style={styles.chipDetail}>📦 {ev.tray.label}</Text>
-                    {ev.traysCount != null && (
-                        <Text style={styles.chipDetail}>🔢 sow {ev.traysCount} {ev.traysCount === 1 ? 'tray' : 'trays'}</Text>
+                    <Text style={styles.chipDetail}>🌱 {seedsNeeded} seeds required</Text>
+
+                    {/* Tray selector row — tap to open picker */}
+                    <TouchableOpacity
+                        onPress={() => setTrayPickerOpen(o => !o)}
+                        style={styles.trayPickerRow}
+                        activeOpacity={0.7}
+                    >
+                        <Text style={styles.trayPickerLabel}>
+                            {selectedTray.emoji ?? '📦'} {selectedTray.label}
+                        </Text>
+                        <Text style={styles.trayPickerCaret}>
+                            {trayPickerOpen ? '▲' : '▼'}
+                        </Text>
+                    </TouchableOpacity>
+
+                    {/* Inline dropdown */}
+                    {trayPickerOpen && (
+                        <View style={styles.trayDropdown}>
+                            {TRAY_OPTIONS.map(opt => {
+                                const isActive = opt.label === selectedTray.label;
+                                return (
+                                    <TouchableOpacity
+                                        key={opt.label}
+                                        onPress={() => { setSelectedTray(opt); setTrayPickerOpen(false); }}
+                                        style={[styles.trayOption, isActive && styles.trayOptionActive]}
+                                        activeOpacity={0.75}
+                                    >
+                                        <Text style={[styles.trayOptionText, isActive && styles.trayOptionTextActive]}>
+                                            {opt.emoji} {opt.label}
+                                        </Text>
+                                        <Text style={styles.trayOptionNote}>{opt.note}</Text>
+                                    </TouchableOpacity>
+                                );
+                            })}
+                        </View>
+                    )}
+
+                    {computedTraysCount != null && (
+                        <Text style={styles.chipDetail}>
+                            🔢 sow {computedTraysCount} {computedTraysCount === 1 ? trayUnit : trayUnitPlural}
+                        </Text>
                     )}
                 </View>
             ) : null}
@@ -281,6 +420,9 @@ export default function CropCalendarScreen({ navigation, route }) {
                     }
                 }
             });
+
+            // ─ Consolidate same-crop, same-week events into one card ───────────
+            fullEventsList = consolidateWeeklyEvents(fullEventsList);
 
             fullEventsList.sort((a, b) => a.date - b.date);
             setEvents(fullEventsList);
@@ -461,8 +603,74 @@ const styles = StyleSheet.create({
         color: 'rgba(0,0,0,0.6)',
         marginTop: 2,
     },
+    chipVolume: {
+        fontSize: 10,
+        fontWeight: '500',
+        color: '#1565C0',
+        fontStyle: 'italic',
+        marginTop: 1,
+    },
     chipExpanded: { marginTop: 4, gap: 2 },
     chipDetail: { fontSize: 11, fontWeight: '700', color: 'rgba(0,0,0,0.7)' },
+
+    // ── Tray Picker ──────────────────────────────────────────────────────────
+    trayPickerRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingVertical: 4,
+        paddingHorizontal: 6,
+        backgroundColor: 'rgba(0,0,0,0.05)',
+        borderRadius: 5,
+        marginTop: 3,
+        borderWidth: 1,
+        borderColor: 'rgba(0,0,0,0.08)',
+    },
+    trayPickerLabel: {
+        fontSize: 11,
+        fontWeight: '800',
+        color: 'rgba(0,0,0,0.75)',
+        flex: 1,
+    },
+    trayPickerCaret: {
+        fontSize: 8,
+        color: 'rgba(0,0,0,0.4)',
+        fontWeight: '900',
+        marginLeft: 4,
+    },
+    trayDropdown: {
+        backgroundColor: '#FFFFFF',
+        borderRadius: 6,
+        borderWidth: 1,
+        borderColor: 'rgba(46,125,50,0.2)',
+        marginTop: 3,
+        overflow: 'hidden',
+        ...Platform.select({ web: { boxShadow: '0 4px 16px rgba(0,0,0,0.14)' } }),
+    },
+    trayOption: {
+        paddingVertical: 6,
+        paddingHorizontal: 8,
+        borderBottomWidth: 1,
+        borderBottomColor: 'rgba(0,0,0,0.04)',
+    },
+    trayOptionActive: {
+        backgroundColor: '#E8F5E9',
+    },
+    trayOptionText: {
+        fontSize: 11,
+        fontWeight: '700',
+        color: 'rgba(0,0,0,0.72)',
+    },
+    trayOptionTextActive: {
+        fontWeight: '900',
+        color: '#2E7D32',
+    },
+    trayOptionNote: {
+        fontSize: 9,
+        color: 'rgba(0,0,0,0.38)',
+        marginTop: 1,
+        fontStyle: 'italic',
+    },
     nurseryBadge: {
         backgroundColor: '#EDE7F6',
         borderRadius: 3,
@@ -481,6 +689,16 @@ const styles = StyleSheet.create({
         alignSelf: 'flex-start',
     },
     rebasedText: { fontSize: 9, color: '#856404', fontWeight: '700' },
+    consolidatedBadge: {
+        backgroundColor: 'rgba(46,125,50,0.12)',
+        borderRadius: 3,
+        paddingHorizontal: 5,
+        paddingVertical: 2,
+        alignSelf: 'flex-start',
+        borderWidth: 1,
+        borderColor: 'rgba(46,125,50,0.25)',
+    },
+    consolidatedText: { fontSize: 9, color: '#2E7D32', fontWeight: '800', letterSpacing: 0.3 },
     rebaseBanner: {
         backgroundColor: '#FFF8E1',
         borderRadius: Radius.sm,

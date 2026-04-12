@@ -51,8 +51,9 @@ export const MEGA_CATEGORIES = [
             { label: 'Cauliflower',          filter: c => c.id.includes('cauliflower') },
             { label: 'Kohlrabi',             filter: c => c.id.includes('kohlrabi') },
             { label: 'Brussels Sprouts',     filter: c => c.id.includes('brussels') },
-            { label: 'Asian Greens',         filter: c => c.category === 'Brassica' && (c.id.includes('choi') || c.id.includes('choy') || c.id.includes('tatsoi') || c.id.includes('komatsuna') || c.id.includes('mizuna') || c.id.includes('asian_mix')) && !c.id.includes('cabbage') },
-            { label: 'Other Brassicas',      filter: c => c.category === 'Brassica' && !c.id.includes('broccoli') && !c.id.includes('romanesco') && !c.id.includes('cabbage') && !c.id.includes('kale') && !c.id.includes('collard') && !c.id.includes('kalettes') && !c.id.includes('cauliflower') && !c.id.includes('kohlrabi') && !c.id.includes('brussels') && !c.id.includes('choi') && !c.id.includes('choy') && !c.id.includes('tatsoi') && !c.id.includes('komatsuna') && !c.id.includes('mizuna') && !c.id.includes('asian_mix') },
+            // Mizuna filter uses name check (not id) since ids are mizuna_red / mizuna_green
+            { label: 'Asian Greens',         filter: c => c.category === 'Brassica' && (c.id.includes('choi') || c.id.includes('choy') || c.id.includes('tatsoi') || c.id.includes('komatsuna') || (c.name && c.name.toLowerCase().includes('mizuna')) || c.id.includes('asian_mix')) && !c.id.includes('cabbage') },
+            { label: 'Other Brassicas',      filter: c => c.category === 'Brassica' && !c.id.includes('broccoli') && !c.id.includes('romanesco') && !c.id.includes('cabbage') && !c.id.includes('kale') && !c.id.includes('collard') && !c.id.includes('kalettes') && !c.id.includes('cauliflower') && !c.id.includes('kohlrabi') && !c.id.includes('brussels') && !c.id.includes('choi') && !c.id.includes('choy') && !c.id.includes('tatsoi') && !c.id.includes('komatsuna') && !(c.name && c.name.toLowerCase().includes('mizuna')) && !c.id.includes('asian_mix') },
         ],
         filter: c => c.category === 'Brassica',
     },
@@ -89,33 +90,25 @@ export const MEGA_CATEGORIES = [
         label: 'Tomatoes',
         emoji: '🍅',
         subcategories: [
-            { label: 'Cherry & Grape',       filter: c => (c.id.includes('tomato') || c.id.includes('cherry')) && (c.id.includes('cherry') || c.id.includes('grape') || c.id.includes('pear') || c.id.includes('juliet')) && !c.id.includes('ground') && !c.id.includes('husk') },
-            { label: 'Paste & Sauce',        filter: c => c.id.includes('roma') || c.id.includes('san_marzano') || c.id.includes('paste') },
-            { label: 'Tomatillos / Ground',  filter: c => c.id.includes('tomatillo') || c.id.includes('ground_cherry') || c.id.includes('husk') },
-            { label: 'Other Tomatoes',       filter: c => c.id.includes('tomato') && !c.id.includes('cherry') && !c.id.includes('grape') && !c.id.includes('pear') && !c.id.includes('juliet') && !c.id.includes('roma') && !c.id.includes('san_marzano') && !c.id.includes('paste') && !c.id.includes('tomatillo') && !c.id.includes('ground') && !c.id.includes('husk') },
+            { label: 'Cherry & Grape',       filter: c => c.category === 'Nightshade' && (c.id.includes('tomato') || c.id.includes('cherry')) && (c.id.includes('cherry') || c.id.includes('grape') || c.id.includes('pear') || c.id.includes('juliet')) && !c.id.includes('ground') && !c.id.includes('husk') },
+            { label: 'Paste & Sauce',        filter: c => c.category === 'Nightshade' && (c.id.includes('roma') || c.id.includes('san_marzano') || c.id.includes('paste')) },
+            { label: 'Tomatillos / Ground',  filter: c => c.category === 'Nightshade' && (c.id.includes('tomatillo') || c.id.includes('ground_cherry') || c.id.includes('husk')) },
+            { label: 'Other Tomatoes',       filter: c => c.category === 'Nightshade' && c.id.includes('tomato') && !c.id.includes('cherry') && !c.id.includes('grape') && !c.id.includes('pear') && !c.id.includes('juliet') && !c.id.includes('roma') && !c.id.includes('san_marzano') && !c.id.includes('paste') && !c.id.includes('tomatillo') && !c.id.includes('ground') && !c.id.includes('husk') },
         ],
         filter: c => c.category === 'Nightshade' && !c.id.includes('pepper') && !c.id.includes('eggplant'),
     },
 
-    // ── Peppers ───────────────────────────────────────────────────────────────
+    // ── Peppers & Eggplant ────────────────────────────────────────────────────
+    // (Merged from two tabs — eggplant promoted to a subcategory)
     {
-        label: 'Peppers',
+        label: 'Peppers & Eggplant',
         emoji: '🌶️',
         subcategories: [
             { label: 'Sweet & Bell',         filter: c => c.id.includes('pepper') && (c.id.includes('sweet') || c.id.includes('bell') || c.id.includes('shishito') || c.id.includes('padron') || c.id.includes('cubanelle') || c.id.includes('banana') || c.id.includes('pepperoncini')) },
-            { label: 'Hot & Roasting',       filter: c => (c.id.includes('pepper') || c.id.includes('jalapeño') || c.id.includes('habanero')) && !c.id.includes('sweet') && !c.id.includes('bell') && !c.id.includes('shishito') && !c.id.includes('padron') && !c.id.includes('cubanelle') && !c.id.includes('banana') && !c.id.includes('pepperoncini') },
+            { label: 'Hot & Roasting',       filter: c => (c.id.includes('pepper') || c.id.includes('jalapeño') || c.id.includes('jalape') || c.id.includes('habanero') || c.id.includes('cayenne') || c.id.includes('serrano') || c.id.includes('ghost') || c.id.includes('thai') || c.id.includes('fresno') || c.id.includes('aji')) && !c.id.includes('sweet') && !c.id.includes('bell') && !c.id.includes('shishito') && !c.id.includes('padron') && !c.id.includes('cubanelle') && !c.id.includes('banana') && !c.id.includes('pepperoncini') && !c.id.includes('eggplant') },
+            { label: 'Eggplant',             filter: c => c.id.includes('eggplant') },
         ],
-        filter: c => c.category === 'Nightshade' && (c.id.includes('pepper') || c.id.includes('jalapeño') || c.id.includes('habanero')),
-    },
-
-    // ── Eggplant ──────────────────────────────────────────────────────────────
-    {
-        label: 'Eggplant',
-        emoji: '🍆',
-        subcategories: [
-            { label: 'All Eggplant',         filter: c => c.id.includes('eggplant') },
-        ],
-        filter: c => c.category === 'Nightshade' && c.id.includes('eggplant'),
+        filter: c => c.category === 'Nightshade' && (c.id.includes('pepper') || c.id.includes('jalapeño') || c.id.includes('jalape') || c.id.includes('habanero') || c.id.includes('cayenne') || c.id.includes('serrano') || c.id.includes('ghost') || c.id.includes('thai') || c.id.includes('fresno') || c.id.includes('aji') || c.id.includes('eggplant')),
     },
 
     // ── Cucurbits ─────────────────────────────────────────────────────────────
@@ -123,11 +116,11 @@ export const MEGA_CATEGORIES = [
         label: 'Cucurbits',
         emoji: '🥒',
         subcategories: [
-            { label: 'Cucumbers',            filter: c => c.id.includes('cucumber') },
-            { label: 'Zucchini & Summer',    filter: c => c.id.includes('zucchini') || c.id.includes('summer_squash') || c.id.includes('pattypan') || c.id.includes('crookneck') || c.id.includes('lebanese') },
+            { label: 'Cucumbers',            filter: c => c.category === 'Cucurbit' && c.id.includes('cucumber') },
+            { label: 'Zucchini & Summer',    filter: c => c.category === 'Cucurbit' && (c.id.includes('zucchini') || c.id.includes('summer_squash') || c.id.includes('pattypan') || c.id.includes('crookneck') || c.id.includes('lebanese')) },
             { label: 'Winter Squash',        filter: c => c.category === 'Cucurbit' && (c.id.includes('squash') || c.id.includes('kabocha') || c.id.includes('delicata') || c.id.includes('acorn') || c.id.includes('hubbard')) && !c.id.includes('summer') && !c.id.includes('zucchini') && !c.id.includes('pattypan') && !c.id.includes('lebanese') },
-            { label: 'Pumpkins',             filter: c => c.id.includes('pumpkin') || c.id.includes('gourd') },
-            { label: 'Melons & Watermelons', filter: c => c.id.includes('melon') || c.id.includes('cantaloupe') || c.id.includes('honeydew') || c.id.includes('casaba') },
+            { label: 'Pumpkins',             filter: c => c.category === 'Cucurbit' && (c.id.includes('pumpkin') || c.id.includes('gourd')) },
+            { label: 'Melons & Watermelons', filter: c => c.category === 'Cucurbit' && (c.id.includes('melon') || c.id.includes('cantaloupe') || c.id.includes('honeydew') || c.id.includes('casaba')) },
             { label: 'Other Cucurbits',      filter: c => c.category === 'Cucurbit' && !c.id.includes('cucumber') && !c.id.includes('zucchini') && !c.id.includes('summer_squash') && !c.id.includes('pattypan') && !c.id.includes('crookneck') && !c.id.includes('lebanese') && !c.id.includes('squash') && !c.id.includes('kabocha') && !c.id.includes('delicata') && !c.id.includes('acorn') && !c.id.includes('hubbard') && !c.id.includes('pumpkin') && !c.id.includes('gourd') && !c.id.includes('melon') && !c.id.includes('cantaloupe') && !c.id.includes('honeydew') && !c.id.includes('casaba') },
         ],
         filter: c => c.category === 'Cucurbit',
@@ -152,9 +145,12 @@ export const MEGA_CATEGORIES = [
         emoji: '🌿',
         subcategories: [
             { label: 'Basil',                filter: c => c.id.includes('basil') },
-            { label: 'Mint & Lemon',         filter: c => c.id.includes('mint') || c.id.includes('lemon_balm') || c.id.includes('lemon_verbena') },
-            { label: 'Cilantro & Parsley',   filter: c => c.id.includes('cilantro') || c.id.includes('parsley') || c.id.includes('culantro') || c.id.includes('coriander') },
-            { label: 'Other Herbs',          filter: c => c.category === 'Herb' && !c.id.includes('basil') && !c.id.includes('mint') && !c.id.includes('lemon_balm') && !c.id.includes('lemon_verbena') && !c.id.includes('cilantro') && !c.id.includes('parsley') && !c.id.includes('culantro') && !c.id.includes('coriander') },
+            { label: 'Cilantro, Parsley & Dill', filter: c => c.id.includes('cilantro') || c.id.includes('parsley') || c.id.includes('culantro') || c.id.includes('coriander') || c.id.includes('dill') },
+            { label: 'Mint & Lemon Herbs',   filter: c => c.id.includes('mint') || c.id.includes('lemon_balm') || c.id.includes('lemon_verbena') || c.id.includes('lemon_thyme') || c.id.includes('lemon_basil') },
+            { label: 'Mediterranean',        filter: c => c.category === 'Herb' && (c.id.includes('oregano') || c.id.includes('thyme') || c.id.includes('rosemary') || c.id.includes('sage') || c.id.includes('savory') || c.id.includes('marjoram') || c.id.includes('tarragon') || c.id.includes('fennel') || c.id.includes('chervil') || c.id.includes('lovage')) },
+            { label: 'Tea Herbs',            filter: c => c.category === 'Herb' && (c.id.includes('chamomile') || c.id.includes('lemongrass') || c.id.includes('tulsi') || c.id.includes('holy_basil') || c.id.includes('stevia') || c.id.includes('anise_hyssop') || c.id.includes('korean_mint') || c.id.includes('catnip')) },
+            { label: 'Medicinal & Botanical', filter: c => c.category === 'Herb' && (c.id.includes('echinacea') || c.id.includes('valerian') || c.id.includes('st_john') || c.id.includes('skullcap') || c.id.includes('rhodiola') || c.id.includes('milk_thistle') || c.id.includes('goldenseal') || c.id.includes('motherwort') || c.id.includes('wood_betony') || c.id.includes('spilanthes') || c.id.includes('ginseng') || c.id.includes('marshmallow') || c.id.includes('licorice') || c.id.includes('passionflower') || c.id.includes('wormwood') || c.id.includes('feverfew') || c.id.includes('rue') || c.id.includes('plantain_herb') || c.id.includes('nettle') || c.id.includes('mountain_mint') || c.id.includes('mad_monk')) },
+            { label: 'Other Herbs',          filter: c => c.category === 'Herb' && !c.id.includes('basil') && !c.id.includes('cilantro') && !c.id.includes('parsley') && !c.id.includes('culantro') && !c.id.includes('coriander') && !c.id.includes('dill') && !c.id.includes('mint') && !c.id.includes('lemon_balm') && !c.id.includes('lemon_verbena') && !c.id.includes('lemon_thyme') && !c.id.includes('lemon_basil') && !c.id.includes('oregano') && !c.id.includes('thyme') && !c.id.includes('rosemary') && !c.id.includes('sage') && !c.id.includes('savory') && !c.id.includes('marjoram') && !c.id.includes('tarragon') && !c.id.includes('fennel') && !c.id.includes('chervil') && !c.id.includes('lovage') && !c.id.includes('chamomile') && !c.id.includes('lemongrass') && !c.id.includes('tulsi') && !c.id.includes('holy_basil') && !c.id.includes('stevia') && !c.id.includes('anise_hyssop') && !c.id.includes('korean_mint') && !c.id.includes('catnip') && !c.id.includes('echinacea') && !c.id.includes('valerian') && !c.id.includes('st_john') && !c.id.includes('skullcap') && !c.id.includes('rhodiola') && !c.id.includes('milk_thistle') && !c.id.includes('goldenseal') && !c.id.includes('motherwort') && !c.id.includes('wood_betony') && !c.id.includes('spilanthes') && !c.id.includes('ginseng') && !c.id.includes('marshmallow') && !c.id.includes('licorice') && !c.id.includes('passionflower') && !c.id.includes('wormwood') && !c.id.includes('feverfew') && !c.id.includes('rue') && !c.id.includes('plantain_herb') && !c.id.includes('nettle') && !c.id.includes('mountain_mint') },
         ],
         filter: c => c.category === 'Herb',
     },
@@ -164,9 +160,15 @@ export const MEGA_CATEGORIES = [
         label: 'Flowers',
         emoji: '🌸',
         subcategories: [
-            { label: 'Sunflowers & Zinnias', filter: c => c.id.includes('sunflower') || c.id.includes('zinnia') },
-            { label: 'Dahlias & Cosmos',     filter: c => c.id.includes('dahlia') || c.id.includes('cosmos') },
-            { label: 'Other Flowers',        filter: c => c.category === 'Flower' && !c.id.includes('sunflower') && !c.id.includes('zinnia') && !c.id.includes('dahlia') && !c.id.includes('cosmos') },
+            { label: 'Sunflowers',           filter: c => c.id.includes('sunflower') },
+            { label: 'Zinnias',              filter: c => c.id.includes('zinnia') },
+            { label: 'Dahlias',              filter: c => c.id.includes('dahlia') },
+            { label: 'Cosmos & Amaranth',    filter: c => c.id.includes('cosmos') || (c.id.includes('amaranth') && c.category === 'Flower') },
+            { label: 'Spring Bulbs',         filter: c => c.category === 'Flower' && (c.id.includes('ranunculus') || c.id.includes('tulip') || c.id.includes('crocus') || c.id.includes('anemone') || c.id.includes('lisianthus')) },
+            { label: 'Fillers & Texture',    filter: c => c.category === 'Flower' && (c.id.includes('scabiosa') || c.id.includes('gypsophila') || c.id.includes('ammi') || c.id.includes('statice') || c.id.includes('limonium') || c.id.includes('gomphrena') || c.id.includes('celosia') || c.id.includes('craspedia') || c.id.includes('xeranthemum') || c.id.includes('strawflower') || c.id.includes('helichrysum') || c.id.includes('helipterum')) },
+            { label: 'Foliage & Accents',    filter: c => c.category === 'Flower' && (c.id.includes('eucalyptus') || c.id.includes('bupleurum') || c.id.includes('bells_of_ireland') || c.id.includes('daucus') || c.id.includes('orlaya') || c.id.includes('atriplex') || c.id.includes('cerinthe')) },
+            { label: 'Spring Cuts',          filter: c => c.category === 'Flower' && (c.id.includes('sweet_pea') || c.id.includes('snapdragon') || c.id.includes('stock') || c.id.includes('larkspur') || c.id.includes('phlox') || c.id.includes('digitalis') || c.id.includes('poppy')) },
+            { label: 'Other Flowers',        filter: c => c.category === 'Flower' && !c.id.includes('sunflower') && !c.id.includes('zinnia') && !c.id.includes('dahlia') && !c.id.includes('cosmos') && !(c.id.includes('amaranth') && c.category === 'Flower') && !c.id.includes('ranunculus') && !c.id.includes('tulip') && !c.id.includes('crocus') && !c.id.includes('anemone') && !c.id.includes('lisianthus') && !c.id.includes('scabiosa') && !c.id.includes('gypsophila') && !c.id.includes('ammi') && !c.id.includes('statice') && !c.id.includes('limonium') && !c.id.includes('gomphrena') && !c.id.includes('celosia') && !c.id.includes('craspedia') && !c.id.includes('xeranthemum') && !c.id.includes('strawflower') && !c.id.includes('helichrysum') && !c.id.includes('helipterum') && !c.id.includes('eucalyptus') && !c.id.includes('bupleurum') && !c.id.includes('bells_of_ireland') && !c.id.includes('daucus') && !c.id.includes('orlaya') && !c.id.includes('atriplex') && !c.id.includes('cerinthe') && !c.id.includes('sweet_pea') && !c.id.includes('snapdragon') && !c.id.includes('stock') && !c.id.includes('larkspur') && !c.id.includes('phlox') && !c.id.includes('digitalis') && !c.id.includes('poppy') },
         ],
         filter: c => c.category === 'Flower',
     },
@@ -188,10 +190,10 @@ export const MEGA_CATEGORIES = [
         label: 'Grains & Corn',
         emoji: '🌾',
         subcategories: [
-            { label: 'Corn & Popcorn',       filter: c => c.id.includes('corn') },
-            { label: 'Grains & Amaranth',    filter: c => (c.category === 'Grain' || c.id.includes('quinoa')) && !c.id.includes('corn') },
+            { label: 'Corn & Popcorn',       filter: c => c.category === 'Grain' && (c.id.includes('corn') || c.id.includes('popcorn')) },
+            { label: 'Grains & Amaranth',    filter: c => (c.category === 'Grain' || c.id.includes('quinoa')) && !(c.id.includes('corn') || c.id.includes('popcorn')) },
         ],
-        filter: c => c.category === 'Grain' || c.id === 'quinoa_brightest',
+        filter: c => c.category === 'Grain' || c.id.includes('quinoa'),
     },
 
     // ── Specialty & Exotic ────────────────────────────────────────────────────
@@ -199,9 +201,10 @@ export const MEGA_CATEGORIES = [
         label: 'Specialty & Exotic',
         emoji: '✨',
         subcategories: [
-            { label: 'Asparagus',            filter: c => c.id.includes('asparagus') },
-            { label: 'Artichoke & Celery',   filter: c => c.id.includes('artichoke') || c.id.includes('celery') || c.id.includes('cardoon') },
-            { label: 'Other Specialty',      filter: c => c.category === 'Specialty' && !c.id.includes('asparagus') && !c.id.includes('artichoke') && !c.id.includes('celery') && !c.id.includes('cardoon') },
+            { label: 'Perennial Vegetables', filter: c => c.id.includes('asparagus') || c.id.includes('artichoke') || c.id.includes('rhubarb') || c.id.includes('cardoon') },
+            { label: 'Warm-Season Specialty', filter: c => c.category === 'Specialty' && (c.id.includes('okra') || c.id.includes('lemongrass') || c.id.includes('turmeric') || c.id.includes('ginger') || c.id.includes('celery') || c.id.includes('amaranth')) },
+            { label: 'Exotic & Aquatic',     filter: c => c.category === 'Specialty' && (c.id.includes('lotus') || c.id.includes('wasabi') || c.id.includes('water_chestnut') || c.id.includes('wakame')) },
+            { label: 'Other Specialty',      filter: c => c.category === 'Specialty' && !c.id.includes('asparagus') && !c.id.includes('artichoke') && !c.id.includes('rhubarb') && !c.id.includes('cardoon') && !c.id.includes('okra') && !c.id.includes('lemongrass') && !c.id.includes('turmeric') && !c.id.includes('ginger') && !c.id.includes('celery') && !c.id.includes('amaranth') && !c.id.includes('lotus') && !c.id.includes('wasabi') && !c.id.includes('water_chestnut') && !c.id.includes('wakame') },
         ],
         filter: c => c.category === 'Specialty' && c.id !== 'quinoa_brightest',
     },

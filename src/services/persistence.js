@@ -677,9 +677,21 @@ export function loadPlanCrops(planId) {
     try {
         const targetId = planId || 'global_library';
         const raw = localStorage.getItem(`acrelogic_plan_crops_${targetId}`);
-        if (!raw) return [];
-        const parsed = JSON.parse(raw);
-        return Array.isArray(parsed) ? parsed : [];
+        if (raw) {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        }
+        // Fallback: if the planId-specific key is empty or missing, try the global library.
+        // This prevents a planId key mismatch (from navigating through different tabs)
+        // from silently evacuating the crop list and bricking the BedWorkspace.
+        if (targetId !== 'global_library') {
+            const fallbackRaw = localStorage.getItem('acrelogic_plan_crops_global_library');
+            if (fallbackRaw) {
+                const fallbackParsed = JSON.parse(fallbackRaw);
+                if (Array.isArray(fallbackParsed)) return fallbackParsed;
+            }
+        }
+        return [];
     } catch { return []; }
 }
 

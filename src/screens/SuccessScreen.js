@@ -66,8 +66,8 @@ export default function SuccessScreen({ route, navigation }) {
     }, []);
 
     const handleContinue = () => {
-        // Pop back to the root of the app
-        navigation.reset({ index: 0, routes: [{ name: 'ModeSelector' }] });
+        // Pop back to the root of the app where Market Farm / Home Gardener split happens
+        navigation.reset({ index: 0, routes: [{ name: 'RoleSelector' }] });
     };
 
     return (

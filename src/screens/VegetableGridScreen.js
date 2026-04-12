@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import {
     View,
     Text,
@@ -13,6 +13,7 @@ import {
     Platform,
     Image,
 } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 
 import { Colors, Typography, Spacing, Radius, Shadows } from '../theme';
 import cropDbRaw from '../data/crops.json';
@@ -21,6 +22,8 @@ import CategorySidebar from '../components/CategorySidebar';
 import { formatCropDisplayName } from '../utils/cropDisplay';
 import { getCropEarliestActionOffset } from '../services/homeGardenCalculator';
 import GlobalNavBar from '../components/GlobalNavBar';
+import SharedCropCard from '../components/SharedCropCard';
+import { loadPlanCrops, savePlanCrops } from '../services/persistence';
 // ─── Responsive breakpoints ───────────────────────────────────────────────────
 function getBreakpoint(width) {
     if (width < 480) {
@@ -179,6 +182,7 @@ class ErrorBoundary extends React.Component {
 function VegetableGridScreenInner({ navigation, route }) {
     const farmProfile = route?.params?.farmProfile ?? null;
     const planId = route?.params?.planId ?? null;
+    const fromWorkspace = route?.params?.fromWorkspace ?? false;
     
     // IMPORTANT: filterFn is stored as { fn: Function } — NOT as a raw function.
     // React treats any function passed to setState() as a functional updater (calling it with
@@ -187,6 +191,26 @@ function VegetableGridScreenInner({ navigation, route }) {
     const [filterObj, setFilterObj] = useState({ fn: () => true });  // driven by CategorySidebar
     const [searchQuery, setSearchQuery] = useState('');
 
+    // ─── Crop Selection State ─────────────────────────────────────────────────
+    // Load persisted selection on mount and every time this screen regains focus
+    // (e.g. back-navigation from BedWorkspace → VegetableGrid).
+    const [selectedCropIds, setSelectedCropIds] = useState(() => loadPlanCrops(planId));
+    useFocusEffect(useCallback(() => {
+        setSelectedCropIds(loadPlanCrops(planId));
+    }, [planId]));
+
+    // Toggle a crop in/out of the selection and immediately persist.
+    const toggleCrop = useCallback((cropId) => {
+        setSelectedCropIds(prev => {
+            const isSelected = prev.includes(cropId);
+            const next = isSelected
+                ? prev.filter(id => id !== cropId)
+                : [...prev, cropId];
+            savePlanCrops(planId, next);
+            return next;
+        });
+    }, [planId]);
+
     // Load frequency on mount + scroll FlatList to top
     const [cropFrequency, setCropFrequency] = useState({});
     React.useEffect(() => {
@@ -194,8 +218,6 @@ function VegetableGridScreenInner({ navigation, route }) {
         // Scroll to top removed to safely avoid React Native Web VirtualizedList layout race condition
         // Setting it blindly with a 50ms timeout was intermittently corrupting layout state and blanking the grid.
     }, []);
-
-
 
     // Reactive screen width — updates on resize & orientation change
     const { width } = useWindowDimensions();
@@ -223,6 +245,8 @@ function VegetableGridScreenInner({ navigation, route }) {
             return (cropFrequency[b.id] ?? 0) - (cropFrequency[a.id] ?? 0) || a.name.localeCompare(b.name);
         });
 
+    const selCount = selectedCropIds.length;
+
     return (
         <View style={styles.container}>
             <GlobalNavBar 
@@ -231,6 +255,34 @@ function VegetableGridScreenInner({ navigation, route }) {
                 planId={planId} 
                 activeRoute="VegetableGrid" 
             />
+
+            {/* ── Selection Banner ─────────────────────────────────────────── */}
+            <View style={styles.selectionBanner}>
+                <View style={styles.selectionBannerLeft}>
+                    <Text style={styles.selectionBannerTitle}>🌱 Crop Library</Text>
+                    <Text style={styles.selectionBannerSub}>
+                        {selCount === 0
+                            ? 'Tap crops to add them to your farm plan'
+                            : `${selCount} crop${selCount !== 1 ? 's' : ''} selected — tap to deselect`}
+                    </Text>
+                </View>
+                {fromWorkspace && (
+                    <TouchableOpacity
+                        style={[styles.doneBtn, selCount === 0 && styles.doneBtnDisabled]}
+                        onPress={() => navigation.goBack()}
+                        disabled={selCount === 0}
+                    >
+                        <Text style={styles.doneBtnText}>
+                            {selCount === 0 ? 'Select crops' : `Done (${selCount})`}
+                        </Text>
+                    </TouchableOpacity>
+                )}
+                {!fromWorkspace && selCount > 0 && (
+                    <View style={styles.selCountBadge}>
+                        <Text style={styles.selCountBadgeText}>{selCount}</Text>
+                    </View>
+                )}
+            </View>
 
             {isDesktop ? (
                 // ── Desktop Layout: Sidebar + Main Content ──
@@ -244,13 +296,8 @@ function VegetableGridScreenInner({ navigation, route }) {
                         }}
                     />
                     <View style={styles.desktopMainContent}>
-                        {/* Subtitle */}
-                        <Text style={[styles.subheading, { paddingHorizontal: Spacing.md }]}>
-                            Browse the agronomic catalog to view crop spacings and harvest details.
-                        </Text>
-            
                         {/* Search bar */}
-                        <View style={[styles.searchRow, { marginHorizontal: Spacing.md }]}>
+                        <View style={[styles.searchRow, { marginHorizontal: Spacing.md, marginTop: Spacing.sm }]}>
                             <Text style={{ paddingLeft: 12, color: Colors.mutedText, fontSize: 16 }}>🔍</Text>
                             <TextInput
                                 style={styles.searchInput}
@@ -271,11 +318,17 @@ function VegetableGridScreenInner({ navigation, route }) {
                         <ScrollView
                             showsVerticalScrollIndicator={false}
                             style={Platform.OS === 'web' ? { overflowY: 'auto', flex: 1 } : { flex: 1 }}
-                            contentContainerStyle={[styles.grid, { paddingBottom: 60, flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center' }]}
+                            contentContainerStyle={[styles.grid, { paddingBottom: 80, flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center' }]}
+                            keyboardShouldPersistTaps="handled"
                         >
                             {filteredCrops.map(item => (
                                 <View key={item.id} style={{ width: 160 }}>
-                                    <CropCard crop={item} cardWidth={160} />
+                                    <SharedCropCard
+                                        crop={item}
+                                        cardWidth={160}
+                                        selected={selectedCropIds.includes(item.id)}
+                                        onPress={toggleCrop}
+                                    />
                                 </View>
                             ))}
                         </ScrollView>
@@ -284,11 +337,6 @@ function VegetableGridScreenInner({ navigation, route }) {
             ) : (
                 // ── Mobile Layout: Stacked ──
                 <View style={{ flex: 1 }}>
-                    {/* Subtitle */}
-                    <Text style={styles.subheading}>
-                        Browse the agronomic catalog to view crop spacings and harvest details.
-                    </Text>
-        
                     {/* Wrapping Mobile Filter Bar */}
                     <CategorySidebar 
                         isMobile={true}
@@ -321,11 +369,17 @@ function VegetableGridScreenInner({ navigation, route }) {
                     <ScrollView
                         showsVerticalScrollIndicator={false}
                         style={Platform.OS === 'web' ? { overflowY: 'auto', flex: 1 } : { flex: 1 }}
-                        contentContainerStyle={[styles.grid, { paddingBottom: 60, flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center' }]}
+                        contentContainerStyle={[styles.grid, { paddingBottom: 80, flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center' }]}
+                        keyboardShouldPersistTaps="handled"
                     >
                         {filteredCrops.map(item => (
                             <View key={item.id} style={{ width: 140 }}>
-                                <CropCard crop={item} cardWidth={140} />
+                                <SharedCropCard
+                                    crop={item}
+                                    cardWidth={140}
+                                    selected={selectedCropIds.includes(item.id)}
+                                    onPress={toggleCrop}
+                                />
                             </View>
                         ))}
                     </ScrollView>
@@ -389,6 +443,59 @@ const styles = StyleSheet.create({
         alignItems: 'center',
     },
     selectionCount: { color: Colors.white, fontSize: Typography.sm, fontWeight: Typography.bold },
+
+    // ── Selection Banner ───────────────────────────────────────────────────────
+    selectionBanner: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingHorizontal: Spacing.lg,
+        paddingVertical: Spacing.sm,
+        backgroundColor: Colors.white,
+        borderBottomWidth: 1,
+        borderBottomColor: 'rgba(45,79,30,0.12)',
+        gap: Spacing.sm,
+    },
+    selectionBannerLeft: { flex: 1 },
+    selectionBannerTitle: {
+        fontSize: Typography.md,
+        fontWeight: Typography.bold,
+        color: Colors.primaryGreen,
+    },
+    selectionBannerSub: {
+        fontSize: Typography.xs,
+        color: Colors.mutedText,
+        marginTop: 2,
+    },
+    doneBtn: {
+        backgroundColor: Colors.primaryGreen,
+        paddingVertical: 8,
+        paddingHorizontal: 16,
+        borderRadius: Radius.full,
+    },
+    doneBtnDisabled: {
+        backgroundColor: Colors.mutedText,
+        opacity: 0.45,
+    },
+    doneBtnText: {
+        fontSize: Typography.sm,
+        fontWeight: Typography.bold,
+        color: Colors.cream,
+        letterSpacing: 0.5,
+    },
+    selCountBadge: {
+        backgroundColor: Colors.burntOrange,
+        width: 28,
+        height: 28,
+        borderRadius: 14,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    selCountBadgeText: {
+        color: Colors.white,
+        fontSize: Typography.sm,
+        fontWeight: Typography.bold,
+    },
 
     // ── Subheading ────────────────────────────────────────────────────────────
     subheading: {

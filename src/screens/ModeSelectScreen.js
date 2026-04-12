@@ -128,7 +128,13 @@ export default function ModeSelectScreen({ navigation }) {
             <View style={styles.header}>
                 {/* Back + centered logo row */}
                 <View style={styles.headerTopRow}>
-                    <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
+                    <TouchableOpacity style={styles.backBtn} onPress={() => {
+                        if (navigation.canGoBack()) {
+                            navigation.goBack();
+                        } else {
+                            navigation.replace('RoleSelector');
+                        }
+                    }}>
                         <Text style={styles.backArrow}>‹</Text>
                     </TouchableOpacity>
                     <HomeLogoButton navigation={navigation} />

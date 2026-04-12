@@ -117,27 +117,20 @@ const BedRow = ({ block, bedNum, successions, shelterType, farmProfile, onPress,
                         {(() => {
                             const sorted = [...successions].sort((a, b) => (a.start_date || '2099').localeCompare(b.start_date || '2099'));
                             
-                            const lanes = [];
+                            const cohorts = [];
                             sorted.forEach((s) => {
-                                let placed = false;
-                                for (let l = 0; l < lanes.length; l++) {
-                                    const lastCrop = lanes[l][lanes[l].length - 1];
-                                    const lastEnd = lastCrop.end_date ?? '9999-12-31';
-                                    const currStart = s.start_date ?? '2000-01-01';
-                                    if (currStart >= lastEnd) {
-                                        lanes[l].push(s);
-                                        placed = true;
-                                        break;
-                                    }
-                                }
-                                if (!placed) {
-                                    lanes.push([s]);
+                                const lastGrp = cohorts[cohorts.length - 1];
+                                const sDate = s.start_date || 'TBD';
+                                if (lastGrp && lastGrp.start_date === sDate) {
+                                    lastGrp.crops.push(s);
+                                } else {
+                                    cohorts.push({ start_date: sDate, crops: [s] });
                                 }
                             });
                             
-                            return lanes.map((laneCrops, laneIdx) => (
-                                <View key={`lane-${laneIdx}`} style={{ flexDirection: 'row', gap: 4, flexWrap: 'wrap' }}>
-                                    {laneCrops.map((s, si) => {
+                            return cohorts.map((cohort, cIdx) => (
+                                <View key={`cohort-${cIdx}`} style={{ flexDirection: 'row', gap: 4, flexWrap: 'wrap' }}>
+                                    {cohort.crops.map((s, si) => {
                                         const meta = cropMeta(s.crop_id);
                                         const frac = s.coverage ?? s.coverage_fraction ?? 1;
                                         const fracLabel = frac >= 0.99 ? 'Full' : frac >= 0.74 ? '¾' : frac >= 0.49 ? '½' : '¼';

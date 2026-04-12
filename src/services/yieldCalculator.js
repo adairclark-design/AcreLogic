@@ -28,18 +28,18 @@ const BED_LENGTH_FT = 50;
 // Low = conservative (new farm, average conditions)
 // High = best-case (established soil, optimal timing) = the stated yield_lbs_per_100ft
 const YIELD_VARIANCE = {
-    'Greens': { low: 0.65, high: 1.00 }, // cut-and-come-again, wide variance
-    'Herb': { low: 0.70, high: 1.00 }, // depends on cutting frequency
-    'Brassica': { low: 0.70, high: 0.95 }, // pest pressure (cabbage moth) varies
-    'Nightshade': { low: 0.55, high: 1.00 }, // tomatoes/peppers — highest variance
-    'Cucurbit': { low: 0.60, high: 1.00 }, // vine crops — weather-sensitive
-    'Root': { low: 0.75, high: 0.95 }, // predictable, less surface-pest exposure
-    'Allium': { low: 0.75, high: 0.95 }, // reliable if planted correctly
-    'Legume': { low: 0.70, high: 0.95 }, // disease pressure varies
-    'Flower': { low: 0.65, high: 1.00 }, // stem count varies by pinching
-    'Specialty': { low: 0.65, high: 0.95 }, // misc specialty crops
+    'Greens': { low: 0.65, high: 0.85 },
+    'Herb': { low: 0.70, high: 0.85 },
+    'Brassica': { low: 0.60, high: 0.80 },
+    'Nightshade': { low: 0.55, high: 0.85 },
+    'Cucurbit': { low: 0.60, high: 0.85 },
+    'Root': { low: 0.65, high: 0.80 },
+    'Allium': { low: 0.65, high: 0.80 },
+    'Legume': { low: 0.60, high: 0.80 },
+    'Flower': { low: 0.65, high: 0.85 },
+    'Specialty': { low: 0.65, high: 0.80 },
 };
-const DEFAULT_VARIANCE = { low: 0.70, high: 1.00 };
+const DEFAULT_VARIANCE = { low: 0.65, high: 0.85 };
 
 // ─── Main API ──────────────────────────────────────────────────────────────────
 
@@ -297,16 +297,14 @@ export function harvestTerm(category, count = 1) {
 // ─── Calculation Helpers ──────────────────────────────────────────────────────
 
 function calcYieldLbs(crop, bedLengthFt, fraction = 1.0) {
-    const rows = crop.rows_per_30in_bed ?? 1;
-    const linearFt = bedLengthFt * rows * fraction;
+    const linearFt = bedLengthFt * fraction;
     const perFt = (crop.yield_lbs_per_100ft ?? 0) / 100;
     return perFt * linearFt;
 }
 
 function calcYieldBunches(crop, bedLengthFt, fraction = 1.0) {
     if (!crop.yield_bunches_per_100ft) return null;
-    const rows = crop.rows_per_30in_bed ?? 1;
-    const linearFt = bedLengthFt * rows * fraction;
+    const linearFt = bedLengthFt * fraction;
     const perFt = crop.yield_bunches_per_100ft / 100;
     return perFt * linearFt;
 }

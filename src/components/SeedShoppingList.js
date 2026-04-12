@@ -18,6 +18,13 @@ import {
 } from 'react-native';
 import { Colors, Typography, Spacing, Radius, Shadows } from '../theme';
 import CROP_IMAGES from '../data/cropImages';
+import cropData from '../data/crops.json';
+import { formatSeedVolume } from '../utils/seedVolumeConverter';
+
+// Fast lookup: crop id → raw crops.json record (built once at module load)
+const CROP_RAW = Object.fromEntries(
+    (cropData.crops ?? []).map(c => [c.id, c])
+);
 
 // ─── Reference tables ─────────────────────────────────────────────────────────
 
@@ -145,25 +152,39 @@ function packetsLabel(n) {
     return n === 1 ? '1 packet' : `${n} packets`;
 }
 
-/** Mirror logic from ActionCalendar / homeGardenCalculator to ensure sync */
-function seedsPerCell(germRate) {
-    if (germRate >= 0.85) return 1;
-    if (germRate >= 0.70) return 2;
-    return 3;
-}
-function withSeasonBuffer(n) { return Math.ceil((n ?? 0) * 1.20); }
-
-function getSeedQty(crop, specs) {
+/**
+ * Unified seed quantity formula — must match ActionCalendar.seedsNeeded exactly.
+ *   target_plants = ceil(plantsNeeded * 1.20)  — 20% attrition / pest / weather buffer
+ *   seeds_needed  = ceil(target_plants / germRate) — germination failure buffer
+ *
+ * For special purchases (bulbs, sets, slips) the quantity is just plantsNeeded
+ * with no seed calculation needed.
+ */
+function seedsNeeded(crop, specs) {
     if (specs.isSpecial) {
         return crop.plantsNeeded || 1;
     }
-    const plantsToGrow = withSeasonBuffer(crop.plantsNeeded ?? 0);
-    if (crop.seedType === 'TP') {
-        const perCell = seedsPerCell(crop.germRate ?? 0.75);
-        return (plantsToGrow || 1) * perCell;
-    }
-    return withSeasonBuffer(crop.seedsToStart ?? crop.plantsNeeded ?? 1);
+    const germRate     = crop.germRate ?? 0.75;
+    const targetPlants = Math.ceil((crop.plantsNeeded ?? 0) * 1.20);
+    return Math.ceil(targetPlants / Math.max(germRate, 0.01));
 }
+
+/**
+ * Compute seed weight in ounces for the shopping list context.
+ * Uses seed_oz_per_100ft from crops.json scaled by linearFeetNeeded.
+ * Includes the same 20% attrition buffer used everywhere else.
+ * Returns null if data is missing or the crop is a special purchase.
+ */
+function seedVolumeOz(crop, specs) {
+    if (specs.isSpecial) return null;
+    const raw = CROP_RAW[crop.cropId];
+    const ozPer100ft = raw?.seed_oz_per_100ft ?? null;
+    if (!ozPer100ft) return null;
+    const linearFt = crop.linearFeetNeeded ?? null;
+    if (!linearFt) return null;
+    return ozPer100ft * (linearFt / 100) * 1.20; // 20% buffer
+}
+
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
@@ -181,13 +202,18 @@ function SectionHeader({ emoji, title, subtitle }) {
 
 function SeedCard({ crop, cardWidth }) {
     const specs  = specsFor(crop);
-    const qty    = getSeedQty(crop, specs);
+    const qty    = seedsNeeded(crop, specs);
     const isSpec = specs.isSpecial;
     const packets = isSpec ? qty : Math.max(1, Math.ceil(qty / specs.seedsPerPacket));
     const lineTotal = packets * specs.price;
     const label = isSpec
         ? `${qty} ${specs.unit}`
         : packetsLabel(packets);
+    // Volume estimate — DS/TP crops only, null for special purchases
+    const ozEst    = seedVolumeOz(crop, specs);
+    const volLabel = ozEst != null
+        ? formatSeedVolume(ozEst, crop.cropId, crop.category)
+        : null;
 
     return (
         <View style={[styles.seedCard, { width: cardWidth }, Shadows.card]}>
@@ -217,14 +243,21 @@ function SeedCard({ crop, cardWidth }) {
                     ~{specs.seedsPerPacket} {specs.unit}/pkt
                 </Text>
             )}
+            {/* Volume estimate */}
+            {volLabel != null && (
+                <Text style={styles.seedCardVolume} numberOfLines={1}>
+                    {volLabel}
+                </Text>
+            )}
         </View>
     );
 }
 
+
 function Subtotal({ label, crops }) {
     const total = crops.reduce((sum, c) => {
         const specs = specsFor(c);
-        const qty = getSeedQty(c, specs);
+        const qty = seedsNeeded(c, specs);
         if (specs.isSpecial) {
             return sum + qty * specs.price;
         }
@@ -260,7 +293,7 @@ export default function SeedShoppingList({ crops }) {
     const all = [...directSow, ...startIndoors, ...specialPurchase];
     const grandTotal = all.reduce((sum, c) => {
         const specs = specsFor(c);
-        const qty = getSeedQty(c, specs);
+        const qty = seedsNeeded(c, specs);
         if (specs.isSpecial) {
             return sum + qty * specs.price;
         }
@@ -271,7 +304,7 @@ export default function SeedShoppingList({ crops }) {
     const grandHigh = grandTotal * 1.2;
     const totalPackets = [...directSow, ...startIndoors].reduce((sum, c) => {
         const specs = specsFor(c);
-        const qty = getSeedQty(c, specs);
+        const qty = seedsNeeded(c, specs);
         return sum + Math.max(1, Math.ceil(qty / specs.seedsPerPacket));
     }, 0);
 
@@ -471,6 +504,14 @@ const styles = StyleSheet.create({
         color: Colors.textLight ?? '#888',
         textAlign: 'center',
         marginTop: 2,
+    },
+    seedCardVolume: {
+        fontSize: 7,
+        color: '#1565C0',
+        fontStyle: 'italic',
+        textAlign: 'center',
+        marginTop: 1,
+        opacity: 0.85,
     },
 
     // ── (legacy row styles kept for any fallback reference) ─────────────────

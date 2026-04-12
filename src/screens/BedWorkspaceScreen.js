@@ -405,6 +405,7 @@ const SuccessionDrawer = ({ visible, bedNumber, blockName, currentSuccessions, a
     const [searchQuery, setSearchQuery] = React.useState('');
     const [activeCategory, setActiveCategory] = React.useState('All');
     const [coverageFraction, setCoverageFraction] = React.useState(1.0);
+    const [tableSort, setTableSort] = React.useState({ key: 'name', direction: 'asc' });
 
     // Fixed canonical category list — always show all crop families regardless of
     // what candidates are currently loaded. Tabs with 0 matches just filter to empty.
@@ -687,20 +688,61 @@ const SuccessionDrawer = ({ visible, bedNumber, blockName, currentSuccessions, a
             }
         }
 
-        // Fill-remaining mode 
-        if (isFillRemainingMode && fillRemainingDtm) {
-            const similar = list.filter(c => Math.abs((c.crop.dtm ?? 0) - fillRemainingDtm) <= 25);
-            const others = list.filter(c => Math.abs((c.crop.dtm ?? 0) - fillRemainingDtm) > 25);
-            return [...similar, ...others];
+        // First, apply the explicit tableSort logic
+        let sortedList = list.slice().sort((a, b) => {
+            let valA, valB;
+            switch(tableSort.key) {
+                case 'dtm':
+                    valA = a.crop.dtm ?? 0;
+                    valB = b.crop.dtm ?? 0;
+                    break;
+                case 'igd':
+                    valA = (a.start_date && a.end_date)
+                        ? Math.round((new Date(a.end_date) - new Date(a.start_date)) / 86400000)
+                        : ((a.crop.dtm ?? 0) + (a.crop.harvest_window_days ?? 0));
+                    valB = (b.start_date && b.end_date)
+                        ? Math.round((new Date(b.end_date) - new Date(b.start_date)) / 86400000)
+                        : ((b.crop.dtm ?? 0) + (b.crop.harvest_window_days ?? 0));
+                    break;
+                case 'earliest':
+                    valA = new Date(a.start_date || '9999-12-31').getTime();
+                    valB = new Date(b.start_date || '9999-12-31').getTime();
+                    break;
+                case 'optimal':
+                    const optA = getIdealStartDate(a.crop, farmProfile?.last_frost_date) || '9999-12-31';
+                    const optB = getIdealStartDate(b.crop, farmProfile?.last_frost_date) || '9999-12-31';
+                    valA = new Date(optA).getTime();
+                    valB = new Date(optB).getTime();
+                    break;
+                case 'name':
+                default:
+                    const nameA = a.crop.name ?? '';
+                    const nameB = b.crop.name ?? '';
+                    if (nameA !== nameB) {
+                        return tableSort.direction === 'asc' ? nameA.localeCompare(nameB) : nameB.localeCompare(nameA);
+                    }
+                    const varA = a.crop.variety ?? '';
+                    const varB = b.crop.variety ?? '';
+                    return tableSort.direction === 'asc' ? varA.localeCompare(varB) : varB.localeCompare(varA);
+            }
+
+            if (valA < valB) return tableSort.direction === 'asc' ? -1 : 1;
+            if (valA > valB) return tableSort.direction === 'asc' ? 1 : -1;
+            
+            // Secondary sort by name
+            return (a.crop.name ?? '').localeCompare(b.crop.name ?? '');
+        });
+
+        // Fill-remaining mode grouping - ONLY apply if the user hasn't explicitly
+        // requested a custom numerical/date sort. If they want DTM sorting, respect it fully.
+        if (isFillRemainingMode && fillRemainingDtm && tableSort.key === 'name') {
+            const similar = sortedList.filter(c => Math.abs((c.crop.dtm ?? 0) - fillRemainingDtm) <= 25);
+            const others = sortedList.filter(c => Math.abs((c.crop.dtm ?? 0) - fillRemainingDtm) > 25);
+            sortedList = [...similar, ...others];
         }
 
-        // Sort: alphabetical by name then variety
-        return list.slice().sort((a, b) => {
-            const n = (a.crop.name ?? '').localeCompare(b.crop.name ?? '');
-            if (n !== 0) return n;
-            return (a.crop.variety ?? '').localeCompare(b.crop.variety ?? '');
-        });
-    }, [candidates, frostFilter, searchQuery, isFillRemainingMode, fillRemainingDtm, activeCategory, selectedCropIds]);
+        return sortedList;
+    }, [candidates, frostFilter, searchQuery, isFillRemainingMode, fillRemainingDtm, activeCategory, selectedCropIds, tableSort, farmProfile]);
 
     const sharedCoverageModal = (
         <View
@@ -752,12 +794,14 @@ const SuccessionDrawer = ({ visible, bedNumber, blockName, currentSuccessions, a
                                                 dtm: payload.isWinterCandidate ? payload.winterDtm : payload.item.crop.dtm,
                                             });
                                         } else {
-                                            onPlantOutOfSeason({
-                                                ...finalPayload,
-                                                coverage_fraction: f.value,
-                                                is_winter_override: payload.isWinterCandidate,
-                                                dtm: payload.isWinterCandidate ? payload.winterDtm : payload.item.crop.dtm,
-                                            });
+                                            setTimeout(() => {
+                                                onPlantOutOfSeason({
+                                                    ...finalPayload,
+                                                    coverage_fraction: f.value,
+                                                    is_winter_override: payload.isWinterCandidate,
+                                                    dtm: payload.isWinterCandidate ? payload.winterDtm : payload.item.crop.dtm,
+                                                });
+                                            }, 50);
                                         }
                                     }}
                                 >
@@ -848,7 +892,6 @@ const SuccessionDrawer = ({ visible, bedNumber, blockName, currentSuccessions, a
                     <View style={fpStyles.ganttCard}>
                         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, paddingHorizontal: 4 }}>
                             <Text style={{ fontSize: 13, fontWeight: '700', color: '#1B3B1A', letterSpacing: 0.5 }}>TIMELINE PLAN</Text>
-                            <Text style={{ fontSize: 10, color: 'blue', maxWidth: 100 }} numberOfLines={2}>DBG: Cnt={currentSuccessions?.length ?? 'none'}, ActYr={activeYear}</Text>
                             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16, backgroundColor: '#E8F5E9', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 20 }}>
                                 <TouchableOpacity onPress={() => setActiveYear(y => y - 1)} hitSlop={{top:10,bottom:10,left:10,right:10}}>
                                     <Text style={{ fontSize: 18, color: '#2E7D32', fontWeight: 'bold' }}>‹</Text>
@@ -1393,14 +1436,37 @@ const SuccessionDrawer = ({ visible, bedNumber, blockName, currentSuccessions, a
                     <View style={[fpStyles.tableCard, { flex: 1, minHeight: 150 }]}>
                         {/* Table header */}
                         <View style={fpStyles.tableHeader}>
-                            <Text style={[fpStyles.tableHeaderCell, { flex: 2.4, textAlign: 'left' }]}>CROP NAME</Text>
-                            <Text style={[fpStyles.tableHeaderCell, { flex: 0.6 }]}>DTM</Text>
-                            <Text style={[fpStyles.tableHeaderCell, { flex: 0.6 }]}>IGD</Text>
-                            <Text style={[fpStyles.tableHeaderCell, { flex: 1.5 }]}>PLANNED DATE</Text>
-                            <Text style={[fpStyles.tableHeaderCell, { flex: 1.6 }]}>OPTIMAL PLANTING DATE</Text>
-                            <Text style={[fpStyles.tableHeaderCell, { flex: 2.0 }]}>EARLIEST PLANTING DATE</Text>
-                            <Text style={[fpStyles.tableHeaderCell, { flex: 0.5 }]}>RPB</Text>
-                            <Text style={[fpStyles.tableHeaderCell, { flex: 0.5 }]}>IRS</Text>
+                            {(() => {
+                                const renderSortHeader = (label, sortKey, flex, align = 'center') => {
+                                    const isActive = tableSort.key === sortKey;
+                                    return (
+                                        <TouchableOpacity 
+                                            style={{ flex, flexDirection: 'row', alignItems: 'center', justifyContent: align === 'left' ? 'flex-start' : 'center', borderRightWidth: 1, borderRightColor: '#E0E0E0', paddingHorizontal: 4 }}
+                                            onPress={() => setTableSort(prev => ({ key: sortKey, direction: prev.key === sortKey ? (prev.direction === 'asc' ? 'desc' : 'asc') : 'asc' }))}
+                                            activeOpacity={0.7}
+                                        >
+                                            <Text style={[fpStyles.tableHeaderCell, { flex: 0, borderRightWidth: 0, paddingHorizontal: 0 }]}>{label}</Text>
+                                            {isActive && (
+                                                <Text style={{ marginLeft: 6, fontSize: 10, color: '#4CAF50', fontWeight: '800' }}>
+                                                    {tableSort.direction === 'asc' ? '▲' : '▼'}
+                                                </Text>
+                                            )}
+                                        </TouchableOpacity>
+                                    );
+                                };
+                                return (
+                                    <>
+                                        {renderSortHeader('CROP NAME', 'name', 2.4, 'left')}
+                                        {renderSortHeader('DTM', 'dtm', 0.6)}
+                                        {renderSortHeader('IGD', 'igd', 0.6)}
+                                        <Text style={[fpStyles.tableHeaderCell, { flex: 1.5 }]}>PLANNED DATE</Text>
+                                        {renderSortHeader('OPTIMAL PLANTING DATE', 'optimal', 1.6)}
+                                        {renderSortHeader('EARLIEST PLANTING DATE', 'earliest', 2.0)}
+                                        <Text style={[fpStyles.tableHeaderCell, { flex: 0.5 }]}>RPB</Text>
+                                        <Text style={[fpStyles.tableHeaderCell, { flex: 0.5, borderRightWidth: 0 }]}>IRS</Text>
+                                    </>
+                                );
+                            })()}
                         </View>
 
                         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 24 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={true}>
@@ -1470,30 +1536,51 @@ const SuccessionDrawer = ({ visible, bedNumber, blockName, currentSuccessions, a
                                         return date.toISOString().slice(0, 10);
                                     })();
 
-                                    let cStart, cEnd;
                                     if (targetGap) {
-                                        // Belt-and-suspenders: if the targetGap window is already at
-                                        // 100% coverage, fall back to the crop's own natural dates so
-                                        // crops planned for OTHER time windows remain selectable.
                                         const gapPeak = getPeakCoverageInWindow(
                                             currentSuccessions,
                                             targetGap.start_date,
                                             targetGap.end_date ?? computedEndDate
                                         );
-                                        if (gapPeak >= 0.99) {
-                                            // The targeted gap is full — evaluate against this crop's own window
-                                            cStart = computedStartDate;
-                                            cEnd = computedEndDate;
-                                        } else {
-                                            cStart = targetGap.start_date;
-                                            cEnd = targetGap.end_date ?? computedEndDate;
-                                        }
-                                    } else {
-                                        cStart = computedStartDate;
-                                        cEnd = computedEndDate;
+                                        if (gapPeak < 0.99) return Math.max(0, 1.0 - gapPeak);
                                     }
-                                    const peak = getPeakCoverageInWindow(currentSuccessions, cStart, cEnd);
-                                    return Math.max(0, 1.0 - peak);
+
+                                    const durationDays = (winterDtm ?? item.dtm ?? item.crop?.dtm ?? 60) + (item.crop?.harvest_window_days ?? 0);
+                                    
+                                    const candidateDates = [
+                                        computedStartDate,
+                                        farmProfile?.last_frost_date,
+                                        ...currentSuccessions.map(s => s.start_date),
+                                        ...currentSuccessions.map(s => {
+                                            if (!s.end_date) return null;
+                                            const dObj = new Date(s.end_date + 'T12:00:00');
+                                            dObj.setDate(dObj.getDate() + 1);
+                                            return dObj.toISOString().slice(0, 10);
+                                        })
+                                    ].filter(Boolean).filter(d => d >= `${activeYear}-01-01`);
+
+                                    const sortedDates = [...new Set(candidateDates)].sort((a,b) => a.localeCompare(b));
+                                    
+                                    let maxFoundCoverage = 0;
+                                    
+                                    const bObj = new Date(computedStartDate);
+                                    bObj.setDate(bObj.getDate() + durationDays);
+                                    const baselinePeak = getPeakCoverageInWindow(currentSuccessions, computedStartDate, bObj.toISOString().slice(0, 10));
+                                    maxFoundCoverage = Math.max(maxFoundCoverage, 1.0 - baselinePeak);
+                                    
+                                    if (maxFoundCoverage < 0.99) {
+                                        for (const testStart of sortedDates) {
+                                            const tObj = new Date(testStart);
+                                            tObj.setDate(tObj.getDate() + durationDays);
+                                            const testEnd = tObj.toISOString().slice(0, 10);
+                                            
+                                            const peak = getPeakCoverageInWindow(currentSuccessions, testStart, testEnd);
+                                            maxFoundCoverage = Math.max(maxFoundCoverage, 1.0 - peak);
+                                            if (maxFoundCoverage >= 0.99) break; // found a fully open spot!
+                                        }
+                                    }
+                                    
+                                    return Math.max(0, maxFoundCoverage);
                                 })();
 
                                 const bedFull = cropRemainingCoverage <= 0.01;
@@ -1943,30 +2030,55 @@ const SuccessionDrawer = ({ visible, bedNumber, blockName, currentSuccessions, a
 
                             const cropRemainingCoverage = (() => {
                                 if (!currentSuccessions || currentSuccessions.length === 0) return 1.0;
-                                let cStart, cEnd;
+                                
                                 if (targetGap) {
-                                    // Belt-and-suspenders: if the targetGap window is already at
-                                    // 100% coverage, fall back to the crop's own natural dates so
-                                    // crops planned for OTHER time windows remain selectable.
                                     const gapPeak = getPeakCoverageInWindow(
                                         currentSuccessions,
                                         targetGap.start_date,
                                         targetGap.end_date ?? '9999-12-31'
                                     );
-                                    if (gapPeak >= 0.99) {
-                                        // The targeted gap is full — evaluate against this crop's own window
-                                        cStart = item.start_date ?? farmProfile?.last_frost_date;
-                                        cEnd = item.end_date ?? '9999-12-31';
-                                    } else {
-                                        cStart = targetGap.start_date;
-                                        cEnd = targetGap.end_date ?? '9999-12-31';
-                                    }
-                                } else {
-                                    cStart = item.start_date ?? farmProfile?.last_frost_date;
-                                    cEnd = item.end_date ?? '9999-12-31';
+                                    // If targetGap is not fully blocked, restrict it perfectly to targetGap.
+                                    if (gapPeak < 0.99) return Math.max(0, 1.0 - gapPeak);
+                                    // If blocked, we fall through to fluid dynamic scan.
                                 }
-                                const peak = getPeakCoverageInWindow(currentSuccessions, cStart, cEnd);
-                                return Math.max(0, 1.0 - peak);
+
+                                const baseline = item.start_date ?? farmProfile?.last_frost_date ?? `${activeYear}-04-15`;
+                                const durationDays = item.crop.dtm ? item.crop.dtm + (item.crop.harvest_window_days ?? 0) : 60;
+                                
+                                const candidateDates = [
+                                    baseline,
+                                    farmProfile?.last_frost_date,
+                                    ...currentSuccessions.map(s => s.start_date),
+                                    ...currentSuccessions.map(s => {
+                                        if (!s.end_date) return null;
+                                        const dObj = new Date(s.end_date + 'T12:00:00');
+                                        dObj.setDate(dObj.getDate() + 1);
+                                        return dObj.toISOString().slice(0, 10);
+                                    })
+                                ].filter(Boolean).filter(d => d >= `${activeYear}-01-01`);
+
+                                const sortedDates = [...new Set(candidateDates)].sort((a,b) => a.localeCompare(b));
+                                
+                                let maxFoundCoverage = 0;
+                                
+                                const bObj = new Date(baseline);
+                                bObj.setDate(bObj.getDate() + durationDays);
+                                const baselinePeak = getPeakCoverageInWindow(currentSuccessions, baseline, bObj.toISOString().slice(0, 10));
+                                maxFoundCoverage = Math.max(maxFoundCoverage, 1.0 - baselinePeak);
+                                
+                                if (maxFoundCoverage < 0.99) {
+                                    for (const testStart of sortedDates) {
+                                        const tObj = new Date(testStart);
+                                        tObj.setDate(tObj.getDate() + durationDays);
+                                        const testEnd = tObj.toISOString().slice(0, 10);
+                                        
+                                        const peak = getPeakCoverageInWindow(currentSuccessions, testStart, testEnd);
+                                        maxFoundCoverage = Math.max(maxFoundCoverage, 1.0 - peak);
+                                        if (maxFoundCoverage >= 0.99) break; // found a fully open spot!
+                                    }
+                                }
+                                
+                                return Math.max(0, maxFoundCoverage);
                             })();
 
                             const bedFull = cropRemainingCoverage <= 0.01;
@@ -2426,10 +2538,12 @@ export default function BedWorkspaceScreen({ navigation, route }) {
             const priorYearCrops = getPriorYearBedCrops(bedNumber);
 
             // ── Pass 1: normal engine run (respects season / DTM filters) ─────────────
+            // We set maxResults very high so ALL crops in the DB receive true biological scores 
+            // and warnings, rather than falling into the Phase 2 "missing/fabricated failure" bucket.
             const engineCandidates = await getSuccessionCandidatesRanked(
                 { successions: successionsForEngine },
                 profile,
-                { maxResults: 200, priorYearCrops, shelterType: currentShelter }
+                { maxResults: 1000, priorYearCrops, shelterType: currentShelter }
             );
 
             if (selectedCropIds.length > 0) {
@@ -2438,7 +2552,7 @@ export default function BedWorkspaceScreen({ navigation, route }) {
                 const matchingIds = new Set(matching.map(c => c.crop.id));
 
                 // ── Pass 2: fetch any selected crops the engine filtered out ──────────
-                // (warm-season crops in a cool window, or crops with DTM > remaining days)
+                // With maxResults:1000, this array should only hit if a crop was permanently deleted from DB.
                 const missingIds = selectedCropIds.filter(id => !matchingIds.has(id));
                 const missingCandidates = (
                     await Promise.all(
@@ -2467,9 +2581,10 @@ export default function BedWorkspaceScreen({ navigation, route }) {
                 // Fitted crops first, out-of-season crops at bottom
                 setDrawerCandidates([...matching, ...missingCandidates]);
             } else {
-                // Strict Phase 2 Gatekeeping: if the library is empty, do NOT default to 200 dummy crops.
-                // Leave the drawer empty so the "No Crops Selected" UI triggers.
-                setDrawerCandidates([]);
+                // No crops have been shortlisted yet (or planId key mismatch caused a silent empty read).
+                // Fall back to the full engine result set so the drawer is never bricked.
+                // Slice to 150 to prevent FlatList from rendering 700 items unnecessarily.
+                setDrawerCandidates(engineCandidates.slice(0, 150));
             }
         } catch (err) {
             console.error('[BedWorkspace] Error loading candidates:', err);
