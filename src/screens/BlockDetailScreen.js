@@ -115,40 +115,49 @@ const BedRow = ({ block, bedNum, successions, shelterType, farmProfile, onPress,
                 {hasCrops ? (
                     <View style={{ flexDirection: 'column', gap: 4, width: '100%' }}>
                         {(() => {
-                            const sorted = [...successions].sort((a, b) => (a.start_date || '2099').localeCompare(b.start_date || '2099'));
-                            
+                            // Sort by start_date ascending. Null dates go to the end.
+                            const sorted = [...successions].sort((a, b) => {
+                                const da = a.start_date ?? '9999';
+                                const db = b.start_date ?? '9999';
+                                return da.localeCompare(db);
+                            });
+
+                            // Group crops that share the SAME in-ground date into a cohort.
+                            // Normalize null/undefined to a sentinel so the comparison is stable.
                             const cohorts = [];
                             sorted.forEach((s) => {
                                 const lastGrp = cohorts[cohorts.length - 1];
-                                const sDate = s.start_date || 'TBD';
+                                // Truncate to YYYY-MM-DD only (strip any time component) for a clean compare
+                                const sDate = s.start_date ? s.start_date.slice(0, 10) : '__no_date__';
                                 if (lastGrp && lastGrp.start_date === sDate) {
                                     lastGrp.crops.push(s);
                                 } else {
                                     cohorts.push({ start_date: sDate, crops: [s] });
                                 }
                             });
-                            
+
                             return cohorts.map((cohort, cIdx) => (
-                                <View key={`cohort-${cIdx}`} style={{ flexDirection: 'row', gap: 4, flexWrap: 'wrap' }}>
+                                // Each cohort = one in-ground date group, rendered as a vertical stack row
+                                <View key={`cohort-${cIdx}`} style={{ flexDirection: 'column', gap: 3 }}>
                                     {cohort.crops.map((s, si) => {
                                         const meta = cropMeta(s.crop_id);
                                         const frac = s.coverage ?? s.coverage_fraction ?? 1;
                                         const fracLabel = frac >= 0.99 ? 'Full' : frac >= 0.74 ? '¾' : frac >= 0.49 ? '½' : '¼';
-                                        
+
                                         let igd = null;
                                         if (s.start_date && s.end_date) {
-                                            const startMs = new Date((s.start_date) + 'T12:00:00').getTime();
-                                            const endMs = new Date((s.end_date) + 'T12:00:00').getTime();
+                                            const startMs = new Date(s.start_date + 'T12:00:00').getTime();
+                                            const endMs   = new Date(s.end_date   + 'T12:00:00').getTime();
                                             igd = Math.round((endMs - startMs) / 86400000);
                                         } else {
                                             igd = (meta?.dtm ?? s.dtm ?? 0) + (meta?.harvest_window_days ?? 14);
                                         }
 
-                                        const startStr = s.start_date ? fmtShortDate(s.start_date) : null;
-                                        const endStr   = s.end_date   ? fmtShortDate(s.end_date)   : null;
+                                        const startStr  = s.start_date ? fmtShortDate(s.start_date) : null;
+                                        const endStr    = s.end_date   ? fmtShortDate(s.end_date)   : null;
                                         const dateRange = startStr && endStr ? ` ${startStr}–${endStr}` : startStr ? ` ${startStr}` : '';
-                                        const igdStr   = igd ? ` ${igd}IGD` : '';
-                                        const label    = `[${fracLabel}] ${s.crop_name ?? s.name ?? '—'}${igdStr}${dateRange}`;
+                                        const igdStr    = igd ? ` ${igd}IGD` : '';
+                                        const label     = `[${fracLabel}] ${s.crop_name ?? s.name ?? '—'}${igdStr}${dateRange}`;
                                         const cc = cropColor(s.crop_id);
 
                                         return (
@@ -1026,15 +1035,14 @@ const styles = StyleSheet.create({
     bedNumBadge: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
     bedNumText: { fontSize: 13, fontWeight: '800' },
     bedRowContent: { flex: 1, gap: 3 },
-    chipsWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 4, width: '100%' },
+    chipsWrap: { flexDirection: 'column', gap: 4 },
     bedDiagramRow: {
-        flexDirection: 'row',
-        justifyContent: 'center', alignItems: 'center',
-        paddingHorizontal: 6, paddingVertical: 3,
-        overflow: 'hidden', borderRadius: Radius.full ?? 999, 
-        borderWidth: 1, borderColor: 'rgba(0,0,0,0.1)',
+        flexDirection: 'column',
+        justifyContent: 'center', alignItems: 'flex-start',
+        paddingHorizontal: 8, paddingVertical: 4,
+        overflow: 'hidden', borderRadius: Radius.sm ?? 6,
     },
-    bedDiagramRowName: { fontSize: 11, fontWeight: '700', lineHeight: 14 },
+    bedDiagramRowName: { fontSize: 10, fontWeight: '800', lineHeight: 14 },
     successionChip: {
         paddingHorizontal: 8, paddingVertical: 4,
         borderRadius: Radius.full ?? 999,
