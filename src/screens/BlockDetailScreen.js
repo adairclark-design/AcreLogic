@@ -556,26 +556,21 @@ export default function BlockDetailScreen({ navigation, route }) {
     // ─── Multi-Select State ───────────────────────────────────────────────
     const [selectedBeds, setSelectedBeds] = useState([]);
     const [isSelectMode, setIsSelectMode] = useState(false);
-    const [lastSelectedBed, setLastSelectedBed] = useState(null);
 
-    const handleToggleSelect = useCallback((bedNum, isShift) => {
+    const handleToggleSelect = useCallback((bedNum) => {
         setSelectedBeds(prev => {
             const next = [...prev];
             const idx = next.indexOf(bedNum);
-            if (isShift && lastSelectedBed !== null && lastSelectedBed !== bedNum) {
-                const min = Math.min(lastSelectedBed, bedNum);
-                const max = Math.max(lastSelectedBed, bedNum);
-                for (let i = min; i <= max; i++) {
-                    if (!next.includes(i)) next.push(i);
-                }
+            
+            if (idx >= 0) {
+                next.splice(idx, 1);
             } else {
-                if (idx >= 0) next.splice(idx, 1);
-                else next.push(bedNum);
+                next.push(bedNum);
             }
-            setLastSelectedBed(bedNum);
+            
             return next;
         });
-    }, [lastSelectedBed]);
+    }, []);
 
     // ─── Crop Manipulation ────────────────────────────────────────────────
     const handleAddCrop = (bedNum, cropEntry) => {
