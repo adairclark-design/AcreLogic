@@ -208,7 +208,7 @@ export default function YieldSummaryScreen({ navigation, route }) {
                     </View>
 
                     {/* ── Top Crops ────────────────────────────────────────────────────── */}
-                    <SectionHeader title="Top Crops globally" subtitle="Most profitable varieties farm-wide" />
+                    <SectionHeader title="Top Crops on the Farm" subtitle="Most profitable varieties farm-wide" />
                     <View style={isLargeScreen ? styles.gridWrapRow : undefined}>
                         {topCrops.length === 0 ? (
                             <View style={[styles.topCropsCard, Shadows.card, styles.flexFull]}>
