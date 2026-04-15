@@ -133,6 +133,14 @@ def _gemini_extract(variety: str, page_text: str) -> Optional[dict]:
         )
         r.raise_for_status()
         text = r.json()["candidates"][0]["content"]["parts"][0]["text"]
+        text = text.strip()
+        if text.startswith("```json"):
+            text = text[7:]
+        if text.startswith("```"):
+            text = text[3:]
+        if text.endswith("```"):
+            text = text[:-3]
+        text = text.strip()
         return json.loads(text)
     except Exception as e:
         log.warning(f"Gemini extract failed for {variety}: {e}")
@@ -154,7 +162,15 @@ SEEDS_PER_OZ = {
 def _price_per_100(raw: dict, variety: str) -> Optional[float]:
     if not raw or raw.get("not_found") or not raw.get("raw_price"):
         return None
-    price = float(raw["raw_price"])
+    try:
+        import re
+        val_str = str(raw["raw_price"])
+        val_str = re.sub(r"[^\d.]", "", val_str)
+        price = float(val_str)
+        raw["raw_price"] = price # Update it in the dict so the caller uses the float
+    except ValueError:
+        return None
+        
     seeds = raw.get("seeds_per_unit")
     if seeds and seeds > 0:
         return round((price / seeds) * 100, 4)
