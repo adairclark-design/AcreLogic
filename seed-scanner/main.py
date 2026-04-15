@@ -206,6 +206,23 @@ def get_prices(varieties: str = Query(..., description="Comma-separated variety 
     }
 
 
+@app.get("/api/seeds/flush_cache_hack")
+def flush_cache_hack():
+    """TEMPORARY endpoint to manually nuke the polluted cache."""
+    conn = get_db_connection()
+    if not conn:
+        return {"status": "error", "msg": "No DB conn"}
+    try:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM seed_price_cache")
+        conn.commit()
+        return {"status": "success", "msg": "seed_price_cache fully deleted"}
+    except Exception as e:
+        return {"status": "error", "msg": str(e)}
+    finally:
+        conn.close()
+
+
 @app.post("/api/seeds/scan")
 def trigger_scan(x_admin_secret: str = Header(None)):
     """Admin endpoint to trigger a full scan immediately."""
