@@ -33,8 +33,8 @@ export async function hydrateSeedPrices() {
             // Create dictionary mapping query names back to original crop.ids 
             const nameToId = {};
             for (const c of targetList) {
-                const reqName = c.variety && c.variety !== 'Primary' ? `${c.name} ${c.variety}` : c.name;
-                nameToId[reqName] = c.id;
+                // Extract directly from the ALL_SEED_LIST mapped shape
+                nameToId[c.name] = c.cropId;
             }
 
             // Convert array output into a keyed map for O(1) lookup using true cropId
