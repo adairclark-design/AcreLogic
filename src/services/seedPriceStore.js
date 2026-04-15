@@ -19,59 +19,64 @@ function notify() {
     for (const listener of listeners) listener(globalPriceCache);
 }
 
+/** Compute lowestPrice and merge a batch of price items into cacheMap */
+function _mergePrices(prices, nameToId, cacheMap) {
+    for (const item of prices) {
+        let minPrice = Infinity;
+        for (const vParams of Object.values(item.vendors)) {
+            if (vParams.stock && vParams.price > 0 && vParams.price < minPrice) {
+                minPrice = vParams.price;
+            }
+        }
+        item.lowestPrice = minPrice === Infinity ? null : minPrice;
+        const trueId = nameToId[item.name] || item.cropId;
+        item.cropId = trueId;
+        cacheMap[trueId] = item;
+    }
+}
+
+const BATCH_SIZE = 60;
+
 export async function hydrateSeedPrices() {
     if (globalPriceCache) return globalPriceCache;
     if (fetchPromise) return fetchPromise;
 
     fetchPromise = (async () => {
         try {
-            console.log('[SeedPriceStore] Hydrating global price cache...');
-            // Exclude cover crops from standard pricing since vendors usually sell in huge bulk
-            const targetList = ALL_SEED_LIST.filter(c => c.category !== 'Cover Crop').slice(0, 60); // Max 60 per request per API limit
-            const prices = await fetchVendorPrices(targetList);
-            
-            // Create dictionary mapping query names back to original crop.ids 
+            console.log('[SeedPriceStore] Hydrating global price cache (batched)...');
+            const allTarget = ALL_SEED_LIST.filter(c => c.category !== 'Cover Crop');
+
+            // Build nameToId for full list
             const nameToId = {};
-            for (const c of targetList) {
-                // Extract directly from the ALL_SEED_LIST mapped shape
-                nameToId[c.name] = c.cropId;
+            for (const c of allTarget) nameToId[c.name] = c.cropId;
+
+            // Split into batches of BATCH_SIZE
+            const batches = [];
+            for (let i = 0; i < allTarget.length; i += BATCH_SIZE) {
+                batches.push(allTarget.slice(i, i + BATCH_SIZE));
             }
 
-            // Convert array output into a keyed map for O(1) lookup using true cropId
-            const cacheMap = {};
-            for (const item of prices) {
-                // Determine lowest price
-                let minPrice = Infinity;
-                for (const vParams of Object.values(item.vendors)) {
-                    if (vParams.stock && vParams.price > 0 && vParams.price < minPrice) {
-                        minPrice = vParams.price;
-                    }
+            // Start with empty cache so subscribers see N/A while batches load
+            globalPriceCache = {};
+
+            // Fire all batches in parallel; notify UI as each resolves
+            await Promise.all(batches.map(async (batch) => {
+                try {
+                    const prices = await fetchVendorPrices(batch);
+                    _mergePrices(prices, nameToId, globalPriceCache);
+                } catch {
+                    // Batch failed — fall back to mock for this slice
+                    const mockPrices = buildMockPriceData(batch);
+                    _mergePrices(mockPrices, nameToId, globalPriceCache);
                 }
-                item.lowestPrice = minPrice === Infinity ? null : minPrice;
-                
-                const trueId = nameToId[item.name] || item.cropId;
-                item.cropId = trueId;
-                cacheMap[trueId] = item;
-            }
-            
-            globalPriceCache = cacheMap;
-            notify();
-            return cacheMap;
+                notify();
+            }));
+
+            return globalPriceCache;
         } catch (err) {
-            console.warn('[SeedPriceStore] Global hydration failed, falling back to mock prices', err);
-            // Fallback to mock logic if Railway worker is down
-            const mockPrices = buildMockPriceData(ALL_SEED_LIST);
+            console.warn('[SeedPriceStore] Hydration failed entirely, using full mock', err);
             const cacheMap = {};
-            for (const item of mockPrices) {
-                let minPrice = Infinity;
-                for (const vParams of Object.values(item.vendors)) {
-                    if (vParams.stock && vParams.price > 0 && vParams.price < minPrice) {
-                        minPrice = vParams.price;
-                    }
-                }
-                item.lowestPrice = minPrice === Infinity ? null : minPrice;
-                cacheMap[item.cropId] = item;
-            }
+            _mergePrices(buildMockPriceData(ALL_SEED_LIST), {}, cacheMap);
             globalPriceCache = cacheMap;
             notify();
             return cacheMap;
