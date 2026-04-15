@@ -38,7 +38,7 @@ log = logging.getLogger(__name__)
 # ─── Config ───────────────────────────────────────────────────────────────────
 DATABASE_URL = os.environ["DATABASE_URL"]
 ADMIN_SECRET = os.environ.get("ADMIN_SECRET", "change-me-in-railway")
-PORT         = int(os.environ.get("PORT", 8080))
+PORT         = int(os.environ.get("PORT", 8000))
 
 # ─── DB Connection ────────────────────────────────────────────────────────────
 
@@ -96,11 +96,11 @@ def nightly_scan_job():
 async def lifespan(app: FastAPI):
     log.info("🌱 Seed Scanner Worker starting up")
     init_db()
-    # Run scan immediately on boot (warms cache for first users)
-    try:
-        run_full_scan(DATABASE_URL)
-    except Exception as e:
-        log.warning(f"Boot scan failed (non-fatal): {e}")
+    # Run scan immediately on boot in a background thread to prevent Railway 502s
+    import threading
+    log.info("Triggering background cache warm on boot...")
+    t = threading.Thread(target=run_full_scan, args=(DATABASE_URL,), daemon=True)
+    t.start()
     # Schedule nightly at 2am UTC
     scheduler.add_job(nightly_scan_job, "cron", hour=2, minute=0)
     scheduler.start()
