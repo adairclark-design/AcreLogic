@@ -127,8 +127,8 @@ export function clearScanResult() {
 // When not set, this throws and the caller falls back to buildMockPriceData().
 
 const SCANNER_URL = typeof process !== 'undefined'
-    ? (process.env.EXPO_PUBLIC_SEED_SCANNER_URL || '')
-    : '';
+    ? (process.env.EXPO_PUBLIC_SEED_SCANNER_URL || 'https://acrelogic-production.up.railway.app')
+    : 'https://acrelogic-production.up.railway.app';
 
 /**
  * Fetch live vendor prices from the Railway seed-scanner worker.
