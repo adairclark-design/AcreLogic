@@ -162,7 +162,7 @@ export default function SharedCropCard({
                 </View>
 
                 {/* Inline Seed Shopping Pill */}
-                {onShopPress && priceData && priceData.lowestPrice !== null && (
+                {onShopPress && priceData && priceData.lowestPrice !== null ? (
                     <TouchableOpacity 
                         style={styles.pricePillWrapper} 
                         onPress={() => onShopPress(crop, priceData)}
@@ -174,7 +174,13 @@ export default function SharedCropCard({
                             </Text>
                         </View>
                     </TouchableOpacity>
-                )}
+                ) : onShopPress && allPrices !== null ? (
+                    <View style={styles.pricePillWrapper}>
+                        <View style={[styles.pricePill, { borderColor: '#aaa' }]}>
+                            <Text style={[styles.pricePillText, { color: '#aaa' }]}>Seeds N/A</Text>
+                        </View>
+                    </View>
+                ) : null}
 
                 {/* Selected overlay */}
                 {selected && (

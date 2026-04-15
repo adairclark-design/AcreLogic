@@ -49,8 +49,8 @@ export async function hydrateSeedPrices() {
                 }
                 item.lowestPrice = minPrice === Infinity ? null : minPrice;
                 
-                const trueId = nameToId[item.variety] || item.cropId;
-                item.cropId = trueId; // Align inner object ID
+                const trueId = nameToId[item.name] || item.cropId;
+                item.cropId = trueId;
                 cacheMap[trueId] = item;
             }
             
