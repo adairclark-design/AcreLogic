@@ -9,7 +9,7 @@ const listeners = new Set();
 
 const ALL_SEED_LIST = cropDbRaw.crops.map(c => ({
     cropId: c.id,
-    name: c.variety || c.name,
+    name: c.variety && c.variety !== 'Primary' ? `${c.name} ${c.variety}` : c.name,
     emoji: c.emoji || '🌱',
     category: c.category,
     reqType: 'seeds'
