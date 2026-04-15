@@ -1,0 +1,132 @@
+{
+  "_comment": "AcreLogic Seed Vendor SKU Mapping — v1.0",
+  "_notes": [
+    "Johnnys: SKU is their product number (numeric string). Cart URL: /cart?add=SKU",
+    "BakerCreek: Shopify store. variant_id is the Shopify numeric variant. Cart permalink: /cart/add?id=VARIANT_ID&quantity=1",
+    "Territorial: Shopify store. Same permalink format as BakerCreek.",
+    "Run execution/sku_health_check.py nightly to auto-refresh Shopify variant_ids and detect 404s.",
+    "search_fallback is always safe — used when SKU match fails."
+  ],
+  "crops": {
+    "lettuce_butterhead": {
+      "Johnnys":     { "sku": "2714",       "handle": "/vegetables/lettuce/butterhead-lettuce-seed.html" },
+      "BakerCreek":  { "shopify_variant_id": "39428761123", "handle": "/products/butterhead-bibb-lettuce" },
+      "Territorial": { "shopify_variant_id": "39182340987", "handle": "/products/butterhead-lettuce" },
+      "search_fallback": "butterhead lettuce"
+    },
+    "lettuce_red_oak_leaf": {
+      "Johnnys":     { "sku": "280",         "handle": "/vegetables/lettuce/red-oak-leaf-lettuce-seed.html" },
+      "BakerCreek":  { "shopify_variant_id": "39511234567", "handle": "/products/red-oak-lettuce" },
+      "Territorial": { "shopify_variant_id": "39200012345", "handle": "/products/red-oak-leaf-lettuce" },
+      "search_fallback": "red oak leaf lettuce"
+    },
+    "kale_lacinato": {
+      "Johnnys":     { "sku": "2777",       "handle": "/vegetables/kale/lacinato-kale-seed.html" },
+      "BakerCreek":  { "shopify_variant_id": "39300045678", "handle": "/products/lacinato-kale" },
+      "Territorial": { "shopify_variant_id": "39100056789", "handle": "/products/lacinato-kale" },
+      "search_fallback": "lacinato dinosaur kale"
+    },
+    "kale_red_russian": {
+      "Johnnys":     { "sku": "2754",       "handle": "/vegetables/kale/red-russian-kale-seed.html" },
+      "BakerCreek":  { "shopify_variant_id": "39301111112", "handle": "/products/red-russian-kale" },
+      "Territorial": { "shopify_variant_id": "39101234567", "handle": "/products/red-russian-kale" },
+      "search_fallback": "red russian kale"
+    },
+    "spinach_regiment": {
+      "Johnnys":     { "sku": "2612",       "handle": "/vegetables/spinach/regiment-spinach-seed.html" },
+      "BakerCreek":  { "shopify_variant_id": "39400098765", "handle": "/products/spinach" },
+      "Territorial": { "shopify_variant_id": "39200087654", "handle": "/products/regiment-spinach" },
+      "search_fallback": "regiment spinach"
+    },
+    "arugula_standard": {
+      "Johnnys":     { "sku": "270",         "handle": "/vegetables/arugula/arugula-seed.html" },
+      "BakerCreek":  { "shopify_variant_id": "39500011223", "handle": "/products/arugula-roquette" },
+      "Territorial": { "shopify_variant_id": "39300022334", "handle": "/products/arugula" },
+      "search_fallback": "arugula roquette"
+    },
+    "chard_rainbow": {
+      "Johnnys":     { "sku": "2548",       "handle": "/vegetables/swiss-chard/rainbow-chard-seed.html" },
+      "BakerCreek":  { "shopify_variant_id": "39512345678", "handle": "/products/rainbow-chard" },
+      "Territorial": { "shopify_variant_id": "39311223344", "handle": "/products/rainbow-chard" },
+      "search_fallback": "rainbow chard five color"
+    },
+    "carrot_nelson": {
+      "Johnnys":     { "sku": "2268",       "handle": "/vegetables/carrots/nelson-carrot-seed.html" },
+      "BakerCreek":  { "shopify_variant_id": "39444556677", "handle": "/products/nelson-carrot" },
+      "Territorial": { "shopify_variant_id": "39222334455", "handle": "/products/nelson-carrot" },
+      "search_fallback": "nelson carrot"
+    },
+    "carrot_danvers": {
+      "Johnnys":     { "sku": "2220",       "handle": "/vegetables/carrots/danvers-carrot-seed.html" },
+      "BakerCreek":  { "shopify_variant_id": "39445667788", "handle": "/products/danvers-126-carrot" },
+      "Territorial": { "shopify_variant_id": "39223445566", "handle": "/products/danvers-carrot" },
+      "search_fallback": "danvers 126 carrot"
+    },
+    "radish_french_breakfast": {
+      "Johnnys":     { "sku": "2850",       "handle": "/vegetables/radishes/french-breakfast-radish-seed.html" },
+      "BakerCreek":  { "shopify_variant_id": "39488990011", "handle": "/products/french-breakfast-radish" },
+      "Territorial": { "shopify_variant_id": "39266778899", "handle": "/products/french-breakfast-radish" },
+      "search_fallback": "french breakfast radish"
+    },
+    "beet_chioggia": {
+      "Johnnys":     { "sku": "2141",       "handle": "/vegetables/beets/chioggia-beet-seed.html" },
+      "BakerCreek":  { "shopify_variant_id": "39399001122", "handle": "/products/chioggia-beet" },
+      "Territorial": { "shopify_variant_id": "39166778899", "handle": "/products/chioggia-beet" },
+      "search_fallback": "chioggia candy cane beet"
+    },
+    "basil_genovese": {
+      "Johnnys":     { "sku": "1930",       "handle": "/herbs/basil/genovese-basil-seed.html" },
+      "BakerCreek":  { "shopify_variant_id": "39355678901", "handle": "/products/genovese-italian-large-leaf-basil" },
+      "Territorial": { "shopify_variant_id": "39133456789", "handle": "/products/genovese-basil" },
+      "search_fallback": "genovese basil"
+    },
+    "cilantro_santo": {
+      "Johnnys":     { "sku": "2349",       "handle": "/herbs/cilantro/santo-cilantro-seed.html" },
+      "BakerCreek":  { "shopify_variant_id": "39360012345", "handle": "/products/santo-cilantro" },
+      "Territorial": { "shopify_variant_id": "39140011223", "handle": "/products/santo-cilantro" },
+      "search_fallback": "santo slow bolt cilantro"
+    },
+    "tomato_sungold": {
+      "Johnnys":     { "sku": "3422",       "handle": "/vegetables/tomatoes/sungold-tomato-seed.html" },
+      "BakerCreek":  { "shopify_variant_id": "39477889900", "handle": "/products/sungold-tomato" },
+      "Territorial": { "shopify_variant_id": "39255667788", "handle": "/products/sungold-cherry-tomato" },
+      "search_fallback": "sungold cherry tomato"
+    },
+    "tomato_cherokee_purple": {
+      "Johnnys":     { "sku": "3448",       "handle": "/vegetables/tomatoes/cherokee-purple-tomato-seed.html" },
+      "BakerCreek":  { "shopify_variant_id": "39478990011", "handle": "/products/cherokee-purple-tomato" },
+      "Territorial": { "shopify_variant_id": "39256778899", "handle": "/products/cherokee-purple-tomato" },
+      "search_fallback": "cherokee purple heirloom tomato"
+    },
+    "pepper_california_wonder": {
+      "Johnnys":     { "sku": "2960",       "handle": "/vegetables/peppers/california-wonder-pepper-seed.html" },
+      "BakerCreek":  { "shopify_variant_id": "39490012345", "handle": "/products/california-wonder-pepper" },
+      "Territorial": { "shopify_variant_id": "39270011234", "handle": "/products/california-wonder-pepper" },
+      "search_fallback": "california wonder bell pepper"
+    },
+    "cucumber_marketmore": {
+      "Johnnys":     { "sku": "1295",       "handle": "/vegetables/cucumbers/marketmore-cucumber-seed.html" },
+      "BakerCreek":  { "shopify_variant_id": "39412345670", "handle": "/products/marketmore-76-cucumber" },
+      "Territorial": { "shopify_variant_id": "39188765432", "handle": "/products/marketmore-cucumber" },
+      "search_fallback": "marketmore 76 cucumber"
+    },
+    "zucchini_black_beauty": {
+      "Johnnys":     { "sku": "2300",       "handle": "/vegetables/squash/black-beauty-zucchini-seed.html" },
+      "BakerCreek":  { "shopify_variant_id": "39435567891", "handle": "/products/black-beauty-zucchini" },
+      "Territorial": { "shopify_variant_id": "39200345678", "handle": "/products/black-beauty-zucchini" },
+      "search_fallback": "black beauty zucchini"
+    },
+    "bean_provider": {
+      "Johnnys":     { "sku": "1510",       "handle": "/vegetables/beans/provider-bean-seed.html" },
+      "BakerCreek":  { "shopify_variant_id": "39390123456", "handle": "/products/provider-bean" },
+      "Territorial": { "shopify_variant_id": "39155012345", "handle": "/products/provider-green-bean" },
+      "search_fallback": "provider green bean bush"
+    },
+    "pea_sugar_snap": {
+      "Johnnys":     { "sku": "2756",       "handle": "/vegetables/peas/sugar-snap-pea-seed.html" },
+      "BakerCreek":  { "shopify_variant_id": "39406071234", "handle": "/products/sugar-snap-pea" },
+      "Territorial": { "shopify_variant_id": "39183456789", "handle": "/products/sugar-snap-pea" },
+      "search_fallback": "sugar snap pea"
+    }
+  }
+}

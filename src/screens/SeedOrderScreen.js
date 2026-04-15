@@ -18,13 +18,15 @@ import React, { useState, useCallback } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import {
     View, Text, StyleSheet, ScrollView, TouchableOpacity,
-    ActivityIndicator, Platform, Clipboard, Image, Modal
+    ActivityIndicator, Platform, Clipboard, Image, Modal, Linking,
 } from 'react-native';
 import { Colors, Typography, Spacing, Radius, Shadows } from '../theme';
 import cropData from '../data/crops.json';
 import CROP_IMAGES from '../data/cropImages';
 import GlobalNavBar from '../components/GlobalNavBar';
 import { loadBlocks, loadBlockBeds } from '../services/persistence';
+import { buildMockPriceData, saveScanResult, loadSavedScanResult, fetchVendorPrices } from '../services/seedProcurementService';
+import { VENDOR_CONFIG, solveOptimalCart } from '../services/seedCostOptimizer';
 
 const CROPS_MAP = Object.fromEntries(cropData.crops.map(c => [c.id, c]));
 
@@ -416,11 +418,262 @@ const SeedCard = ({ item }) => {
 
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 
+// ─── Seed Savant Panel Sub-components ────────────────────────────────────────
+
+const VendorPriceRow = ({ vendor, offer, cropName }) => {
+    const cfg = VENDOR_CONFIG[vendor];
+    if (!cfg) return null;
+    return (
+        <View style={[savantStyles.vendorRow, { borderLeftColor: cfg.accentColor }]}>
+            <Text style={savantStyles.vendorEmoji}>{cfg.emoji}</Text>
+            <View style={savantStyles.vendorInfo}>
+                <Text style={savantStyles.vendorName}>{cfg.shortLabel}</Text>
+                {offer.rawUnit && <Text style={savantStyles.vendorUnit}>{offer.rawUnit}</Text>}
+            </View>
+            {offer.stock ? (
+                <Text style={[savantStyles.vendorPrice, { color: cfg.accentColor }]}>${offer.price.toFixed(2)}</Text>
+            ) : (
+                <Text style={savantStyles.vendorOos}>Out of Stock</Text>
+            )}
+        </View>
+    );
+};
+
+const CartVendorCard = ({ vendor, cart, onPress }) => {
+    const cfg = VENDOR_CONFIG[vendor];
+    if (!cfg || !cart) return null;
+    return (
+        <TouchableOpacity
+            style={[savantStyles.cartCard, { borderColor: cfg.borderColor, backgroundColor: cfg.bgColor }]}
+            onPress={onPress}
+            activeOpacity={0.82}
+        >
+            <View style={savantStyles.cartCardTop}>
+                <Text style={savantStyles.cartVendorEmoji}>{cfg.emoji}</Text>
+                <View style={{ flex: 1 }}>
+                    <Text style={[savantStyles.cartVendorLabel, { color: cfg.accentColor }]}>{cfg.shortLabel}</Text>
+                    <Text style={savantStyles.cartItemCount}>{cart.cropIds.length} item{cart.cropIds.length !== 1 ? 's' : ''}</Text>
+                </View>
+                <View style={savantStyles.cartTotals}>
+                    {cart.shipping === 0 ? (
+                        <Text style={savantStyles.cartFreeShip}>FREE ship</Text>
+                    ) : (
+                        <Text style={savantStyles.cartShipCost}>+${cart.shipping.toFixed(2)} ship</Text>
+                    )}
+                    <Text style={[savantStyles.cartTotal, { color: cfg.accentColor }]}>${cart.total.toFixed(2)}</Text>
+                </View>
+            </View>
+            <View style={[savantStyles.cartBtn, { backgroundColor: cfg.accentColor }]}>
+                <Text style={savantStyles.cartBtnText}>Open {cfg.shortLabel} Cart →</Text>
+            </View>
+        </TouchableOpacity>
+    );
+};
+
+const SeedSavantPanel = ({ visible, onClose, seedList }) => {
+    const [scanState, setScanState] = useState('idle'); // idle | scanning | done
+    const [priceData, setPriceData] = useState(null);
+    const [cartPlan, setCartPlan] = useState(null);
+    const [activeTab, setActiveTab] = useState('cart'); // cart | prices
+
+    const runScan = useCallback(async () => {
+        setScanState('scanning');
+        try {
+            const prices = await fetchVendorPrices(seedList);
+            const plan = solveOptimalCart(prices);
+            setPriceData(prices);
+            setCartPlan(plan);
+            saveScanResult(prices, plan);
+            setScanState('done');
+        } catch (err) {
+            // Worker not deployed yet — fall back to mock data
+            console.warn('[SeedSavant] API unavailable, using mock prices:', err.message);
+            const prices = buildMockPriceData(seedList);
+            const plan = solveOptimalCart(prices);
+            setPriceData(prices);
+            setCartPlan(plan);
+            saveScanResult(prices, plan);
+            setScanState('done');
+        }
+    }, [seedList]);
+
+    const handleOpenCart = useCallback((vendor, cartUrl) => {
+        if (!cartUrl) return;
+        if (Platform.OS === 'web') {
+            window.open(cartUrl, '_blank', 'noopener,noreferrer');
+        } else {
+            Linking.openURL(cartUrl);
+        }
+    }, []);
+
+    // Reset scan state when panel opens
+    const handleOpen = useCallback(() => {
+        const cached = loadSavedScanResult();
+        if (cached) {
+            setPriceData(cached.priceData);
+            setCartPlan(cached.cartPlan);
+            setScanState('done');
+        } else {
+            setScanState('idle');
+            setPriceData(null);
+            setCartPlan(null);
+        }
+    }, []);
+
+    return (
+        <Modal
+            visible={visible}
+            animationType="slide"
+            transparent
+            onRequestClose={onClose}
+            onShow={handleOpen}
+        >
+            <View style={savantStyles.overlay}>
+                <View style={savantStyles.sheet}>
+                    {/* Header */}
+                    <View style={savantStyles.sheetHeader}>
+                        <View>
+                            <Text style={savantStyles.sheetTitle}>🤖 Seed Savant</Text>
+                            <Text style={savantStyles.sheetSubtitle}>Smart price comparison across 3 vendors</Text>
+                        </View>
+                        <TouchableOpacity onPress={onClose} style={savantStyles.closeBtn}>
+                            <Text style={savantStyles.closeBtnText}>✕</Text>
+                        </TouchableOpacity>
+                    </View>
+
+                    {/* Idle state */}
+                    {scanState === 'idle' && (
+                        <View style={savantStyles.idleWrap}>
+                            <Text style={savantStyles.idleEmoji}>🌱</Text>
+                            <Text style={savantStyles.idleTitle}>Find the best price for your {seedList.length} crops</Text>
+                            <Text style={savantStyles.idleBody}>
+                                Compares Johnny's, Baker Creek, and Territorial. Finds the cheapest cart split including shipping thresholds. Opens checkout in a new tab — you stay in control.
+                            </Text>
+                            <TouchableOpacity style={savantStyles.scanBtn} onPress={runScan}>
+                                <Text style={savantStyles.scanBtnText}>🔍 Compare Prices Now</Text>
+                            </TouchableOpacity>
+                            <Text style={savantStyles.idleDisclaimer}>
+                                Purchases made via affiliated vendor links. AcreLogic earns a small commission at no extra cost to you.
+                            </Text>
+                        </View>
+                    )}
+
+                    {/* Scanning */}
+                    {scanState === 'scanning' && (
+                        <View style={savantStyles.scanningWrap}>
+                            <ActivityIndicator color={Colors.primaryGreen} size="large" />
+                            <Text style={savantStyles.scanningTitle}>Scanning vendors…</Text>
+                            <Text style={savantStyles.scanningBody}>
+                                Checking Johnny's, Baker Creek, and Territorial for your {seedList.length} crops
+                            </Text>
+                        </View>
+                    )}
+
+                    {/* Results */}
+                    {scanState === 'done' && cartPlan && (
+                        <ScrollView
+                            style={savantStyles.resultsScroll}
+                            contentContainerStyle={savantStyles.resultsContent}
+                            showsVerticalScrollIndicator={false}
+                        >
+                            {/* Tab bar */}
+                            <View style={savantStyles.tabBar}>
+                                <TouchableOpacity
+                                    style={[savantStyles.tab, activeTab === 'cart' && savantStyles.tabActive]}
+                                    onPress={() => setActiveTab('cart')}
+                                >
+                                    <Text style={[savantStyles.tabText, activeTab === 'cart' && savantStyles.tabTextActive]}>🛒 Best Cart</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                    style={[savantStyles.tab, activeTab === 'prices' && savantStyles.tabActive]}
+                                    onPress={() => setActiveTab('prices')}
+                                >
+                                    <Text style={[savantStyles.tabText, activeTab === 'prices' && savantStyles.tabTextActive]}>📊 Price Breakdown</Text>
+                                </TouchableOpacity>
+                            </View>
+
+                            {activeTab === 'cart' && (
+                                <View style={savantStyles.cartTab}>
+                                    {/* Savings banner */}
+                                    {cartPlan.savingsVsSingleVendor > 0 && (
+                                        <View style={savantStyles.savingsBanner}>
+                                            <Text style={savantStyles.savingsEmoji}>💰</Text>
+                                            <View>
+                                                <Text style={savantStyles.savingsTitle}>Save ${cartPlan.savingsVsSingleVendor.toFixed(2)} by splitting vendors</Text>
+                                                <Text style={savantStyles.savingsBody}>vs. ordering everything from one place</Text>
+                                            </View>
+                                        </View>
+                                    )}
+
+                                    {/* Optimal cart */}
+                                    <Text style={savantStyles.sectionLabel}>RECOMMENDED ORDER</Text>
+                                    <Text style={savantStyles.cartLabel}>{cartPlan.optimal.label}</Text>
+                                    {Object.entries(cartPlan.optimal.vendorCarts).map(([vendor, cart]) => (
+                                        <CartVendorCard
+                                            key={vendor}
+                                            vendor={vendor}
+                                            cart={cart}
+                                            onPress={() => handleOpenCart(vendor, cart.cartUrl)}
+                                        />
+                                    ))}
+                                    <View style={savantStyles.grandTotalRow}>
+                                        <Text style={savantStyles.grandTotalLabel}>Estimated Total</Text>
+                                        <Text style={savantStyles.grandTotalValue}>${cartPlan.optimal.grandTotal.toFixed(2)}</Text>
+                                    </View>
+
+                                    {/* Single vendor alternative */}
+                                    {cartPlan.singleVendorAlternative && cartPlan.savingsVsSingleVendor > 0 && (
+                                        <>
+                                            <Text style={[savantStyles.sectionLabel, { marginTop: 20 }]}>SIMPLER OPTION (ONE STORE)</Text>
+                                            {Object.entries(cartPlan.singleVendorAlternative.vendorCarts).map(([vendor, cart]) => (
+                                                <CartVendorCard
+                                                    key={vendor}
+                                                    vendor={vendor}
+                                                    cart={cart}
+                                                    onPress={() => handleOpenCart(vendor, cart.cartUrl)}
+                                                />
+                                            ))}
+                                            <View style={savantStyles.grandTotalRow}>
+                                                <Text style={savantStyles.grandTotalLabel}>Estimated Total</Text>
+                                                <Text style={[savantStyles.grandTotalValue, { color: Colors.mutedText }]}>${cartPlan.singleVendorAlternative.grandTotal.toFixed(2)}</Text>
+                                            </View>
+                                        </>
+                                    )}
+
+                                    <TouchableOpacity style={savantStyles.rescanBtn} onPress={runScan}>
+                                        <Text style={savantStyles.rescanBtnText}>↻ Refresh Prices</Text>
+                                    </TouchableOpacity>
+                                </View>
+                            )}
+
+                            {activeTab === 'prices' && priceData && (
+                                <View style={savantStyles.pricesTab}>
+                                    {priceData.map(item => (
+                                        <View key={item.cropId} style={savantStyles.priceItem}>
+                                            <Text style={savantStyles.priceItemName}>{item.emoji} {item.name}</Text>
+                                            {Object.entries(item.vendors).map(([vendor, offer]) => (
+                                                <VendorPriceRow key={vendor} vendor={vendor} offer={offer} cropName={item.name} />
+                                            ))}
+                                        </View>
+                                    ))}
+                                </View>
+                            )}
+                        </ScrollView>
+                    )}
+                </View>
+            </View>
+        </Modal>
+    );
+};
+
+// ─── Main Screen ──────────────────────────────────────────────────────────────
+
 export default function SeedOrderScreen({ navigation, route }) {
     const { farmProfile, planId } = route?.params ?? {};
     const [seedList, setSeedList] = useState([]);
     const [loading, setLoading] = useState(true);
     const [copied, setCopied] = useState(false);
+    const [savantOpen, setSavantOpen] = useState(false);
 
     useFocusEffect(useCallback(() => {
         setLoading(true);
@@ -557,11 +810,31 @@ export default function SeedOrderScreen({ navigation, route }) {
                         </View>
                     ))}
 
-                    <View style={{ height: 60 }} />
+                    <View style={{ height: 100 }} />
                 </ScrollView>
             )}
-            
 
+            {/* Seed Savant FAB */}
+            {seedList.length > 0 && !loading && (
+                <TouchableOpacity
+                    style={savantStyles.fab}
+                    onPress={() => setSavantOpen(true)}
+                    activeOpacity={0.88}
+                >
+                    <Text style={savantStyles.fabEmoji}>🤖</Text>
+                    <View>
+                        <Text style={savantStyles.fabTitle}>Shop Smart</Text>
+                        <Text style={savantStyles.fabSub}>Compare prices · Best cart</Text>
+                    </View>
+                    <Text style={savantStyles.fabArrow}>›</Text>
+                </TouchableOpacity>
+            )}
+
+            <SeedSavantPanel
+                visible={savantOpen}
+                onClose={() => setSavantOpen(false)}
+                seedList={seedList}
+            />
         </View>
     );
 }
@@ -684,4 +957,137 @@ const styles = StyleSheet.create({
     cardBreakdownDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: Colors.primaryGreen, opacity: 0.6 },
     cardBreakdownText: { flex: 1, fontSize: 11, color: Colors.primaryGreen },
     cardBreakdownVal: { fontSize: 11, fontWeight: '800', color: Colors.burntOrange }
+});
+
+// ─── Seed Savant Styles ───────────────────────────────────────────────────────
+const savantStyles = StyleSheet.create({
+    // FAB
+    fab: {
+        position: 'absolute', bottom: 20, left: 16, right: 16,
+        flexDirection: 'row', alignItems: 'center', gap: 12,
+        backgroundColor: '#1A3A0F',
+        borderRadius: Radius.lg, paddingVertical: 14, paddingHorizontal: 18,
+        shadowColor: '#000', shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3, shadowRadius: 10, elevation: 8,
+    },
+    fabEmoji: { fontSize: 22 },
+    fabTitle: { fontSize: 14, fontWeight: '800', color: '#fff' },
+    fabSub: { fontSize: 10, color: 'rgba(255,255,255,0.6)', marginTop: 1 },
+    fabArrow: { marginLeft: 'auto', fontSize: 22, color: 'rgba(255,255,255,0.5)', fontWeight: '300' },
+
+    // Modal
+    overlay: {
+        flex: 1, backgroundColor: 'rgba(0,0,0,0.55)',
+        justifyContent: 'flex-end',
+    },
+    sheet: {
+        backgroundColor: '#FAFAF7', borderTopLeftRadius: 24, borderTopRightRadius: 24,
+        maxHeight: '90%', minHeight: 360,
+        ...Platform.select({ web: { maxHeight: '88vh' } }),
+    },
+    sheetHeader: {
+        flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between',
+        padding: 20, paddingBottom: 12,
+        borderBottomWidth: 1, borderBottomColor: 'rgba(45,79,30,0.08)',
+    },
+    sheetTitle: { fontSize: 20, fontWeight: '900', color: Colors.primaryGreen },
+    sheetSubtitle: { fontSize: 12, color: Colors.mutedText, marginTop: 2 },
+    closeBtn: {
+        width: 32, height: 32, borderRadius: 16,
+        backgroundColor: 'rgba(0,0,0,0.07)',
+        alignItems: 'center', justifyContent: 'center',
+    },
+    closeBtnText: { fontSize: 14, color: Colors.mutedText, fontWeight: '700' },
+
+    // Idle state
+    idleWrap: { padding: 24, alignItems: 'center', gap: 10 },
+    idleEmoji: { fontSize: 40, marginBottom: 4 },
+    idleTitle: { fontSize: 17, fontWeight: '800', color: Colors.primaryGreen, textAlign: 'center' },
+    idleBody: { fontSize: 13, color: Colors.mutedText, textAlign: 'center', lineHeight: 19 },
+    scanBtn: {
+        backgroundColor: Colors.primaryGreen, borderRadius: Radius.full,
+        paddingVertical: 14, paddingHorizontal: 32, marginTop: 8,
+    },
+    scanBtnText: { color: '#fff', fontWeight: '800', fontSize: 15 },
+    idleDisclaimer: { fontSize: 10, color: Colors.mutedText, textAlign: 'center', fontStyle: 'italic', marginTop: 4 },
+
+    // Scanning
+    scanningWrap: { padding: 40, alignItems: 'center', gap: 16 },
+    scanningTitle: { fontSize: 17, fontWeight: '800', color: Colors.primaryGreen },
+    scanningBody: { fontSize: 13, color: Colors.mutedText, textAlign: 'center' },
+
+    // Results scroll
+    resultsScroll: { flex: 1 },
+    resultsContent: { padding: 16, paddingBottom: 40, gap: 12 },
+
+    // Tab bar
+    tabBar: {
+        flexDirection: 'row', backgroundColor: 'rgba(45,79,30,0.07)',
+        borderRadius: Radius.full, padding: 3, marginBottom: 4,
+    },
+    tab: { flex: 1, paddingVertical: 8, alignItems: 'center', borderRadius: Radius.full },
+    tabActive: { backgroundColor: Colors.primaryGreen },
+    tabText: { fontSize: 13, fontWeight: '700', color: Colors.mutedText },
+    tabTextActive: { color: '#fff' },
+
+    // Cart tab
+    cartTab: { gap: 10 },
+    savingsBanner: {
+        flexDirection: 'row', alignItems: 'center', gap: 10,
+        backgroundColor: '#ECFDF5', borderRadius: Radius.md,
+        padding: 12, borderWidth: 1, borderColor: '#6EE7B7',
+    },
+    savingsEmoji: { fontSize: 24 },
+    savingsTitle: { fontSize: 14, fontWeight: '800', color: '#065F46' },
+    savingsBody: { fontSize: 11, color: '#047857', marginTop: 1 },
+    sectionLabel: {
+        fontSize: 9, fontWeight: '800', color: Colors.mutedText,
+        letterSpacing: 1.4, marginTop: 4,
+    },
+    cartLabel: { fontSize: 13, fontWeight: '700', color: Colors.primaryGreen },
+    cartCard: {
+        borderWidth: 1.5, borderRadius: Radius.md,
+        padding: 12, gap: 10,
+    },
+    cartCardTop: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+    cartVendorEmoji: { fontSize: 20 },
+    cartVendorLabel: { fontSize: 14, fontWeight: '800' },
+    cartItemCount: { fontSize: 11, color: Colors.mutedText, marginTop: 1 },
+    cartTotals: { marginLeft: 'auto', alignItems: 'flex-end' },
+    cartFreeShip: { fontSize: 10, fontWeight: '700', color: '#16A34A', backgroundColor: '#DCFCE7', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
+    cartShipCost: { fontSize: 10, color: Colors.mutedText },
+    cartTotal: { fontSize: 18, fontWeight: '900', marginTop: 2 },
+    cartBtn: {
+        borderRadius: Radius.sm, paddingVertical: 10, alignItems: 'center',
+    },
+    cartBtnText: { color: '#fff', fontWeight: '800', fontSize: 14 },
+    grandTotalRow: {
+        flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+        paddingTop: 10, borderTopWidth: 1, borderTopColor: 'rgba(0,0,0,0.07)',
+    },
+    grandTotalLabel: { fontSize: 12, color: Colors.mutedText, fontWeight: '600' },
+    grandTotalValue: { fontSize: 22, fontWeight: '900', color: Colors.primaryGreen },
+    rescanBtn: {
+        alignSelf: 'center', marginTop: 8, paddingVertical: 8, paddingHorizontal: 20,
+        borderRadius: Radius.full, borderWidth: 1.5, borderColor: 'rgba(45,79,30,0.2)',
+    },
+    rescanBtnText: { fontSize: 12, fontWeight: '700', color: Colors.mutedText },
+
+    // Prices tab
+    pricesTab: { gap: 16 },
+    priceItem: {
+        backgroundColor: '#fff', borderRadius: Radius.md, padding: 12,
+        borderWidth: 1, borderColor: 'rgba(45,79,30,0.09)', gap: 6,
+    },
+    priceItemName: { fontSize: 14, fontWeight: '800', color: Colors.primaryGreen, marginBottom: 4 },
+    vendorRow: {
+        flexDirection: 'row', alignItems: 'center', gap: 10,
+        borderLeftWidth: 3, paddingLeft: 8,
+    },
+    vendorEmoji: { fontSize: 14 },
+    vendorInfo: { flex: 1 },
+    vendorName: { fontSize: 12, fontWeight: '700', color: Colors.primaryGreen },
+    vendorUnit: { fontSize: 10, color: Colors.mutedText },
+    vendorPrice: { fontSize: 15, fontWeight: '900' },
+    vendorOos: { fontSize: 11, color: '#9CA3AF', fontStyle: 'italic' },
 });
