@@ -96,7 +96,7 @@ export function buildCartUrl(vendor, cropIds) {
         url = config.cartUrl(skus);
     } else {
         // All unmapped — fall back to search for first item
-        const fallback = VENDOR_SKUS.crops?.[cropIds[0]]?.search_fallback || cropIds[0];
+        const fallback = VENDOR_SKUS.crops?.[cropIds[0]]?.search_fallback || cropIds[0].replace(/_/g, ' ');
         url = config.searchUrl(fallback);
     }
 
