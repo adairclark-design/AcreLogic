@@ -91,7 +91,7 @@ export default function SharedCropCard({
 
     // Grab cached prices for this specific crop
     const allPrices = useSeedPrices();
-    const priceData = allPrices?.[crop.variety || crop.name];
+    const priceData = allPrices?.[crop.id];
 
     const handlePress = () => {
         Animated.sequence([

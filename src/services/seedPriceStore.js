@@ -41,7 +41,7 @@ export async function hydrateSeedPrices() {
                     }
                 }
                 item.lowestPrice = minPrice === Infinity ? null : minPrice;
-                cacheMap[item.name] = item;
+                cacheMap[item.cropId] = item;
             }
             
             globalPriceCache = cacheMap;
@@ -60,7 +60,7 @@ export async function hydrateSeedPrices() {
                     }
                 }
                 item.lowestPrice = minPrice === Infinity ? null : minPrice;
-                cacheMap[item.name] = item;
+                cacheMap[item.cropId] = item;
             }
             globalPriceCache = cacheMap;
             notify();
