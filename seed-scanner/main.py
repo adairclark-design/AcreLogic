@@ -38,7 +38,7 @@ log = logging.getLogger(__name__)
 # ─── Config ───────────────────────────────────────────────────────────────────
 DATABASE_URL = os.environ["DATABASE_URL"]
 ADMIN_SECRET = os.environ.get("ADMIN_SECRET", "change-me-in-railway")
-PORT         = int(os.environ.get("PORT", 8000))
+PORT = 8000
 
 # ─── DB Connection ────────────────────────────────────────────────────────────
 
