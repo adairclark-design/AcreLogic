@@ -29,7 +29,7 @@ load_dotenv()
 log = logging.getLogger(__name__)
 
 GEMINI_API_KEY   = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_GEMINI_API_KEY")
-GEMINI_URL       = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+GEMINI_URL       = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
 
 CACHE_DIR = Path(".tmp/html_cache")
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
