@@ -192,6 +192,16 @@ def _scan_one(variety: str) -> list[dict]:
         text = _clean_html(html)
         raw = _gemini_extract(variety, text)
         if not raw or raw.get("not_found"):
+            rows.append({
+                "variety_key":   re.sub(r"[^a-z0-9]+", "_", variety.lower()).strip("_"),
+                "vendor":        vendor,
+                "raw_price":     None,
+                "raw_unit":      None,
+                "price_per_100": None,
+                "stock":         False,
+                "confidence":    1.0,
+                "product_url":   url,
+            })
             continue
         ppu = _price_per_100(raw, variety)
         product_url = (cfg["base"] + raw["product_url_path"]) if raw.get("product_url_path") else url
