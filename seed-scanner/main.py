@@ -181,13 +181,18 @@ def get_prices(varieties: str = Query(..., description="Comma-separated variety 
                         "url":      row["product_url"],
                     }
 
-                result.append({
-                    "variety":   variety,
-                    "cropId":    key,
-                    "vendors":   vendors,
-                    "cached":    True,
-                    "cachedAt":  rows[0]["scanned_at"].isoformat() if rows else None,
-                })
+                # If ALL vendors are out-of-stock (scraper blocked), fall back to mock prices
+                all_oos = all(not v["stock"] for v in vendors.values())
+                if all_oos:
+                    result.append(_mock_price_item(variety))
+                else:
+                    result.append({
+                        "variety":   variety,
+                        "cropId":    key,
+                        "vendors":   vendors,
+                        "cached":    True,
+                        "cachedAt":  rows[0]["scanned_at"].isoformat() if rows else None,
+                    })
     finally:
         conn.close()
 
