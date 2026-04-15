@@ -100,7 +100,7 @@ async def lifespan(app: FastAPI):
     import threading
     log.info("Triggering background cache warm on boot...")
     def _bg_flush_and_scan():
-        conn = get_db_connection()
+        conn = get_conn()
         if conn:
             try:
                 with conn.cursor() as cur:
@@ -209,7 +209,7 @@ def get_prices(varieties: str = Query(..., description="Comma-separated variety 
 @app.get("/api/seeds/flush_cache_hack")
 def flush_cache_hack():
     """TEMPORARY endpoint to manually nuke the polluted cache."""
-    conn = get_db_connection()
+    conn = get_conn()
     if not conn:
         return {"status": "error", "msg": "No DB conn"}
     try:
