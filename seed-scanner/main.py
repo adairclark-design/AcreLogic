@@ -112,10 +112,10 @@ async def lifespan(app: FastAPI):
         
     t = threading.Thread(target=_bg_flush_and_scan, daemon=True)
     t.start()
-    # Schedule nightly at 2am UTC
-    scheduler.add_job(nightly_scan_job, "cron", hour=2, minute=0)
+    # Schedule weekly on Sunday at 2am UTC to reduce token costs
+    scheduler.add_job(nightly_scan_job, "cron", day_of_week='sun', hour=2, minute=0)
     scheduler.start()
-    log.info("📅 Nightly scanner scheduled at 02:00 UTC")
+    log.info("📅 Weekly scanner scheduled at Sunday 02:00 UTC")
     yield
     scheduler.shutdown()
     log.info("Seed Scanner Worker shut down")
@@ -162,7 +162,7 @@ def get_prices(varieties: str = Query(..., description="Comma-separated variety 
                     SELECT vendor, raw_price, raw_unit, price_per_100, stock, confidence, product_url, scanned_at
                     FROM seed_price_cache
                     WHERE variety_key = %s
-                      AND scanned_at > NOW() - INTERVAL '24 hours'
+                      AND scanned_at > NOW() - INTERVAL '7 days'
                 """, (key,))
                 rows = cur.fetchall()
 
@@ -252,7 +252,7 @@ def cache_status():
                     MAX(scanned_at) AS last_scan,
                     MIN(scanned_at) AS oldest_entry
                 FROM seed_price_cache
-                WHERE scanned_at > NOW() - INTERVAL '24 hours'
+                WHERE scanned_at > NOW() - INTERVAL '7 days'
             """)
             row = cur.fetchone()
             cur.execute("SELECT * FROM scan_runs ORDER BY id DESC LIMIT 5")
