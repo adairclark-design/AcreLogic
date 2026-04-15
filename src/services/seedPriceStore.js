@@ -30,7 +30,14 @@ export async function hydrateSeedPrices() {
             const targetList = ALL_SEED_LIST.filter(c => c.category !== 'Cover Crop').slice(0, 60); // Max 60 per request per API limit
             const prices = await fetchVendorPrices(targetList);
             
-            // Convert array output into a keyed map for O(1) lookup: { "Tomato": priceData }
+            // Create dictionary mapping query names back to original crop.ids 
+            const nameToId = {};
+            for (const c of targetList) {
+                const reqName = c.variety && c.variety !== 'Primary' ? `${c.name} ${c.variety}` : c.name;
+                nameToId[reqName] = c.id;
+            }
+
+            // Convert array output into a keyed map for O(1) lookup using true cropId
             const cacheMap = {};
             for (const item of prices) {
                 // Determine lowest price
@@ -41,7 +48,10 @@ export async function hydrateSeedPrices() {
                     }
                 }
                 item.lowestPrice = minPrice === Infinity ? null : minPrice;
-                cacheMap[item.cropId] = item;
+                
+                const trueId = nameToId[item.variety] || item.cropId;
+                item.cropId = trueId; // Align inner object ID
+                cacheMap[trueId] = item;
             }
             
             globalPriceCache = cacheMap;
