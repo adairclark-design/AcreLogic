@@ -23,6 +23,7 @@ import { formatCropDisplayName } from '../utils/cropDisplay';
 import { getCropEarliestActionOffset } from '../services/homeGardenCalculator';
 import GlobalNavBar from '../components/GlobalNavBar';
 import SharedCropCard from '../components/SharedCropCard';
+import QuickShopModal from '../components/QuickShopModal';
 import { loadPlanCrops, savePlanCrops } from '../services/persistence';
 // ─── Responsive breakpoints ───────────────────────────────────────────────────
 function getBreakpoint(width) {
@@ -228,6 +229,12 @@ function VegetableGridScreenInner({ navigation, route }) {
     // Add an active label tracker for the sidebar
     const [activeFilterLabel, setActiveFilterLabel] = useState('All');
 
+    // ─── Quick Shop Modal State ─────────────────────────────────────────────
+    const [shopModalData, setShopModalData] = useState(null);
+    const handleShopPress = useCallback((crop, priceData) => {
+        setShopModalData({ crop, priceData });
+    }, []);
+
 
 
     const filteredCrops = CROPS
@@ -328,6 +335,7 @@ function VegetableGridScreenInner({ navigation, route }) {
                                         cardWidth={160}
                                         selected={selectedCropIds.includes(item.id)}
                                         onPress={toggleCrop}
+                                        onShopPress={handleShopPress}
                                     />
                                 </View>
                             ))}
@@ -379,12 +387,20 @@ function VegetableGridScreenInner({ navigation, route }) {
                                     cardWidth={140}
                                     selected={selectedCropIds.includes(item.id)}
                                     onPress={toggleCrop}
+                                    onShopPress={handleShopPress}
                                 />
                             </View>
                         ))}
                     </ScrollView>
                 </View>
             )}
+
+            <QuickShopModal 
+                visible={!!shopModalData} 
+                cropName={shopModalData?.crop?.name} 
+                priceData={shopModalData?.priceData} 
+                onClose={() => setShopModalData(null)} 
+            />
         </View>
     );
 }

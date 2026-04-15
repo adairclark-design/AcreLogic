@@ -21,6 +21,7 @@ import {
 import { Colors, Radius, Shadows, Spacing, Typography } from '../theme';
 import CROP_IMAGES from '../data/cropImages';
 import { formatCropDisplayName } from '../utils/cropDisplay';
+import { useSeedPrices } from '../services/seedPriceStore';
 
 // ── Category color accents ────────────────────────────────────────────────────
 // Subtle top-border hue per crop family — improves at-a-glance scannability.
@@ -67,6 +68,7 @@ function getSeedTypeLabel(seedType, friendlyMode) {
  *                is long-pressed (used by Market Farm for context menu)
  *  friendlyMode — optional; when true (Feed My Family), translates TP/DS to
  *                 plain-language labels for non-professional users
+ *  onShopPress  — optional; called with (crop, priceData) when the price pill is tapped
  */
 export default function SharedCropCard({
     crop,
@@ -75,6 +77,7 @@ export default function SharedCropCard({
     cardWidth,
     onLongPress,
     friendlyMode = false,
+    onShopPress,
 }) {
     const scaleAnim = useRef(new Animated.Value(1)).current;
     const imgHeight = cardWidth ? Math.round(cardWidth * 0.85) : 90;
@@ -85,6 +88,10 @@ export default function SharedCropCard({
     const categoryColor = CATEGORY_COLORS[crop.category] ?? Colors.primaryGreen;
     const dtmSpeed     = getDtmSpeed(crop.dtm);
     const seedTypeLabel = getSeedTypeLabel(seedType, friendlyMode);
+
+    // Grab cached prices for this specific crop
+    const allPrices = useSeedPrices();
+    const priceData = allPrices?.[crop.variety || crop.name];
 
     const handlePress = () => {
         Animated.sequence([
@@ -153,6 +160,21 @@ export default function SharedCropCard({
                         </View>
                     )}
                 </View>
+
+                {/* Inline Seed Shopping Pill */}
+                {onShopPress && priceData && priceData.lowestPrice !== null && (
+                    <TouchableOpacity 
+                        style={styles.pricePillWrapper} 
+                        onPress={() => onShopPress(crop, priceData)}
+                        activeOpacity={0.8}
+                    >
+                        <View style={[styles.pricePill, { borderColor: categoryColor }]}>
+                            <Text style={[styles.pricePillText, { color: categoryColor }]}>
+                                🛒 ${priceData.lowestPrice.toFixed(2)}
+                            </Text>
+                        </View>
+                    </TouchableOpacity>
+                )}
 
                 {/* Selected overlay */}
                 {selected && (
@@ -261,6 +283,27 @@ const styles = StyleSheet.create({
         fontSize: 8,
         fontWeight: '700',
         color: Colors.mutedText,
+    },
+
+    // ── Inline Pre-fetched Prices ──────────────────────────────────────────
+    pricePillWrapper: {
+        width: '100%',
+        alignItems: 'center',
+        paddingHorizontal: 8,
+        paddingBottom: 4,
+    },
+    pricePill: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingVertical: 3,
+        paddingHorizontal: 8,
+        borderRadius: Radius.full,
+        borderWidth: 1,
+        backgroundColor: '#FFF',
+    },
+    pricePillText: {
+        fontSize: 9,
+        fontWeight: Typography.bold,
     },
 
     // ── Selected overlay ─────────────────────────────────────────────────────

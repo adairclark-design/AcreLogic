@@ -5,6 +5,7 @@ import { View, Text, TouchableOpacity, Platform, StyleSheet } from 'react-native
 import AppNavigator from './src/navigation/AppNavigator';
 import { getActiveTier, resetTierForTesting, setActiveTier, TIER } from './src/services/tierLimits';
 import ErrorBoundary from './src/components/ErrorBoundary';
+import { hydrateSeedPrices } from './src/services/seedPriceStore';
 
 // ─── Dev-only: detect ?dev=1 in URL (web only) ───────────────────────────────
 const IS_DEV_MODE = Platform.OS === 'web' && typeof window !== 'undefined'
@@ -63,6 +64,10 @@ const devStyles = StyleSheet.create({
 });
 
 export default function App() {
+    React.useEffect(() => {
+        hydrateSeedPrices();
+    }, []);
+
     return (
         <ErrorBoundary>
             <StatusBar style="light" />
