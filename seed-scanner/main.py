@@ -99,7 +99,18 @@ async def lifespan(app: FastAPI):
     # Run scan immediately on boot in a background thread to prevent Railway 502s
     import threading
     log.info("Triggering background cache warm on boot...")
-    t = threading.Thread(target=run_full_scan, args=(DATABASE_URL,), daemon=True)
+    def _bg_flush_and_scan():
+        conn = get_db_connection()
+        if conn:
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("DELETE FROM seed_price_cache")
+                conn.commit()
+            finally:
+                conn.close()
+        run_full_scan(DATABASE_URL)
+        
+    t = threading.Thread(target=_bg_flush_and_scan, daemon=True)
     t.start()
     # Schedule nightly at 2am UTC
     scheduler.add_job(nightly_scan_job, "cron", hour=2, minute=0)
