@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { fetchVendorPrices, buildMockPriceData } from './seedProcurementService';
+import { fetchVendorPrices } from './seedProcurementService';
 import cropDbRaw from '../data/crops.json';
 
 // Singleton cache to survive remounts
@@ -64,22 +64,20 @@ export async function hydrateSeedPrices() {
                 try {
                     const prices = await fetchVendorPrices(batch);
                     _mergePrices(prices, nameToId, globalPriceCache);
-                } catch {
-                    // Batch failed — fall back to mock for this slice
-                    const mockPrices = buildMockPriceData(batch);
-                    _mergePrices(mockPrices, nameToId, globalPriceCache);
+                } catch (batchErr) {
+                    console.warn(`[SeedPriceStore] Batch failed, logging N/A:`, batchErr);
+                    // Simply leave the cache items out so they show as N/A
                 }
                 notify();
             }));
 
             return globalPriceCache;
         } catch (err) {
-            console.warn('[SeedPriceStore] Hydration failed entirely, using full mock', err);
-            const cacheMap = {};
-            _mergePrices(buildMockPriceData(ALL_SEED_LIST), {}, cacheMap);
-            globalPriceCache = cacheMap;
+            console.warn('[SeedPriceStore] Hydration failed entirely', err);
+            // Don't fall back to mocks, leave globalPriceCache empty
+            globalPriceCache = {};
             notify();
-            return cacheMap;
+            return globalPriceCache;
         } finally {
             fetchPromise = null;
         }

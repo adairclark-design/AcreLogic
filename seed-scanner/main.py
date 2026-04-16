@@ -168,7 +168,6 @@ def get_prices(varieties: str = Query(..., description="Comma-separated variety 
 
                 if not rows:
                     uncached.append(variety)
-                    result.append(_mock_price_item(variety))
                     continue
 
                 vendors = {}
@@ -181,18 +180,13 @@ def get_prices(varieties: str = Query(..., description="Comma-separated variety 
                         "url":      row["product_url"],
                     }
 
-                # If ALL vendors are out-of-stock (scraper blocked), fall back to mock prices
-                all_oos = all(not v["stock"] for v in vendors.values())
-                if all_oos:
-                    result.append(_mock_price_item(variety))
-                else:
-                    result.append({
-                        "variety":   variety,
-                        "cropId":    key,
-                        "vendors":   vendors,
-                        "cached":    True,
-                        "cachedAt":  rows[0]["scanned_at"].isoformat() if rows else None,
-                    })
+                result.append({
+                    "variety":   variety,
+                    "cropId":    key,
+                    "vendors":   vendors,
+                    "cached":    True,
+                    "cachedAt":  rows[0]["scanned_at"].isoformat() if rows else None,
+                })
     finally:
         conn.close()
 
@@ -284,21 +278,6 @@ _MOCK_BASE = {
     "cucumber": 4.50, "squash": 4.25, "bean": 4.25, "pea": 4.25,
     "default": 4.25,
 }
-
-def _mock_price_item(variety: str) -> dict:
-    name_lower = variety.lower()
-    base = next((v for k, v in _MOCK_BASE.items() if k in name_lower), _MOCK_BASE["default"])
-    return {
-        "variety": variety,
-        "cropId":  _variety_key(variety),
-        "cached":  False,
-        "vendors": {
-            "Johnnys":     {"price": round(base * 1.05, 2), "stock": True, "rawUnit": "est.", "price_per_100": 0},
-            "BakerCreek":  {"price": round(base * 0.94, 2), "stock": True, "rawUnit": "est.", "price_per_100": 0},
-            "Territorial": {"price": round(base * 1.08, 2), "stock": True, "rawUnit": "est.", "price_per_100": 0},
-        },
-    }
-
 
 if __name__ == "__main__":
     import uvicorn
