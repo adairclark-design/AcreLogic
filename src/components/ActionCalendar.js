@@ -800,7 +800,7 @@ const styles = StyleSheet.create({
         alignSelf: 'flex-start',
     },
     rebasedText: {
-        fontSize: 8,
+        fontSize: 10,
         color: '#7A4500',
         fontWeight: '700',
     },

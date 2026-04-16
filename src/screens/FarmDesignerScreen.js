@@ -5,7 +5,7 @@ import {
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { Colors, Typography, Spacing, Radius, Shadows } from '../theme';
-import { loadBlocks, deleteBlock, loadBlockBeds, loadFarmPlans, loadPlanCrops } from '../services/persistence';
+import { loadBlocks, loadBlocksForPlan, deleteBlock, loadBlockBeds, loadFarmPlans, loadPlanCrops } from '../services/persistence';
 import { totalPlantedSqFt } from '../services/farmUtils';
 import GlobalNavBar from '../components/GlobalNavBar';
 
@@ -148,8 +148,8 @@ export default function FarmDesignerScreen({ navigation, route }) {
     }, []));
 
     useFocusEffect(useCallback(() => {
-        setBlocks(loadBlocks());
-    }, []));
+        setBlocks(loadBlocksForPlan(planId));
+    }, [planId]));
 
     const totalBeds = blocks.reduce((sum, b) => sum + (b.bedCount ?? 0), 0);
     const totalSqFt = blocks.reduce((sum, b) => sum + totalPlantedSqFt(b), 0);
@@ -162,7 +162,7 @@ export default function FarmDesignerScreen({ navigation, route }) {
         if (Platform.OS === 'web') {
             if (!window.confirm(`Delete "${block.name}"? This cannot be undone.`)) return;
             deleteBlock(block.id);
-            setBlocks(loadBlocks());
+            setBlocks(loadBlocksForPlan(planId));
         }
     };
 

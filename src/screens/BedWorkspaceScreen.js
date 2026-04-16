@@ -1505,16 +1505,15 @@ const SuccessionDrawer = ({ visible, bedNumber, blockName, currentSuccessions, a
                                 const irs = item.crop.in_row_spacing_in ? `${item.crop.in_row_spacing_in}"` : '—';
                                 const rawFits = item.fits ?? true;
                                 const dStr = item.start_date || `${activeYear}-05-01`;
-                                const m = new Date(dStr + (dStr.includes('T') ? '' : 'T12:00:00')).getMonth();
-                                const isSpringWarm = item.crop.season === 'warm' && m >= 2 && m <= 7;
-                                // isInFarmWindow: the engine placed this crop at/after the farm's own last_frost_date.
-                                // checkAgronomicViability uses hardcoded Apr-20/May-15 thresholds that pre-date
-                                // the farm's actual frost profile. If the suggested planting date is within the
-                                // farm's real growing season, honour it — don't push it through handlePlantOutOfSeason.
-                                const _lfMD = farmProfile?.last_frost_date?.slice(5); // "MM-DD"
-                                const _itemMD = item.start_date?.slice(5);
-                                const isInFarmWindow = _itemMD && _lfMD ? _itemMD >= _lfMD : false;
-                                const fits = rawFits || isSpringWarm || isInFarmWindow;
+                                const lfDate = new Date(farmProfile?.last_frost_date || `${activeYear}-04-15`);
+                                const ffDate = new Date(farmProfile?.first_frost_date || `${activeYear}-10-15`);
+                                // Allow 14-day biological leniency for season borders
+                                lfDate.setDate(lfDate.getDate() - 14);
+                                ffDate.setDate(ffDate.getDate() + 14);
+                                const cropStart = new Date(dStr);
+                                const cropEnd = item.end_date ? new Date(item.end_date) : new Date(dStr);
+                                const isInFarmWindow = cropStart >= lfDate && cropEnd <= ffDate;
+                                const fits = rawFits || isInFarmWindow;
                                 
                                 const isWinterCandidate = checkIsWinterGrow(item, hasProtection, fits, farmProfile?.lat, bedShelterType);
                                 const winterDtm = isWinterCandidate
@@ -1634,7 +1633,7 @@ const SuccessionDrawer = ({ visible, bedNumber, blockName, currentSuccessions, a
                                                 {maxSeverity && (
                                                     <View style={[fpStyles.severityDotTable, { backgroundColor: maxSeverity === 'high' ? '#C62828' : maxSeverity === 'medium' ? '#E65100' : '#2E7D32' }]} />
                                                 )}
-                                                <Text style={[fpStyles.tableCropName, { flexShrink: 1 }]} numberOfLines={1}>
+                                                <Text style={[fpStyles.tableCropName, { flexShrink: 1 }]}>
                                                     {item.crop.name}{item.crop.variety ? ` | ${item.crop.variety}` : ''}
                                                 </Text>
                                                 {/* ✓ Queued badge: shows the crop is in the active plan queue */}
@@ -2014,14 +2013,13 @@ const SuccessionDrawer = ({ visible, bedNumber, blockName, currentSuccessions, a
 
                             const rawFits = item.fits ?? false;
                             const dStr = item.start_date || `${activeYear}-05-01`;
-                            const m = new Date(dStr + (dStr.includes('T') ? '' : 'T12:00:00')).getMonth();
-                            const isSpringWarm = item.crop.season === 'warm' && m >= 2 && m <= 7;
-                            // isInFarmWindow: engine placed crop at/after the farm's real last_frost_date.
-                            // Hardcoded checkAgronomicViability thresholds don't account for farm-specific frost profiles.
-                            const _lfMD2 = farmProfile?.last_frost_date?.slice(5);
-                            const _itemMD2 = item.start_date?.slice(5);
-                            const isInFarmWindow2 = _itemMD2 && _lfMD2 ? _itemMD2 >= _lfMD2 : false;
-                            const effFits = rawFits || isSpringWarm || isInFarmWindow2;
+                            const lfDate = new Date(farmProfile?.last_frost_date || `${activeYear}-04-15`);
+                            const ffDate = new Date(farmProfile?.first_frost_date || `${activeYear}-10-15`);
+                            lfDate.setDate(lfDate.getDate() - 14);
+                            ffDate.setDate(ffDate.getDate() + 14);
+                            const cropStart = new Date(dStr);
+                            const cropEnd = item.end_date ? new Date(item.end_date) : new Date(dStr);
+                            const effFits = rawFits || (cropStart >= lfDate && cropEnd <= ffDate);
                             
                             const isWinterCandidate = checkIsWinterGrow(item, hasProtection, effFits, farmProfile?.lat, bedShelterType);
                             const winterDtm = isWinterCandidate
@@ -2110,10 +2108,10 @@ const SuccessionDrawer = ({ visible, bedNumber, blockName, currentSuccessions, a
                                         activeOpacity={bedFull ? 1 : 0.75}
                                     >
                                         <View style={[styles.cropListCell, { flex: 1.8 }]}>
-                                            <Text style={styles.cropListName} numberOfLines={1}>
+                                            <Text style={styles.cropListName}>
                                                 {remainingCoverage >= 0.99 ? '[Full] ' : ''}{item.crop.name}
                                             </Text>
-                                            <Text style={styles.cropListVariety} numberOfLines={1}>{item.crop.variety ?? '—'}</Text>
+                                            <Text style={styles.cropListVariety}>{item.crop.variety ?? '—'}</Text>
                                             {isWinterCandidate && (
                                                 <Text style={styles.cropListWinterLabel} numberOfLines={2}>
                                                     ❄️ Winter grow · est. {winterDtm}D · Very slow, extra coverage required
@@ -2581,10 +2579,9 @@ export default function BedWorkspaceScreen({ navigation, route }) {
                 // Fitted crops first, out-of-season crops at bottom
                 setDrawerCandidates([...matching, ...missingCandidates]);
             } else {
-                // No crops have been shortlisted yet (or planId key mismatch caused a silent empty read).
-                // Fall back to the full engine result set so the drawer is never bricked.
-                // Slice to 150 to prevent FlatList from rendering 700 items unnecessarily.
-                setDrawerCandidates(engineCandidates.slice(0, 150));
+                // No crops selected for this project — return empty so the drawer
+                // does not leak the global dictionary into an unrelated plan.
+                setDrawerCandidates([]);
             }
         } catch (err) {
             console.error('[BedWorkspace] Error loading candidates:', err);

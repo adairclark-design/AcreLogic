@@ -5,7 +5,7 @@ import {
     TextInput, Animated, Platform, Alert, KeyboardAvoidingView,
 } from 'react-native';
 import { Colors, Typography, Spacing, Radius, Shadows } from '../theme';
-import { loadJournalEntries, saveJournalEntry, deleteJournalEntry, saveActualHarvest, loadBlocks } from '../services/persistence';
+import { loadJournalEntries, saveJournalEntry, deleteJournalEntry, saveActualHarvest, loadBlocks, loadBlocksForPlan, loadBlockBeds } from '../services/persistence';
 import GlobalNavBar from '../components/GlobalNavBar';
 
 function formatDate(isoString) {
@@ -99,9 +99,14 @@ export default function FieldJournalScreen({ navigation, route }) {
         const loadedEntries = loadJournalEntries();
         setEntries(loadedEntries);
 
-        const loadedBlocks = loadBlocks();
+        const planId = route?.params?.planId;
+        const loadedBlocks = loadBlocksForPlan(planId);
         setBlocks(loadedBlocks);
-        if (loadedBlocks.length > 0) setActiveBlockId(prev => prev || loadedBlocks[0].id);
+        setActiveBlockId(prev => {
+            if (loadedBlocks.length === 0) return null;
+            if (prev && loadedBlocks.some(b => b.id === prev)) return prev;
+            return loadedBlocks[0].id;
+        });
 
         Animated.timing(fadeAnim, { toValue: 1, duration: 350, useNativeDriver: true }).start();
     }, []));
@@ -137,13 +142,16 @@ export default function FieldJournalScreen({ navigation, route }) {
         : `${currentBlockName} - Bed ${activeBedNum}`;
 
     const filteredEntries = entries.filter(e => {
-        // Strict match against exact BedTag string
-        if (e.bedTag === currentBedTag) return true;
-        
-        // Handling legacy entries that only had "General" or "Bed X" saved
-        if (!activeBlock && (e.bedTag === `Bed ${activeBedNum}` || (activeBedNum === 'General' && e.bedTag === 'General'))) {
-            return true;
+        if (activeBedNum === 'General') {
+            // Roll-up: any entry whose bedTag starts with this block name
+            if (e.bedTag && e.bedTag.startsWith(currentBlockName)) return true;
+            // Legacy fallback: bare 'General' or 'Bed X' tags with no active block
+            if (!activeBlock && (e.bedTag === 'General' || (e.bedTag && e.bedTag.startsWith('Bed ')))) return true;
+            return false;
         }
+        // Strict match for individual bed tabs
+        if (e.bedTag === currentBedTag) return true;
+        if (!activeBlock && e.bedTag === `Bed ${activeBedNum}`) return true;
         return false;
     });
 
@@ -319,11 +327,29 @@ export default function FieldJournalScreen({ navigation, route }) {
                                     </TouchableOpacity>
                                 )}
                             </View>
-                        ) : (
-                            filteredEntries.map(entry => (
-                                <EntryCard key={entry.id} entry={entry} onDelete={handleDelete} />
-                            ))
-                        )}
+                        ) : (() => {
+                            if (activeBedNum !== 'General') {
+                                return filteredEntries.map(entry => (
+                                    <EntryCard key={entry.id} entry={entry} onDelete={handleDelete} />
+                                ));
+                            }
+                            // Build month-grouped sections for roll-up view
+                            const monthSections = [];
+                            const seenKeys = {};
+                            for (const e of filteredEntries) {
+                                const label = new Date(e.createdAt || e.date).toLocaleString('default', { month: 'long', year: 'numeric' });
+                                if (!seenKeys[label]) { seenKeys[label] = true; monthSections.push({ label, entries: [] }); }
+                                monthSections[monthSections.length - 1].entries.push(e);
+                            }
+                            return monthSections.map(section => (
+                                <View key={section.label}>
+                                    <Text style={styles.monthHeader}>{section.label}</Text>
+                                    {section.entries.map(entry => (
+                                        <EntryCard key={entry.id} entry={entry} onDelete={handleDelete} />
+                                    ))}
+                                </View>
+                            ));
+                        })()}
                         <View style={{ height: showForm ? 400 : 100 }} />
                     </Animated.ScrollView>
                 </View>
@@ -366,6 +392,28 @@ export default function FieldJournalScreen({ navigation, route }) {
                                             placeholderTextColor={Colors.mutedText}
                                             autoFocus
                                         />
+                                        {(() => {
+                                            if (activeBedNum === 'General') return null;
+                                            const bedData = loadBlockBeds(activeBlockId) || {};
+                                            const successions = bedData[activeBedNum]?.successions || [];
+                                            const now = Date.now();
+                                            const cropNames = [...new Set(
+                                                [...successions]
+                                                    .sort((a, b) => Math.abs(new Date(a.start_date || 0) - now) - Math.abs(new Date(b.start_date || 0) - now))
+                                                    .map(s => s.crop_name)
+                                                    .filter(Boolean)
+                                            )];
+                                            if (!cropNames.length) return null;
+                                            return (
+                                                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.cropChipScroll} contentContainerStyle={styles.cropChipRow}>
+                                                    {cropNames.map(name => (
+                                                        <TouchableOpacity key={name} style={[styles.cropChip, harvestCrop === name && styles.cropChipActive]} onPress={() => setHarvestCrop(name)}>
+                                                            <Text style={[styles.cropChipText, harvestCrop === name && styles.cropChipTextActive]}>{name}</Text>
+                                                        </TouchableOpacity>
+                                                    ))}
+                                                </ScrollView>
+                                            );
+                                        })()}
                                         <View style={styles.lbsRow}>
                                             <TextInput
                                                 style={[styles.harvestInput, styles.lbsInput]}
@@ -438,7 +486,7 @@ export default function FieldJournalScreen({ navigation, route }) {
 }
 
 const styles = StyleSheet.create({
-    container: { flex: 1, backgroundColor: '#F0EDE6' },
+    container: { flex: 1, backgroundColor: '#F0EDE6', ...Platform.select({ web: { height: '100vh', overflow: 'hidden' } }) },
     header: {
         paddingTop: Spacing.sm, paddingHorizontal: Spacing.lg, paddingBottom: 0,
         backgroundColor: Colors.primaryGreen,
@@ -491,6 +539,11 @@ const styles = StyleSheet.create({
     addBtnSmallText: { color: Colors.cream, fontWeight: '700', fontSize: 11 },
     
     listContent: { padding: Spacing.md, gap: Spacing.sm },
+    monthHeader: {
+        fontSize: 11, fontWeight: '800', color: Colors.mutedText, letterSpacing: 0.8,
+        textTransform: 'uppercase', marginTop: Spacing.md, marginBottom: 6,
+        paddingBottom: 4, borderBottomWidth: 1, borderBottomColor: 'rgba(45,79,30,0.1)',
+    },
     emptyView: { alignItems: 'center', paddingVertical: 60, gap: 10 },
     emptyIcon: { fontSize: 48 },
     emptyTitle: { fontSize: Typography.lg, fontWeight: Typography.bold, color: Colors.primaryGreen },
@@ -562,5 +615,12 @@ const styles = StyleSheet.create({
     issueChipActive: { backgroundColor: '#FFCDD2', borderColor: '#C62828' },
     issueChipText: { fontSize: 10, color: '#C62828', fontWeight: Typography.bold },
     issueChipTextActive: { color: '#B71C1C' },
+
+    cropChipScroll: { marginTop: 2 },
+    cropChipRow: { flexDirection: 'row', gap: 6, paddingVertical: 2 },
+    cropChip: { paddingVertical: 5, paddingHorizontal: 12, borderRadius: Radius.full, borderWidth: 1.5, borderColor: 'rgba(45,79,30,0.25)', backgroundColor: 'rgba(45,79,30,0.06)' },
+    cropChipActive: { backgroundColor: Colors.primaryGreen, borderColor: Colors.primaryGreen },
+    cropChipText: { fontSize: 11, color: Colors.primaryGreen, fontWeight: '700' },
+    cropChipTextActive: { color: Colors.cream },
     issueNoteInput: { borderWidth: 1.5, borderColor: 'rgba(198,40,40,0.2)', borderRadius: Radius.sm, padding: 8, fontSize: 11, color: Colors.darkText, minHeight: 46, textAlignVertical: 'top', backgroundColor: 'rgba(255,235,238,0.4)', marginTop: 4 },
 });

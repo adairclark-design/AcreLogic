@@ -127,8 +127,8 @@ export default function BlockSetupWizard({ route, navigation }) {
 
     const [bedWidthFt, setBedWidthFt] = useState(String(existingBlock?.bedWidthFt ?? '2.5'));
     const [pathwayFt, setPathwayFt] = useState(String(existingBlock?.pathwayWidthFt ?? '1'));
-    // N/S bisecting pathway: auto-enabled when coming from satellite (user's requested default)
-    const [bisectEnabled, setBisectEnabled] = useState(existingBlock?.bisectingRoad?.enabled ?? (prefill ? true : false));
+    // Bisecting road: only restore from saved block — never auto-enable for new/satellite blocks
+    const [bisectEnabled, setBisectEnabled] = useState(existingBlock?.bisectingRoad?.enabled ?? false);
     const [bisectOrient, setBisectOrient] = useState(existingBlock?.bisectingRoad?.orientation ?? 'NS');
     const [bisectWidFt, setBisectWidFt] = useState(String(existingBlock?.bisectingRoad?.widthFt ?? '4'));
 

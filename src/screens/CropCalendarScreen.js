@@ -6,7 +6,7 @@ import {
 } from 'react-native';
 import { Colors, Typography, Spacing, Radius, Shadows } from '../theme';
 import { generateBedCalendar } from '../services/calendarGenerator';
-import { loadBlocks, loadBlockBeds } from '../services/persistence';
+import { loadBlocks, loadBlocksForPlan, loadBlockBeds } from '../services/persistence';
 import GlobalNavBar from '../components/GlobalNavBar';
 import cropData from '../data/crops.json';
 import { formatSeedVolume } from '../utils/seedVolumeConverter';
@@ -180,11 +180,10 @@ const TRAY_OPTIONS = [
 ];
 
 // ─── Components ───────────────────────────────────────────────────────────────
-function EventChip({ ev }) {
+function EventChip({ ev, selectedTray, onTrayChange }) {
     const t = EVENT_TYPES[ev.type] ?? EVENT_TYPES.direct_seed;
 
-    // ── Tray Picker State (session-only, per-card) ──────────────────────────────
-    const [selectedTray, setSelectedTray] = useState(ev.tray ?? null);
+    // ── Tray Picker open/close state stays local (UI-only, safe to reset) ──────
     const [trayPickerOpen, setTrayPickerOpen] = useState(false);
 
     const seedsNeeded = ev.plants ? Math.ceil(ev.plants * 1.2) : 0;
@@ -274,25 +273,32 @@ function EventChip({ ev }) {
                         </Text>
                     </TouchableOpacity>
 
-                    {/* Inline dropdown */}
+                    {/* Inline dropdown — scrollable, shows 3 options before scrolling */}
                     {trayPickerOpen && (
                         <View style={styles.trayDropdown}>
-                            {TRAY_OPTIONS.map(opt => {
-                                const isActive = opt.label === selectedTray.label;
-                                return (
-                                    <TouchableOpacity
-                                        key={opt.label}
-                                        onPress={() => { setSelectedTray(opt); setTrayPickerOpen(false); }}
-                                        style={[styles.trayOption, isActive && styles.trayOptionActive]}
-                                        activeOpacity={0.75}
-                                    >
-                                        <Text style={[styles.trayOptionText, isActive && styles.trayOptionTextActive]}>
-                                            {opt.emoji} {opt.label}
-                                        </Text>
-                                        <Text style={styles.trayOptionNote}>{opt.note}</Text>
-                                    </TouchableOpacity>
-                                );
-                            })}
+                            <ScrollView
+                                style={styles.trayDropdownScroll}
+                                showsVerticalScrollIndicator={true}
+                                nestedScrollEnabled={true}
+                                keyboardShouldPersistTaps="handled"
+                            >
+                                {TRAY_OPTIONS.map(opt => {
+                                    const isActive = opt.label === selectedTray.label;
+                                    return (
+                                        <TouchableOpacity
+                                            key={opt.label}
+                                            onPress={() => { onTrayChange(opt); setTrayPickerOpen(false); }}
+                                            style={[styles.trayOption, isActive && styles.trayOptionActive]}
+                                            activeOpacity={0.75}
+                                        >
+                                            <Text style={[styles.trayOptionText, isActive && styles.trayOptionTextActive]}>
+                                                {opt.emoji} {opt.label}
+                                            </Text>
+                                            <Text style={styles.trayOptionNote}>{opt.note}</Text>
+                                        </TouchableOpacity>
+                                    );
+                                })}
+                            </ScrollView>
                         </View>
                     )}
 
@@ -308,31 +314,63 @@ function EventChip({ ev }) {
             {ev.type === 'harvest' && ev.dtm && (
                 <Text style={styles.chipExtra}>⏱ {ev.dtm} DTM</Text>
             )}
+
+            {/* Spacing info — direct seed and transplant only */}
+            {(ev.type === 'direct_seed' || ev.type === 'transplant') && (() => {
+                const crop = cropData.crops?.find(c => c.id === ev.crop_id);
+                if (!crop) return null;
+                const rows = crop.rows_per_30in_bed;
+                const inRow = crop.in_row_spacing_in;
+                const rowSpacing = crop.row_spacing_in;
+                if (rows == null && inRow == null && rowSpacing == null) return null;
+                const parts = [];
+                if (rows != null) parts.push(`${rows} rows`);
+                if (inRow != null) parts.push(`${inRow}" in-row`);
+                if (rowSpacing != null) parts.push(`${rowSpacing}" row-spacing`);
+                return (
+                    <Text style={styles.chipDetail}>📐 {parts.join(' • ')}</Text>
+                );
+            })()}
         </View>
     );
 }
 
-function WeekSection({ week }) {
+function WeekSection({ week, traySelections, onTrayChange }) {
     return (
         <View style={styles.weekSection}>
             <Text style={styles.weekLabel}>{week.weekLabel}</Text>
             <View style={styles.chipGrid}>
-                {week.events.map((ev, i) => (
-                    <EventChip key={`${ev.weekKey}-${ev.cropName}-${ev.type}-${i}`} ev={ev} />
-                ))}
+                {week.events.map((ev, i) => {
+                    const trayKey = `${ev.weekKey}||${ev.cropName}||${ev.type}||${ev.cropVariety ?? ''}`;
+                    return (
+                        <EventChip
+                            key={trayKey}
+                            ev={ev}
+                            selectedTray={traySelections[trayKey] ?? ev.tray ?? null}
+                            onTrayChange={(tray) => onTrayChange(trayKey, tray)}
+                        />
+                    );
+                })}
             </View>
         </View>
     );
 }
 
-function MonthSection({ month }) {
+function MonthSection({ month, traySelections, onTrayChange }) {
     return (
         <View style={styles.monthSection}>
             <Text style={[styles.monthLabel, month.isHighlight && { color: '#E65100' }]}>
                 {month.isHighlight ? month.monthLabel : month.monthLabel.toUpperCase()}
             </Text>
             <View style={[styles.monthDivider, month.isHighlight && { backgroundColor: '#E65100', opacity: 0.4 }]} />
-            {month.weeks.map(w => <WeekSection key={w.weekKey} week={w} />)}
+            {month.weeks.map(w => (
+                <WeekSection
+                    key={w.weekKey}
+                    week={w}
+                    traySelections={traySelections}
+                    onTrayChange={onTrayChange}
+                />
+            ))}
         </View>
     );
 }
@@ -342,6 +380,11 @@ export default function CropCalendarScreen({ navigation, route }) {
     const [events, setEvents] = useState([]);
     const [loading, setLoading] = useState(true);
     const [activeTab, setActiveTab] = useState('planting'); // 'planting' | 'harvests'
+    // ── Lifted tray selections: keyed by weekKey||cropName||type||variety ──────
+    const [traySelections, setTraySelections] = useState({});
+    const handleTrayChange = useCallback((key, tray) => {
+        setTraySelections(prev => ({ ...prev, [key]: tray }));
+    }, []);
 
     useFocusEffect(useCallback(() => {
         loadAndProcessEvents();
@@ -360,7 +403,7 @@ export default function CropCalendarScreen({ navigation, route }) {
                 }));
             } else {
                 // The intended path via MegaMenuBar. Load all blocks!
-                const allBlocks = loadBlocks();
+                const allBlocks = loadBlocksForPlan(planId);
                 const activeBlocks = planId ? allBlocks.filter(b => b.planId === planId) : allBlocks;
                 
                 for (const block of activeBlocks) {
@@ -509,7 +552,14 @@ export default function CropCalendarScreen({ navigation, route }) {
                         </View>
                     )}
 
-                    {groupedEvents.map(m => <MonthSection key={m.sectionKey} month={m} />)}
+                    {groupedEvents.map(m => (
+                        <MonthSection
+                            key={m.sectionKey}
+                            month={m}
+                            traySelections={traySelections}
+                            onTrayChange={handleTrayChange}
+                        />
+                    ))}
                     <View style={{ height: 100 }} />
                 </ScrollView>
             )}
@@ -598,13 +648,13 @@ const styles = StyleSheet.create({
         letterSpacing: 0.5,
     },
     chipExtra: {
-        fontSize: 11,
+        fontSize: 15,
         fontWeight: '600',
         color: 'rgba(0,0,0,0.6)',
         marginTop: 2,
     },
     chipVolume: {
-        fontSize: 10,
+        fontSize: 14,
         fontWeight: '500',
         color: '#1565C0',
         fontStyle: 'italic',
@@ -647,6 +697,10 @@ const styles = StyleSheet.create({
         overflow: 'hidden',
         ...Platform.select({ web: { boxShadow: '0 4px 16px rgba(0,0,0,0.14)' } }),
     },
+    // maxHeight = 3 rows × ~40px each (paddingVertical 6+6 + label ~11px + note ~10px + border ~1px)
+    trayDropdownScroll: {
+        maxHeight: 120,
+    },
     trayOption: {
         paddingVertical: 6,
         paddingHorizontal: 8,
@@ -688,7 +742,7 @@ const styles = StyleSheet.create({
         marginBottom: 3,
         alignSelf: 'flex-start',
     },
-    rebasedText: { fontSize: 9, color: '#856404', fontWeight: '700' },
+    rebasedText: { fontSize: 13, color: '#856404', fontWeight: '700' },
     consolidatedBadge: {
         backgroundColor: 'rgba(46,125,50,0.12)',
         borderRadius: 3,

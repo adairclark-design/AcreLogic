@@ -20,7 +20,7 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Platform } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { Colors, Typography, Spacing, Radius, Shadows } from '../theme';
-import { loadBlocks, saveBlock } from '../services/persistence';
+import { loadBlocks, loadBlocksForPlan, saveBlock } from '../services/persistence';
 import { totalPlantedSqFt } from '../services/farmUtils';
 import HomeLogoButton from '../components/HomeLogoButton';
 
@@ -506,15 +506,17 @@ export default function FarmCanvasScreen({ navigation, route }) {
     const [blocks, setBlocks] = useState([]);
     const [dimensions, setDimensions] = useState({ w: 800, h: 600 });
 
+    const planId = route?.params?.planId;
+
     useFocusEffect(useCallback(() => {
-        setBlocks(loadBlocks());
-    }, []));
+        setBlocks(loadBlocksForPlan(planId));
+    }, [planId]));
 
     const handleMoveSave = useCallback((blockId, pos) => {
         // Save canvas position as gridPosition approximation
         const col = Math.round(pos.x / (SNAP_GRID * PX_PER_FT * 3));
         const row = Math.round(pos.y / (SNAP_GRID * PX_PER_FT * 3));
-        const block = loadBlocks().find(b => b.id === blockId);
+        const block = loadBlocksForPlan(planId).find(b => b.id === blockId);
         if (block) {
             saveBlock({ ...block, canvasPos: pos, gridPosition: { col: Math.min(2, Math.max(0, col)), row: Math.min(2, Math.max(0, row)), label: '' } });
         }

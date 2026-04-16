@@ -22,7 +22,7 @@ import {
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { Colors, Typography, Spacing, Radius, Shadows } from '../theme';
-import { loadBlocks, saveBlock } from '../services/persistence';
+import { loadBlocks, loadBlocksForPlan, saveBlock } from '../services/persistence';
 import {
     calculateBedsFromDimensions, generateBlockId,
     FAMILY_OPTIONS, GRID_POSITIONS,
@@ -211,9 +211,11 @@ export default function FarmSatelliteScreen({ navigation, route }) {
 
     const suggestedBeds = drawnSqFt > 0 ? suggestBeds(drawnSqFt, parseFloat(bedLengthFt) || 100) : 0;
 
+    const planId = route?.params?.planId;
+
     useFocusEffect(useCallback(() => {
-        setBlocks(loadBlocks());
-    }, []));
+        setBlocks(loadBlocksForPlan(planId));
+    }, [planId]));
 
     // ── Dynamic script loader ────────────────────────────────────────────────
     function loadScript(src) {
@@ -373,7 +375,7 @@ export default function FarmSatelliteScreen({ navigation, route }) {
     // Uses proportional scaling: each block gets beds proportional to its current
     // share of the total. Falls back to equal split when all blocks are the same size.
     const handleApplyToAllBlocks = () => {
-        const existingBlocks = loadBlocks();
+        const existingBlocks = loadBlocksForPlan(planId);
         if (existingBlocks.length === 0) {
             handleCreateBlock(); // No blocks yet — fall through to wizard
             return;

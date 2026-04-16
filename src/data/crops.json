@@ -1763,8 +1763,8 @@
     },
     {
       "id": "potato_red_norland",
-      "name": "Potatoes",
-      "variety": "Red Norland / Yukon Gold",
+      "name": "Potato",
+      "variety": "Red Norland",
       "category": "Tuber",
       "emoji": "🥔",
       "dtm": 70,
@@ -3741,7 +3741,8 @@
       "is_special_purchase": false,
       "late_transplant_tolerant": false,
       "planting_method": "Transplant",
-      "seeds_per_oz": 10000
+      "seeds_per_oz": 10000,
+      "subcategory": "Heirlooms and Other Tomatoes"
     },
     {
       "id": "cherry_tomato_sungold",
@@ -9506,7 +9507,8 @@
       "seed_unit": "seeds",
       "is_special_purchase": false,
       "late_transplant_tolerant": false,
-      "planting_method": "Transplant"
+      "planting_method": "Transplant",
+      "subcategory": "Heirlooms and Other Tomatoes"
     },
     {
       "id": "tomato_yellow_brandywine",
@@ -9562,7 +9564,8 @@
       "seed_unit": "seeds",
       "is_special_purchase": false,
       "late_transplant_tolerant": false,
-      "planting_method": "Transplant"
+      "planting_method": "Transplant",
+      "subcategory": "Heirlooms and Other Tomatoes"
     },
     {
       "id": "tomato_green_zebra",
@@ -9618,7 +9621,8 @@
       "seed_unit": "seeds",
       "is_special_purchase": false,
       "late_transplant_tolerant": false,
-      "planting_method": "Transplant"
+      "planting_method": "Transplant",
+      "subcategory": "Heirlooms and Other Tomatoes"
     },
     {
       "id": "tomato_black_krim",
@@ -9674,7 +9678,8 @@
       "seed_unit": "seeds",
       "is_special_purchase": false,
       "late_transplant_tolerant": false,
-      "planting_method": "Transplant"
+      "planting_method": "Transplant",
+      "subcategory": "Heirlooms and Other Tomatoes"
     },
     {
       "id": "tomato_mortgage_lifter",
@@ -9730,7 +9735,8 @@
       "seed_unit": "seeds",
       "is_special_purchase": false,
       "late_transplant_tolerant": false,
-      "planting_method": "Transplant"
+      "planting_method": "Transplant",
+      "subcategory": "Heirlooms and Other Tomatoes"
     },
     {
       "id": "tomato_celebrity",
@@ -9787,7 +9793,8 @@
       "is_special_purchase": false,
       "late_transplant_tolerant": false,
       "planting_method": "Transplant",
-      "seeds_per_oz": 10000
+      "seeds_per_oz": 10000,
+      "subcategory": "Slicing Tomatoes"
     },
     {
       "id": "tomato_early_girl",
@@ -9844,7 +9851,8 @@
       "is_special_purchase": false,
       "late_transplant_tolerant": true,
       "planting_method": "Transplant",
-      "seeds_per_oz": 10000
+      "seeds_per_oz": 10000,
+      "subcategory": "Slicing Tomatoes"
     },
     {
       "id": "tomato_yellow_pear",
@@ -28371,46 +28379,6 @@
       "seeds_per_oz": 100
     },
     {
-      "id": "bush_bean_royal_burgundy",
-      "name": "Bush Bean",
-      "variety": "Royal Burgundy",
-      "scientific_name": "",
-      "category": "Legume",
-      "subcategories": [
-        "Legume",
-        "Tender"
-      ],
-      "description": "Purple pod bush bean.",
-      "planting_method": "Direct Seed",
-      "dtm": 55,
-      "season": "warm",
-      "sun_requirements": "Full Sun",
-      "frost_hardiness": "Tender (killed by frost)",
-      "seed_type": "DS",
-      "in_row_spacing_in": 4,
-      "row_spacing_in": 15,
-      "rows_per_30in_bed": 2,
-      "yield_lbs_per_100ft": 80,
-      "feed_class": "Legume",
-      "yield_dry_lbs_per_100ft": null,
-      "rotation_family": [
-        "Legume Family"
-      ],
-      "rotation_cannot_follow": [
-        "Legume Family"
-      ],
-      "notes": "",
-      "germination_rate_pct": 0.88,
-      "seeds_per_packet": 60,
-      "seed_price_usd": 3.99,
-      "seed_unit": "seeds",
-      "is_special_purchase": false,
-      "late_transplant_tolerant": true,
-      "harvest_window_days": 28,
-      "min_frost_free_days": 69,
-      "seeds_per_oz": 100
-    },
-    {
       "id": "bush_bean_dragon_tongue",
       "name": "Bush Bean",
       "variety": "Dragon Tongue",
@@ -30172,7 +30140,8 @@
       "is_special_purchase": false,
       "late_transplant_tolerant": false,
       "planting_method": "Transplant",
-      "seeds_per_oz": 10000
+      "seeds_per_oz": 10000,
+      "subcategory": "Slicing Tomatoes"
     },
     {
       "id": "tomato_better_boy",
@@ -30230,7 +30199,8 @@
       "is_special_purchase": false,
       "late_transplant_tolerant": false,
       "planting_method": "Transplant",
-      "seeds_per_oz": 10000
+      "seeds_per_oz": 10000,
+      "subcategory": "Slicing Tomatoes"
     },
     {
       "id": "tomato_big_boy",
@@ -30288,7 +30258,8 @@
       "is_special_purchase": false,
       "late_transplant_tolerant": false,
       "planting_method": "Transplant",
-      "seeds_per_oz": 10000
+      "seeds_per_oz": 10000,
+      "subcategory": "Slicing Tomatoes"
     },
     {
       "id": "tomato_brandywine",
@@ -30346,7 +30317,8 @@
       "is_special_purchase": false,
       "late_transplant_tolerant": false,
       "planting_method": "Transplant",
-      "seeds_per_oz": 10000
+      "seeds_per_oz": 10000,
+      "subcategory": "Heirlooms and Other Tomatoes"
     },
     {
       "id": "tomato_campari",
@@ -30404,7 +30376,8 @@
       "is_special_purchase": false,
       "late_transplant_tolerant": false,
       "planting_method": "Transplant",
-      "seeds_per_oz": 10000
+      "seeds_per_oz": 10000,
+      "subcategory": "Cherry Tomatoes"
     },
     {
       "id": "tomato_costoluto_genovese",
@@ -30462,7 +30435,8 @@
       "is_special_purchase": false,
       "late_transplant_tolerant": false,
       "planting_method": "Transplant",
-      "seeds_per_oz": 10000
+      "seeds_per_oz": 10000,
+      "subcategory": "Paste Tomatoes"
     },
     {
       "id": "tomato_delicious",
@@ -30520,7 +30494,8 @@
       "is_special_purchase": false,
       "late_transplant_tolerant": false,
       "planting_method": "Transplant",
-      "seeds_per_oz": 10000
+      "seeds_per_oz": 10000,
+      "subcategory": "Slicing Tomatoes"
     },
     {
       "id": "tomato_german_johnson",
@@ -30578,7 +30553,8 @@
       "is_special_purchase": false,
       "late_transplant_tolerant": false,
       "planting_method": "Transplant",
-      "seeds_per_oz": 10000
+      "seeds_per_oz": 10000,
+      "subcategory": "Heirlooms and Other Tomatoes"
     },
     {
       "id": "tomato_indigo_rose",
@@ -30636,7 +30612,8 @@
       "is_special_purchase": false,
       "late_transplant_tolerant": false,
       "planting_method": "Transplant",
-      "seeds_per_oz": 10000
+      "seeds_per_oz": 10000,
+      "subcategory": "Heirlooms and Other Tomatoes"
     },
     {
       "id": "tomato_kelloggs_breakfast",
@@ -30694,7 +30671,8 @@
       "is_special_purchase": false,
       "late_transplant_tolerant": false,
       "planting_method": "Transplant",
-      "seeds_per_oz": 10000
+      "seeds_per_oz": 10000,
+      "subcategory": "Heirlooms and Other Tomatoes"
     },
     {
       "id": "tomato_kumato",
@@ -30752,7 +30730,8 @@
       "is_special_purchase": false,
       "late_transplant_tolerant": false,
       "planting_method": "Transplant",
-      "seeds_per_oz": 10000
+      "seeds_per_oz": 10000,
+      "subcategory": "Slicing Tomatoes"
     },
     {
       "id": "tomato_lemon_boy",
@@ -30810,7 +30789,8 @@
       "is_special_purchase": false,
       "late_transplant_tolerant": false,
       "planting_method": "Transplant",
-      "seeds_per_oz": 10000
+      "seeds_per_oz": 10000,
+      "subcategory": "Slicing Tomatoes"
     },
     {
       "id": "tomato_mr_stripey",
@@ -30868,7 +30848,8 @@
       "is_special_purchase": false,
       "late_transplant_tolerant": false,
       "planting_method": "Transplant",
-      "seeds_per_oz": 10000
+      "seeds_per_oz": 10000,
+      "subcategory": "Heirlooms and Other Tomatoes"
     },
     {
       "id": "tomato_oxheart",
@@ -30926,7 +30907,8 @@
       "is_special_purchase": false,
       "late_transplant_tolerant": false,
       "planting_method": "Transplant",
-      "seeds_per_oz": 10000
+      "seeds_per_oz": 10000,
+      "subcategory": "Heirlooms and Other Tomatoes"
     },
     {
       "id": "tomato_paul_robeson",
@@ -30984,7 +30966,8 @@
       "is_special_purchase": false,
       "late_transplant_tolerant": false,
       "planting_method": "Transplant",
-      "seeds_per_oz": 10000
+      "seeds_per_oz": 10000,
+      "subcategory": "Heirlooms and Other Tomatoes"
     },
     {
       "id": "tomato_pineapple",
@@ -31042,7 +31025,8 @@
       "is_special_purchase": false,
       "late_transplant_tolerant": false,
       "planting_method": "Transplant",
-      "seeds_per_oz": 10000
+      "seeds_per_oz": 10000,
+      "subcategory": "Heirlooms and Other Tomatoes"
     },
     {
       "id": "tomato_rose_de_berne",
@@ -31100,7 +31084,8 @@
       "is_special_purchase": false,
       "late_transplant_tolerant": false,
       "planting_method": "Transplant",
-      "seeds_per_oz": 10000
+      "seeds_per_oz": 10000,
+      "subcategory": "Heirlooms and Other Tomatoes"
     },
     {
       "id": "tomato_rutgers",
@@ -31158,7 +31143,8 @@
       "is_special_purchase": false,
       "late_transplant_tolerant": false,
       "planting_method": "Transplant",
-      "seeds_per_oz": 10000
+      "seeds_per_oz": 10000,
+      "subcategory": "Slicing Tomatoes"
     },
     {
       "id": "tomato_sun_sugar",
@@ -31216,7 +31202,8 @@
       "is_special_purchase": false,
       "late_transplant_tolerant": false,
       "planting_method": "Transplant",
-      "seeds_per_oz": 10000
+      "seeds_per_oz": 10000,
+      "subcategory": "Cherry Tomatoes"
     },
     {
       "id": "tomato_sweet_million",
@@ -31274,7 +31261,8 @@
       "is_special_purchase": false,
       "late_transplant_tolerant": false,
       "planting_method": "Transplant",
-      "seeds_per_oz": 10000
+      "seeds_per_oz": 10000,
+      "subcategory": "Cherry Tomatoes"
     },
     {
       "id": "tomato_chocolate_stripes",
@@ -31332,7 +31320,8 @@
       "is_special_purchase": false,
       "late_transplant_tolerant": false,
       "planting_method": "Transplant",
-      "seeds_per_oz": 10000
+      "seeds_per_oz": 10000,
+      "subcategory": "Heirlooms and Other Tomatoes"
     },
     {
       "id": "tomato_black_sea_man",
@@ -31390,7 +31379,8 @@
       "is_special_purchase": false,
       "late_transplant_tolerant": false,
       "planting_method": "Transplant",
-      "seeds_per_oz": 10000
+      "seeds_per_oz": 10000,
+      "subcategory": "Heirlooms and Other Tomatoes"
     },
     {
       "id": "tomato_hillbilly",
@@ -31448,7 +31438,8 @@
       "is_special_purchase": false,
       "late_transplant_tolerant": false,
       "planting_method": "Transplant",
-      "seeds_per_oz": 10000
+      "seeds_per_oz": 10000,
+      "subcategory": "Heirlooms and Other Tomatoes"
     },
     {
       "id": "tomato_amana_orange",
@@ -31506,7 +31497,8 @@
       "is_special_purchase": false,
       "late_transplant_tolerant": false,
       "planting_method": "Transplant",
-      "seeds_per_oz": 10000
+      "seeds_per_oz": 10000,
+      "subcategory": "Heirlooms and Other Tomatoes"
     },
     {
       "id": "tomato_great_white",
@@ -31564,7 +31556,8 @@
       "is_special_purchase": false,
       "late_transplant_tolerant": false,
       "planting_method": "Transplant",
-      "seeds_per_oz": 10000
+      "seeds_per_oz": 10000,
+      "subcategory": "Heirlooms and Other Tomatoes"
     },
     {
       "id": "tomato_japanese_black_trifele",
@@ -31622,7 +31615,8 @@
       "is_special_purchase": false,
       "late_transplant_tolerant": false,
       "planting_method": "Transplant",
-      "seeds_per_oz": 10000
+      "seeds_per_oz": 10000,
+      "subcategory": "Heirlooms and Other Tomatoes"
     },
     {
       "id": "tomato_isis_candy",
@@ -31680,7 +31674,8 @@
       "is_special_purchase": false,
       "late_transplant_tolerant": false,
       "planting_method": "Transplant",
-      "seeds_per_oz": 10000
+      "seeds_per_oz": 10000,
+      "subcategory": "Cherry Tomatoes"
     },
     {
       "id": "tomato_carmello",
@@ -31738,7 +31733,8 @@
       "is_special_purchase": false,
       "late_transplant_tolerant": false,
       "planting_method": "Transplant",
-      "seeds_per_oz": 10000
+      "seeds_per_oz": 10000,
+      "subcategory": "Slicing Tomatoes"
     },
     {
       "id": "tomato_jersey_boy",
@@ -31796,7 +31792,8 @@
       "is_special_purchase": false,
       "late_transplant_tolerant": false,
       "planting_method": "Transplant",
-      "seeds_per_oz": 10000
+      "seeds_per_oz": 10000,
+      "subcategory": "Slicing Tomatoes"
     },
     {
       "id": "tomato_gold_medal",
@@ -31854,7 +31851,8 @@
       "is_special_purchase": false,
       "late_transplant_tolerant": false,
       "planting_method": "Transplant",
-      "seeds_per_oz": 10000
+      "seeds_per_oz": 10000,
+      "subcategory": "Heirlooms and Other Tomatoes"
     },
     {
       "id": "tomato_brads_atomic_grape",
@@ -31970,7 +31968,8 @@
       "is_special_purchase": false,
       "late_transplant_tolerant": false,
       "planting_method": "Transplant",
-      "seeds_per_oz": 10000
+      "seeds_per_oz": 10000,
+      "subcategory": "Cherry Tomatoes"
     },
     {
       "id": "tomato_garden_peach",
@@ -32028,7 +32027,8 @@
       "is_special_purchase": false,
       "late_transplant_tolerant": false,
       "planting_method": "Transplant",
-      "seeds_per_oz": 10000
+      "seeds_per_oz": 10000,
+      "subcategory": "Cherry Tomatoes"
     },
     {
       "id": "tomato_orange_wellington",
@@ -32086,7 +32086,8 @@
       "is_special_purchase": false,
       "late_transplant_tolerant": false,
       "planting_method": "Transplant",
-      "seeds_per_oz": 10000
+      "seeds_per_oz": 10000,
+      "subcategory": "Slicing Tomatoes"
     },
     {
       "id": "tomato_principe_borghese",
@@ -32144,7 +32145,8 @@
       "is_special_purchase": false,
       "late_transplant_tolerant": false,
       "planting_method": "Transplant",
-      "seeds_per_oz": 10000
+      "seeds_per_oz": 10000,
+      "subcategory": "Paste Tomatoes"
     },
     {
       "id": "chicory_frisee",

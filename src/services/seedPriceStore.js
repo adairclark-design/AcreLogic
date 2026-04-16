@@ -1,10 +1,9 @@
 import { useState, useEffect } from 'react';
-import { fetchVendorPrices } from './seedProcurementService';
+import { generateCategoricalPricing } from './seedProcurementService';
 import cropDbRaw from '../data/crops.json';
 
 // Singleton cache to survive remounts
 let globalPriceCache = null;
-let fetchPromise = null;
 const listeners = new Set();
 
 const ALL_SEED_LIST = cropDbRaw.crops.map(c => ({
@@ -35,54 +34,27 @@ function _mergePrices(prices, nameToId, cacheMap) {
     }
 }
 
-const BATCH_SIZE = 60;
-
-export async function hydrateSeedPrices() {
+export function hydrateSeedPrices() {
     if (globalPriceCache) return globalPriceCache;
-    if (fetchPromise) return fetchPromise;
 
-    fetchPromise = (async () => {
-        try {
-            console.log('[SeedPriceStore] Hydrating global price cache (batched)...');
-            const allTarget = ALL_SEED_LIST.filter(c => c.category !== 'Cover Crop');
+    console.log('[SeedPriceStore] Hydrating global categorical prices synchronously...');
+    
+    // Only price real crops (ignore Cover Crops bulk sizing)
+    const allTarget = ALL_SEED_LIST.filter(c => c.category !== 'Cover Crop');
+    
+    // Build lookup dictionary
+    const nameToId = {};
+    for (const c of allTarget) nameToId[c.name] = c.cropId;
 
-            // Build nameToId for full list
-            const nameToId = {};
-            for (const c of allTarget) nameToId[c.name] = c.cropId;
+    // Generate math-based approximations instantly
+    const prices = generateCategoricalPricing(allTarget);
+    
+    const cacheMap = {};
+    _mergePrices(prices, nameToId, cacheMap);
 
-            // Split into batches of BATCH_SIZE
-            const batches = [];
-            for (let i = 0; i < allTarget.length; i += BATCH_SIZE) {
-                batches.push(allTarget.slice(i, i + BATCH_SIZE));
-            }
-
-            // Start with empty cache so subscribers see N/A while batches load
-            globalPriceCache = {};
-
-            // Fire all batches in parallel; notify UI as each resolves
-            await Promise.all(batches.map(async (batch) => {
-                try {
-                    const prices = await fetchVendorPrices(batch);
-                    _mergePrices(prices, nameToId, globalPriceCache);
-                } catch (batchErr) {
-                    console.warn(`[SeedPriceStore] Batch failed, logging N/A:`, batchErr);
-                    // Simply leave the cache items out so they show as N/A
-                }
-                notify();
-            }));
-
-            return globalPriceCache;
-        } catch (err) {
-            console.warn('[SeedPriceStore] Hydration failed entirely', err);
-            // Don't fall back to mocks, leave globalPriceCache empty
-            globalPriceCache = {};
-            notify();
-            return globalPriceCache;
-        } finally {
-            fetchPromise = null;
-        }
-    })();
-    return fetchPromise;
+    globalPriceCache = cacheMap;
+    notify();
+    return globalPriceCache;
 }
 
 export function useSeedPrices() {

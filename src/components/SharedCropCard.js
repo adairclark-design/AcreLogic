@@ -170,7 +170,7 @@ export default function SharedCropCard({
                     >
                         <View style={[styles.pricePill, { borderColor: categoryColor }]}>
                             <Text style={[styles.pricePillText, { color: categoryColor }]}>
-                                🛒 ${priceData.lowestPrice.toFixed(2)}
+                                🛒 ~${priceData.lowestPrice.toFixed(2)}
                             </Text>
                         </View>
                     </TouchableOpacity>

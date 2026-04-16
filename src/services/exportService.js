@@ -167,31 +167,39 @@ export async function exportExcel(farmProfile, calendarEntries, yieldSummary, be
 
   // ── Sheet 1: Seeding Calendar ──────────────────────────────────────────────
   const calendarHeaders = [
-    'Date', 'Week Day', 'Bed', 'Action', 'Crop', 'Variety',
+    'Block', 'Date', 'Week Day', 'Indoor Seed Date', 'Bed', 'Action', 'Crop', 'Variety',
     'DTM (days)', 'Seed Amount', 'Plant Count', 'Rows', 'Spacing',
     'JANG Config', 'Est. Harvest', 'Notes',
   ];
-  const calendarData = [calendarHeaders, ...calendarEntries.map(e => [
-    e.entry_date ?? '',
-    e.entry_date ? new Date(`${e.entry_date}T00:00:00`).toLocaleDateString('en-US', { weekday: 'long' }) : '',
-    e.bed_label ?? `Bed ${e.bed_number}`,
-    formatAction(e.action),
-    e.crop_name ?? '',
-    e.crop_variety ?? '',
-    e.dtm ?? '',
-    e.seed_amount_label ?? '',
-    e.plant_count ?? '',
-    e.row_count ?? '',
-    e.spacing_label ?? '',
-    e.jang_config_label ?? '',
-    e.estimated_harvest_date ?? '',
-    e.special_notes ?? '',
-  ])];
+  const calendarData = [calendarHeaders, ...calendarEntries.map(e => {
+    const blockName = e.blockName ?? (e.bed_label ? e.bed_label.split(/\s+/)[0] : '');
+    const indoorSeedDate = e.tray_date
+      ? new Date(`${e.tray_date}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+      : '';
+    return [
+      blockName,
+      e.entry_date ?? '',
+      e.entry_date ? new Date(`${e.entry_date}T00:00:00`).toLocaleDateString('en-US', { weekday: 'long' }) : '',
+      indoorSeedDate,
+      e.bed_label ?? `Bed ${e.bed_number}`,
+      formatAction(e.action),
+      e.crop_name ?? '',
+      e.crop_variety ?? '',
+      e.dtm ?? '',
+      e.seed_amount_label ?? '',
+      e.plant_count ?? '',
+      e.row_count ?? '',
+      e.spacing_label ?? '',
+      e.jang_config_label ?? '',
+      e.estimated_harvest_date ?? '',
+      e.special_notes ?? '',
+    ];
+  })];
   const calSheet = XLSX.utils.aoa_to_sheet(calendarData);
   calSheet['!cols'] = [
-    { wch: 12 }, { wch: 12 }, { wch: 8 }, { wch: 14 }, { wch: 18 }, { wch: 18 },
-    { wch: 10 }, { wch: 16 }, { wch: 12 }, { wch: 6 }, { wch: 10 },
-    { wch: 16 }, { wch: 14 }, { wch: 30 },
+    { wch: 10 }, { wch: 12 }, { wch: 10 }, { wch: 14 }, { wch: 8 }, { wch: 14 }, { wch: 18 }, { wch: 18 },
+    { wch: 8 }, { wch: 14 }, { wch: 10 }, { wch: 6 }, { wch: 10 },
+    { wch: 14 }, { wch: 14 }, { wch: 28 },
   ];
   XLSX.utils.book_append_sheet(wb, calSheet, 'Seeding Calendar');
 

@@ -674,22 +674,15 @@ export function createFarmPlan(name, farmProfile) {
 
 export function loadPlanCrops(planId) {
     if (!isWeb) return [];
+    // A null/undefined planId means a new project with no ID yet — return empty immediately.
+    // Do NOT fall back to global_library; that would bleed another project's crop selections
+    // into a fresh project that has never visited the VegetableGrid.
+    if (!planId) return [];
     try {
-        const targetId = planId || 'global_library';
-        const raw = localStorage.getItem(`acrelogic_plan_crops_${targetId}`);
+        const raw = localStorage.getItem(`acrelogic_plan_crops_${planId}`);
         if (raw) {
             const parsed = JSON.parse(raw);
-            if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-        }
-        // Fallback: if the planId-specific key is empty or missing, try the global library.
-        // This prevents a planId key mismatch (from navigating through different tabs)
-        // from silently evacuating the crop list and bricking the BedWorkspace.
-        if (targetId !== 'global_library') {
-            const fallbackRaw = localStorage.getItem('acrelogic_plan_crops_global_library');
-            if (fallbackRaw) {
-                const fallbackParsed = JSON.parse(fallbackRaw);
-                if (Array.isArray(fallbackParsed)) return fallbackParsed;
-            }
+            if (Array.isArray(parsed)) return parsed;
         }
         return [];
     } catch { return []; }
@@ -697,9 +690,11 @@ export function loadPlanCrops(planId) {
 
 export function savePlanCrops(planId, cropIds) {
     if (!isWeb) return;
+    // Do not write without a planId — writing to global_library would contaminate future
+    // new projects that haven't selected any crops yet.
+    if (!planId) return;
     try {
-        const targetId = planId || 'global_library';
-        localStorage.setItem(`acrelogic_plan_crops_${targetId}`, JSON.stringify(cropIds));
+        localStorage.setItem(`acrelogic_plan_crops_${planId}`, JSON.stringify(cropIds));
     } catch (e) {
         console.warn('[Persistence] savePlanCrops failed:', e);
     }

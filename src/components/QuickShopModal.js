@@ -73,7 +73,7 @@ export default function QuickShopModal({ visible, cropName, priceData, onClose }
                                                     styles.buyBtnText, 
                                                     vendor === 'Johnnys' && { color: '#000' }
                                                 ]}>
-                                                    Buy ${vData.price.toFixed(2)}
+                                                    Buy ~${vData.price.toFixed(2)}
                                                 </Text>
                                             </TouchableOpacity>
                                         )}
@@ -86,6 +86,10 @@ export default function QuickShopModal({ visible, cropName, priceData, onClose }
                     <TouchableOpacity style={styles.closeBtn} onPress={onClose}>
                         <Text style={styles.closeBtnText}>Cancel</Text>
                     </TouchableOpacity>
+
+                    <Text style={styles.disclaimerText}>
+                        * Prices shown are approximate categorical market averages.
+                    </Text>
                 </View>
             </View>
         </Modal>

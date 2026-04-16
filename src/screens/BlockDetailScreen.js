@@ -16,7 +16,7 @@ import {
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { Colors, Typography, Spacing, Radius, Shadows } from '../theme';
-import { loadBlockBeds, saveBlockBeds, saveJournalEntry, loadJournalEntries, loadPlanCrops, getClipboardBeds, setClipboardBeds } from '../services/persistence';
+import { loadBlockBeds, saveBlockBeds, saveJournalEntry, loadJournalEntries, loadPlanCrops, getClipboardBeds, setClipboardBeds, loadBlocks } from '../services/persistence';
 import { blockSummaryLine } from '../services/farmUtils';
 import cropData from '../data/crops.json';
 import { getSuccessionCandidatesRanked } from '../services/successionEngine';
@@ -110,74 +110,94 @@ const BedRow = ({ block, bedNum, successions, shelterType, farmProfile, onPress,
                 )}
             </View>
 
-            {/* Compact crop chips */}
-            <View style={styles.bedRowContent}>
-                {hasCrops ? (
-                    <View style={{ flexDirection: 'column', gap: 4, width: '100%' }}>
-                        {(() => {
-                            // Sort by start_date ascending. Null dates go to the end.
-                            const sorted = [...successions].sort((a, b) => {
-                                const da = a.start_date ?? '9999';
-                                const db = b.start_date ?? '9999';
-                                return da.localeCompare(db);
-                            });
+            {/* Compact crop chips — one line per crop, grouped by cohort date */}
+            <View style={[styles.bedRowContent, { flexWrap: 'wrap', minWidth: 0, flex: 1 }]}>
+                {hasCrops ? (() => {
+                    const CLUSTER_THRESHOLD_MS = 5 * 86400000; // 5 days in ms
+                    const sorted = [...successions].sort((a, b) => {
+                        if (!a.start_date) return 1;
+                        if (!b.start_date) return -1;
+                        return a.start_date.localeCompare(b.start_date);
+                    });
+                    // Rolling cluster: group items whose start_date is within 5 days of the cohort anchor
+                    const cohortMap = new Map(); // anchor ISO string → [successions]
+                    const sortedKeys = [];
+                    sorted.forEach(s => {
+                        if (!s.start_date) {
+                            const key = '__no_date__';
+                            if (!cohortMap.has(key)) { cohortMap.set(key, []); sortedKeys.push(key); }
+                            cohortMap.get(key).push(s);
+                            return;
+                        }
+                        const ms = new Date(s.start_date + 'T12:00:00').getTime();
+                        let matched = false;
+                        for (const key of sortedKeys) {
+                            if (key === '__no_date__') continue;
+                            const anchorMs = new Date(key + 'T12:00:00').getTime();
+                            if (Math.abs(ms - anchorMs) <= CLUSTER_THRESHOLD_MS) {
+                                cohortMap.get(key).push(s);
+                                matched = true;
+                                break;
+                            }
+                        }
+                        if (!matched) {
+                            const key = s.start_date.slice(0, 10);
+                            cohortMap.set(key, [s]);
+                            sortedKeys.push(key);
+                        }
+                    });
 
-                            // Group crops that share the SAME in-ground date into a cohort.
-                            // Normalize null/undefined to a sentinel so the comparison is stable.
-                            const cohorts = [];
-                            sorted.forEach((s) => {
-                                const lastGrp = cohorts[cohorts.length - 1];
-                                // Truncate to YYYY-MM-DD only (strip any time component) for a clean compare
-                                const sDate = s.start_date ? s.start_date.slice(0, 10) : '__no_date__';
-                                if (lastGrp && lastGrp.start_date === sDate) {
-                                    lastGrp.crops.push(s);
-                                } else {
-                                    cohorts.push({ start_date: sDate, crops: [s] });
-                                }
-                            });
+                    return sortedKeys.map((dateKey, cIdx) => {
+                        const crops = cohortMap.get(dateKey);
+                        return (
+                            <View key={`cohort-${cIdx}-${dateKey}`} style={[styles.cohortColumn, { flexShrink: 1, maxWidth: '100%', alignSelf: 'flex-start' }]}>
+                                {crops.map((s, si) => {
+                                    const meta = cropMeta(s.crop_id);
+                                    const frac = s.coverage ?? s.coverage_fraction ?? 1;
+                                    const fracLabel = frac >= 0.99 ? '1/1' : frac >= 0.74 ? '3/4' : frac >= 0.49 ? '1/2' : '1/4';
 
-                            return cohorts.map((cohort, cIdx) => (
-                                // Each cohort = one in-ground date group, rendered as a vertical stack row
-                                <View key={`cohort-${cIdx}`} style={{ flexDirection: 'column', gap: 3 }}>
-                                    {cohort.crops.map((s, si) => {
-                                        const meta = cropMeta(s.crop_id);
-                                        const frac = s.coverage ?? s.coverage_fraction ?? 1;
-                                        const fracLabel = frac >= 0.99 ? 'Full' : frac >= 0.74 ? '¾' : frac >= 0.49 ? '½' : '¼';
+                                    let igd = 0;
+                                    if (s.start_date && s.end_date) {
+                                        const startMs = new Date(s.start_date + 'T12:00:00').getTime();
+                                        const endMs   = new Date(s.end_date   + 'T12:00:00').getTime();
+                                        igd = Math.round((endMs - startMs) / 86400000);
+                                    } else {
+                                        igd = (meta?.dtm ?? s.dtm ?? 0) + (meta?.harvest_window_days ?? 14);
+                                    }
 
-                                        let igd = null;
-                                        if (s.start_date && s.end_date) {
-                                            const startMs = new Date(s.start_date + 'T12:00:00').getTime();
-                                            const endMs   = new Date(s.end_date   + 'T12:00:00').getTime();
-                                            igd = Math.round((endMs - startMs) / 86400000);
-                                        } else {
-                                            igd = (meta?.dtm ?? s.dtm ?? 0) + (meta?.harvest_window_days ?? 14);
-                                        }
+                                    const startStr = s.start_date ? fmtShortDate(s.start_date) : null;
+                                    const endStr   = s.end_date   ? fmtShortDate(s.end_date)   : null;
+                                    const cc       = cropColor(s.crop_id);
 
-                                        const startStr  = s.start_date ? fmtShortDate(s.start_date) : null;
-                                        const endStr    = s.end_date   ? fmtShortDate(s.end_date)   : null;
-                                        const dateRange = startStr && endStr ? ` ${startStr}–${endStr}` : startStr ? ` ${startStr}` : '';
-                                        const igdStr    = igd ? ` ${igd}IGD` : '';
-                                        const label     = `[${fracLabel}] ${s.crop_name ?? s.name ?? '—'}${igdStr}${dateRange}`;
-                                        const cc = cropColor(s.crop_id);
+                                    const fullName  = meta?.variety ?? s.variety ?? s.crop_name ?? s.name ?? '—';
+                                    const shortName = fullName.length > 13 ? fullName.slice(0, 13) + '…' : fullName;
+                                    const dateRange = startStr && endStr ? `${startStr}-${endStr}` : startStr ?? '';
+                                    const chipLabel = `[${fracLabel}] ${shortName}${igd ? ' ' + igd + 'IGD' : ''}${dateRange ? ' ' + dateRange : ''}`;
 
-                                        return (
-                                            <View key={`crop-${si}`} style={[{ backgroundColor: cc.bg }, styles.bedDiagramRow]}>
-                                                <Text style={[styles.bedDiagramRowName, { color: cc.text }]} numberOfLines={1}>
-                                                    {label}
-                                                </Text>
-                                            </View>
-                                        );
-                                    })}
-                                </View>
-                            ));
-                        })()}
-                    </View>
-                ) : (
+                                    return (
+                                        <View key={`chip-${si}`} style={[styles.compactChip, { backgroundColor: cc.bg, borderColor: cc.text, maxWidth: '100%', flexShrink: 1 }]}>
+                                            <Text style={[styles.compactChipText, { color: cc.text, flexShrink: 1 }]} numberOfLines={1}>
+                                                {chipLabel}
+                                            </Text>
+                                        </View>
+                                    );
+                                })}
+                            </View>
+                        );
+                    });
+                })() : (
                     <Text style={styles.bedEmpty}>Empty — tap to plan</Text>
                 )}
             </View>
 
-            <Text style={styles.chevron}>›</Text>
+            {/* Crop action button */}
+            <TouchableOpacity
+                style={styles.cropActionBtn}
+                onPress={() => onPress(bedNum)}
+                activeOpacity={0.7}
+            >
+                <Text style={styles.cropActionBtnText}>Crop</Text>
+            </TouchableOpacity>
         </TouchableOpacity>
     );
 };
@@ -547,7 +567,18 @@ const modStyles = StyleSheet.create({
 
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 export default function BlockDetailScreen({ navigation, route }) {
-    const { block, farmProfile, planId: routePlanId } = route?.params ?? {};
+    const { block: navBlock, farmProfile, planId: routePlanId } = route?.params ?? {};
+
+    // Always re-read the live block from storage on focus so stale nav-param
+    // snapshots (e.g. from PWA navigation-state restoration) never bleed through.
+    const [liveBlock, setLiveBlock] = useState(navBlock ?? null);
+    useFocusEffect(useCallback(() => {
+        if (!navBlock?.id) return;
+        const fresh = loadBlocks().find(b => b.id === navBlock.id);
+        setLiveBlock(fresh ?? navBlock);
+    }, [navBlock?.id]));
+
+    const block = liveBlock;  // single source of truth from here down
     const planId = routePlanId ?? block?.planId;
 
     const [selectedCropIds, setSelectedCropIds] = useState([]);
@@ -658,20 +689,34 @@ export default function BlockDetailScreen({ navigation, route }) {
     };
 
     const handleMimicRequest = () => {
-        const available = [];
+        // Build a deduplicated list of unique bed templates.
+        // Fingerprint = sorted crop_ids joined + shelter type.
+        const seen = new Set();
+        const uniqueCandidates = []; // [{ bedNum, label }]
         for (let i = 1; i <= block.bedCount; i++) {
-            if (bedData[i] && bedData[i].successions.length > 0) {
-                available.push(i);
-            }
+            const data = bedData[i];
+            if (!data || data.successions.length === 0) continue;
+            const cropKey = [...data.successions]
+                .map(s => s.crop_id ?? s.crop_name ?? '')
+                .sort()
+                .join('|');
+            const fingerprint = `${cropKey}::${data.shelterType ?? 'none'}`;
+            if (seen.has(fingerprint)) continue;
+            seen.add(fingerprint);
+            const cropNames = data.successions.map(s => s.crop_name ?? s.crop_id ?? '?').join(', ');
+            const shelterTag = data.shelterType && data.shelterType !== 'none'
+                ? ` (${data.shelterType === 'greenhouse' ? '🏡 GH' : '☔ RC'})`
+                : '';
+            uniqueCandidates.push({ bedNum: i, label: `${cropNames}${shelterTag}` });
         }
-        if (available.length === 0) {
+        if (uniqueCandidates.length === 0) {
             Alert.alert("No planned beds", "There are no planned beds in this block to mimic.");
             return;
         }
-        if (available.length === 1) {
-            executeMimic(available[0]);
+        if (uniqueCandidates.length === 1) {
+            executeMimic(uniqueCandidates[0].bedNum);
         } else {
-            setMimicCandidates(available);
+            setMimicCandidates(uniqueCandidates);
             setShowMimicPicker(true);
         }
     };
@@ -752,12 +797,14 @@ export default function BlockDetailScreen({ navigation, route }) {
     }, [block?.id]));
 
     const bedCount = block?.bedCount ?? 0;
+    const hasBisectingRoad = block?.bisectingRoad?.enabled === true;
     const half = Math.ceil(bedCount / 2);
 
-    // West side = beds 1..half, East side = beds (half+1)..bedCount
-    const westBeds = Array.from({ length: half }, (_, i) => i + 1);
-    const eastBeds = Array.from({ length: bedCount - half }, (_, i) => half + i + 1);
-    const displayedBeds = side === 'W' ? westBeds : eastBeds;
+    // Only split into W/E sides when the user explicitly enabled a bisecting road
+    const westBeds = hasBisectingRoad ? Array.from({ length: half }, (_, i) => i + 1) : [];
+    const eastBeds = hasBisectingRoad ? Array.from({ length: bedCount - half }, (_, i) => half + i + 1) : [];
+    const allBeds  = Array.from({ length: bedCount }, (_, i) => i + 1);
+    const displayedBeds = hasBisectingRoad ? (side === 'W' ? westBeds : eastBeds) : allBeds;
 
     const handleLongPress = (bedNum) => {
         // Quick shortcut: long-press opens Field Journal pre-tagged to this bed
@@ -814,23 +861,25 @@ export default function BlockDetailScreen({ navigation, route }) {
                 </Text>
             </View>
 
-            {/* E / W side picker */}
-            <View style={styles.sideRow}>
-                <Text style={styles.sideLabel}>↑ N</Text>
-                <View style={styles.sidePicker}>
-                    {['W', 'E'].map(s => (
-                        <TouchableOpacity
-                            key={s}
-                            style={[styles.sideBtn, side === s && styles.sideBtnActive]}
-                            onPress={() => setSide(s)}
-                        >
-                            <Text style={[styles.sideBtnText, side === s && styles.sideBtnTextActive]}>
-                                {s} Side ({s === 'W' ? westBeds.length : eastBeds.length} beds)
-                            </Text>
-                        </TouchableOpacity>
-                    ))}
+            {/* E / W side picker — only rendered when a bisecting road is enabled */}
+            {hasBisectingRoad && (
+                <View style={styles.sideRow}>
+                    <Text style={styles.sideLabel}>↑ N</Text>
+                    <View style={styles.sidePicker}>
+                        {['W', 'E'].map(s => (
+                            <TouchableOpacity
+                                key={s}
+                                style={[styles.sideBtn, side === s && styles.sideBtnActive]}
+                                onPress={() => setSide(s)}
+                            >
+                                <Text style={[styles.sideBtnText, side === s && styles.sideBtnTextActive]}>
+                                    {s} Side ({s === 'W' ? westBeds.length : eastBeds.length} beds)
+                                </Text>
+                            </TouchableOpacity>
+                        ))}
+                    </View>
                 </View>
-            </View>
+            )}
 
             {/* Bed list */}
             <ScrollView
@@ -961,15 +1010,16 @@ export default function BlockDetailScreen({ navigation, route }) {
             <Modal visible={showMimicPicker} transparent animationType="fade" onRequestClose={() => setShowMimicPicker(false)}>
                 <View style={modStyles.modalContainer}>
                     <View style={modStyles.sheet}>
-                        <Text style={[modStyles.titleRow, { textAlign: 'center', marginBottom: 12 }]}>Which bed should they mimic?</Text>
+                        <Text style={[modStyles.titleRow, { textAlign: 'center', marginBottom: 12 }]}>Which bed template should they mimic?</Text>
                         <ScrollView style={{maxHeight: 300}} contentContainerStyle={{ gap: 10 }}>
-                            {mimicCandidates.map(num => (
+                            {mimicCandidates.map(({ bedNum, label }) => (
                                 <TouchableOpacity
-                                    key={num}
-                                    style={{ paddingVertical: 14, backgroundColor: '#F4F5F0', borderRadius: 8, borderWidth: 1, borderColor: '#D7D6CB', alignItems: 'center' }}
-                                    onPress={() => executeMimic(num)}
+                                    key={bedNum}
+                                    style={{ paddingVertical: 14, paddingHorizontal: 12, backgroundColor: '#F4F5F0', borderRadius: 8, borderWidth: 1, borderColor: '#D7D6CB', alignItems: 'center' }}
+                                    onPress={() => executeMimic(bedNum)}
                                 >
-                                    <Text style={{ fontSize: 16, fontWeight: '800', color: '#1B3B1A' }}>Mimic Bed {num}</Text>
+                                    <Text style={{ fontSize: 15, fontWeight: '800', color: '#1B3B1A', textAlign: 'center' }}>{label}</Text>
+                                    <Text style={{ fontSize: 11, fontWeight: '600', color: '#6B7280', marginTop: 2 }}>from Bed {bedNum}</Text>
                                 </TouchableOpacity>
                             ))}
                         </ScrollView>
@@ -1025,17 +1075,41 @@ const styles = StyleSheet.create({
     seasonRemainingText: { fontSize: 9, fontWeight: '800' },
     bedRow: {
         backgroundColor: Colors.cardBg ?? '#FAFAF7', borderRadius: Radius.md,
-        paddingHorizontal: Spacing.md, paddingVertical: 8, flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
+        paddingHorizontal: Spacing.md, paddingVertical: 10, flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.sm,
     },
     bedRowSelected: {
         backgroundColor: '#E8F5E9',
         borderWidth: 2,
         borderColor: '#4CAF50',
     },
-    bedNumBadge: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+    bedNumBadge: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center', marginTop: 2 },
     bedNumText: { fontSize: 13, fontWeight: '800' },
-    bedRowContent: { flex: 1, gap: 3 },
-    chipsWrap: { flexDirection: 'column', gap: 4 },
+    bedRowContent: { flex: 1, flexDirection: 'row', flexWrap: 'nowrap', gap: 6, alignItems: 'flex-start' },
+    chipsWrap: { flexDirection: 'row', gap: 6 },
+
+    // ─── Compact Timeline Chip Styles ────────────────────────────────────────
+    cohortColumn: { flexDirection: 'column', gap: 4 },
+    compactChip: {
+        borderWidth: 1,
+        borderRadius: 5,
+        paddingHorizontal: 6,
+        paddingVertical: 3,
+    },
+    compactChipText: { fontSize: 10, fontWeight: '700', letterSpacing: 0.1 },
+    cropActionBtn: {
+        borderWidth: 1.5,
+        borderColor: 'rgba(45,79,30,0.3)',
+        borderRadius: 6,
+        paddingHorizontal: 8,
+        paddingVertical: 5,
+        justifyContent: 'center',
+        alignSelf: 'center',
+        minWidth: 44,
+        alignItems: 'center',
+    },
+    cropActionBtnText: { fontSize: 10, fontWeight: '800', color: '#2D4F1E' },
+
+    // ─── Legacy / other ───────────────────────────────────────────────────────
     bedDiagramRow: {
         flexDirection: 'column',
         justifyContent: 'center', alignItems: 'flex-start',
@@ -1055,8 +1129,10 @@ const styles = StyleSheet.create({
     bedSubtext: { fontSize: 9, color: Colors.mutedText },
     bedSuccessionLine: { fontSize: 9, color: Colors.primaryGreen, fontWeight: '700', lineHeight: 13 },
     bedEmpty: { fontSize: Typography.xs, color: Colors.mutedText, fontStyle: 'italic' },
-    chevron: { fontSize: 18, color: Colors.mutedText },
+    chevron: { fontSize: 18, color: Colors.mutedText, marginTop: 4 },
 
     noBedsText: { fontSize: Typography.sm, color: Colors.mutedText, fontStyle: 'italic', textAlign: 'center', paddingVertical: 32 },
 });
+
+
 
