@@ -220,11 +220,8 @@ function StampPanel({ widthFt, setWidthFt, lengthFt, setLengthFt, orientation, s
 }
 
 // ─── Drawn Block Info Panel ────────────────────────────────────────────────────
-function DrawingPanel({ sqFt, bedLengthFt, setBedLengthFt, bedWidthFt, setBedWidthFt, pathWidthFt, setPathWidthFt, suggestedBeds, onCreateBlock, onCreateMultipleBlocks, onClear }) {
-    const [isMulti, setIsMulti] = useState(false);
-    const [numBlocks, setNumBlocks] = useState('2');
+function DrawingPanel({ sqFt, bedLengthFt, setBedLengthFt, bedWidthFt, setBedWidthFt, pathWidthFt, setPathWidthFt, suggestedBeds, onCreateBlock, onCreateMultipleBlocks, onClear, isPosLocked, setIsPosLocked, isManipLocked, setIsManipLocked, onMoveBackward, onMoveForward }) {
     const acres = (sqFt / 43560).toFixed(3);
-    const perBlock = Math.max(1, Math.round(suggestedBeds / (parseInt(numBlocks) || 1)));
     return (
         <View style={styles.drawPanel}>
             <Text style={styles.drawPanelTitle}>Farm Area</Text>
@@ -264,46 +261,34 @@ function DrawingPanel({ sqFt, bedLengthFt, setBedLengthFt, bedWidthFt, setBedWid
                 <Text style={styles.drawUnit}>ft</Text>
             </View>
 
-            {/* Create Multiple Blocks checkbox */}
+            {/* Lock controls */}
             <TouchableOpacity
-                id="draw-multi-toggle"
-                style={[styles.drawRow, { marginTop: 6 }]}
-                onPress={() => setIsMulti(v => !v)}
+                id="draw-lock-position"
+                style={styles.drawCheckRow}
+                onPress={() => setIsPosLocked(v => !v)}
             >
-                <Text style={[styles.drawUnit, { marginRight: 8, fontSize: 16 }]}>{isMulti ? '☑' : '☐'}</Text>
-                <Text style={styles.drawLabel}>Create Multiple blocks?</Text>
+                <Text style={styles.drawCheckBox}>{isPosLocked ? '☑' : '☐'}</Text>
+                <Text style={styles.drawCheckLabel}>Lock Position on Map</Text>
             </TouchableOpacity>
 
-            {isMulti && (
-                <View style={styles.drawRow}>
-                    <Text style={styles.drawLabel}>Number of blocks</Text>
-                    <TextInput
-                        id="draw-num-blocks-input"
-                        style={styles.drawInput}
-                        value={numBlocks}
-                        onChangeText={setNumBlocks}
-                        keyboardType="numeric"
-                        selectTextOnFocus
-                    />
-                </View>
-            )}
-
-            {isMulti && (
-                <View style={styles.drawSuggestion}>
-                    <Text style={styles.drawSuggestLabel}>Per block (~{numBlocks} blocks)</Text>
-                    <Text style={styles.drawSuggestNum}>~{perBlock} beds</Text>
-                </View>
-            )}
-
-            {/* Unified Customise / Save Link */}
             <TouchableOpacity
-                style={styles.drawCustomiseBtn}
-                onPress={() => isMulti ? onCreateMultipleBlocks(parseInt(numBlocks) || 1) : onCreateBlock()}
+                id="draw-lock-manipulation"
+                style={styles.drawCheckRow}
+                onPress={() => setIsManipLocked(v => !v)}
             >
-                <Text style={styles.drawCustomiseBtnText}>
-                    {isMulti ? `+ Generate ${numBlocks || 1} blocks →` : '+ Customise with wizard →'}
-                </Text>
+                <Text style={styles.drawCheckBox}>{isManipLocked ? '☑' : '☐'}</Text>
+                <Text style={styles.drawCheckLabel}>No Manipulation of Boundary</Text>
             </TouchableOpacity>
+
+            {/* Z-index controls */}
+            <View style={styles.drawZIndexRow}>
+                <TouchableOpacity id="draw-move-backward" onPress={onMoveBackward}>
+                    <Text style={styles.drawZIndexLink}>↓ Move Boundary Backward</Text>
+                </TouchableOpacity>
+                <TouchableOpacity id="draw-move-forward" onPress={onMoveForward}>
+                    <Text style={styles.drawZIndexLink}>↑ Move Boundary Forward</Text>
+                </TouchableOpacity>
+            </View>
 
             <TouchableOpacity style={styles.drawClearBtn} onPress={onClear}>
                 <Text style={styles.drawClearBtnText}>✕ Clear drawing</Text>
@@ -389,6 +374,13 @@ export default function FarmSatelliteScreen({ navigation, route }) {
     const stampMoveHandlerRef = useRef(null);
     // Farm boundary polygon (GeoJSON Feature) for containment checks
     const farmBoundaryRef = useRef(null);
+    // Tracks last valid farm boundary geometry for lock revert
+    const lastValidBoundaryRef = useRef(null);
+    // Lock state for the farm boundary feature
+    const [isPosLocked, setIsPosLocked] = useState(false);
+    const [isManipLocked, setIsManipLocked] = useState(false);
+    const isPosLockedRef = useRef(false);
+    const isManipLockedRef = useRef(false);
     // Map of MapboxDraw feature ID → { blockId, blockName } for stamped blocks
     const stampDrawIdsRef = useRef({});
     const activeBlockIdRef = useRef(null);
@@ -415,6 +407,8 @@ export default function FarmSatelliteScreen({ navigation, route }) {
     useEffect(() => { stampModeRef.current = mapMode; }, [mapMode]);
     useEffect(() => { allowOverlapRef.current = allowOverlap; }, [allowOverlap]);
     useEffect(() => { blocksRef.current = blocks; }, [blocks]);
+    useEffect(() => { isPosLockedRef.current = isPosLocked; }, [isPosLocked]);
+    useEffect(() => { isManipLockedRef.current = isManipLocked; }, [isManipLocked]);
 
     // ── Escape key exits stamp mode ───────────────────────────────────────────
     useEffect(() => {
@@ -690,9 +684,30 @@ export default function FarmSatelliteScreen({ navigation, route }) {
                     f => !stampDrawIdsRef.current[f.id]
                 );
 
+                // Lock intercept: if a farm boundary feature was moved or manipulated while locked, revert it
+                if (e?.features?.length) {
+                    for (const updatedFeat of e.features) {
+                        if (stampDrawIdsRef.current[updatedFeat.id]) continue; // skip stamps
+                        const action = e.action;
+                        const shouldRevert =
+                            (action === 'move' && isPosLockedRef.current) ||
+                            (action === 'change_coordinates' && isManipLockedRef.current);
+                        if (shouldRevert && lastValidBoundaryRef.current) {
+                            draw.add({
+                                id: updatedFeat.id,
+                                type: 'Feature',
+                                properties: updatedFeat.properties ?? {},
+                                geometry: lastValidBoundaryRef.current,
+                            });
+                            return; // bail — do not update state
+                        }
+                    }
+                }
+
                 if (nonStampFeatures.length > 0) {
                     // Use last non-stamp polygon as the farm boundary
                     farmFeat = nonStampFeatures[nonStampFeatures.length - 1];
+                    lastValidBoundaryRef.current = farmFeat.geometry; // track last valid
                     farmBoundaryRef.current = { type: 'Feature', properties: {}, geometry: farmFeat.geometry };
                     savePolygon('farm_total', farmFeat.geometry);
                 } else {
@@ -1177,6 +1192,27 @@ export default function FarmSatelliteScreen({ navigation, route }) {
         setDrawnSqFt(0);
         setShowPanel(false);
         setActiveFeatureId(null);
+    };
+
+    // ── Z-index helpers for farm boundary (reorder within MapboxDraw) ─────────
+    const handleMoveBoundaryBackward = () => {
+        if (!drawRef.current) return;
+        const data = drawRef.current.getAll();
+        const idx = data.features.findIndex(f => !stampDrawIdsRef.current[f.id]);
+        if (idx <= 0) return;
+        const [feat] = data.features.splice(idx, 1);
+        data.features.unshift(feat);
+        drawRef.current.set(data);
+    };
+
+    const handleMoveBoundaryForward = () => {
+        if (!drawRef.current) return;
+        const data = drawRef.current.getAll();
+        const idx = data.features.findIndex(f => !stampDrawIdsRef.current[f.id]);
+        if (idx < 0 || idx === data.features.length - 1) return;
+        const [feat] = data.features.splice(idx, 1);
+        data.features.push(feat);
+        drawRef.current.set(data);
     };
 
     // ── Create multiple new blocks from the drawn farm boundary ──────────────
@@ -1822,6 +1858,12 @@ export default function FarmSatelliteScreen({ navigation, route }) {
                                 onCreateBlock={handleCreateBlock}
                                 onCreateMultipleBlocks={handleCreateMultipleBlocks}
                                 onClear={handleClearDraw}
+                                isPosLocked={isPosLocked}
+                                setIsPosLocked={setIsPosLocked}
+                                isManipLocked={isManipLocked}
+                                setIsManipLocked={setIsManipLocked}
+                                onMoveBackward={handleMoveBoundaryBackward}
+                                onMoveForward={handleMoveBoundaryForward}
                             />
                         </View>
                     )}
@@ -2037,6 +2079,11 @@ const styles = StyleSheet.create({
     drawCustomiseBtnText: { fontSize: 11, color: Colors.primaryGreen, fontWeight: '700', textDecorationLine: 'underline' },
     drawClearBtn: { paddingVertical: 6, alignItems: 'center' },
     drawClearBtnText: { fontSize: 11, color: Colors.mutedText },
+    drawCheckRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 5, gap: 6 },
+    drawCheckBox: { fontSize: 14, color: Colors.offWhite },
+    drawCheckLabel: { fontSize: 12, color: Colors.offWhite, flex: 1 },
+    drawZIndexRow: { flexDirection: 'column', gap: 6, paddingVertical: 6, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.1)', marginTop: 4 },
+    drawZIndexLink: { fontSize: 11, color: '#81C784', textDecorationLine: 'underline' },
 
     blockBadgeRow: { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: 'rgba(245,240,225,0.9)' },
     blockBadge: { paddingVertical: 5, paddingHorizontal: 10, borderRadius: Radius.full, backgroundColor: 'rgba(45,79,30,0.08)', borderWidth: 1, borderColor: 'rgba(45,79,30,0.15)' },
